@@ -1,0 +1,20 @@
+# Road-network build configuration for `python -m trajguard.maps.build`.
+# bbox order: [min_lon, min_lat, max_lon, max_lat] — identical to OSMnx 2.x
+# bbox=(left, bottom, right, top), so values pass through unchanged.
+maps:
+  # Native map for Geolife / T-Drive attacks (design §0: map/dataset consistency).
+  beijing:
+    bbox: [116.20, 39.75, 116.55, 40.05]
+    crs: EPSG:32650
+
+  # Reserved for synthetic trajectories / RN-LDP-Synth — never for Geolife attacks.
+  ljubljana:
+    bbox: [14.42, 46.00, 14.57, 46.10]
+    crs: EPSG:3794
+
+  # Tiny Beijing fragment for the committed test fixture; skipped by default builds.
+  # Built once with: python -m trajguard.maps.build config/maps.yaml --region beijing_fixture --out tests/fixtures/maps
+  beijing_fixture:
+    bbox: [116.30, 39.98, 116.32, 39.995]
+    crs: EPSG:32650
+    fixture: true

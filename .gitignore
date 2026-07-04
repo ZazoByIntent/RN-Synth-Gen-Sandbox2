@@ -13,6 +13,9 @@ dist/
 # Experiment outputs
 results/
 
+# OSMnx HTTP response cache
+cache/
+
 # Regenerable data caches (data/raw is immutable input, never committed either)
 data/*/*
 !data/*/.gitkeep

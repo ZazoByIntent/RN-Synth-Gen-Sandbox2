@@ -1,10 +1,21 @@
-"""MapSource interface (design §2.3)."""
+"""MapSource interface and the RoadNetwork container (design §2.3)."""
 
 from abc import ABC, abstractmethod
-from typing import Any, TypeAlias
+from dataclasses import dataclass
 
-RoadNetwork: TypeAlias = Any
-"""Road-network container; the concrete type lands with the OSM map source (P1)."""
+import geopandas as gpd
+import networkx as nx
+
+
+@dataclass(frozen=True)
+class RoadNetwork:
+    """A projected road graph with its normalized node and edge tables."""
+
+    graph: nx.MultiDiGraph
+    nodes: gpd.GeoDataFrame  # node_id, x, y, lon, lat, street_count, geometry
+    edges: gpd.GeoDataFrame  # edge_id, u, v, key, length_m, highway, oneway, maxspeed, geometry
+    region: str
+    crs: str
 
 
 class MapSource(ABC):
@@ -12,7 +23,7 @@ class MapSource(ABC):
 
     @abstractmethod
     def load(self) -> RoadNetwork:
-        """Return the road network, building it or reading it from disk as needed."""
+        """Read a previously built road network from disk (never touches the network)."""
 
     @property
     @abstractmethod

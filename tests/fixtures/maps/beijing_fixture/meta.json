@@ -1,0 +1,16 @@
+{
+  "map_id": "osm_beijing_fixture",
+  "source": "osm",
+  "region": "beijing_fixture",
+  "bbox": [
+    116.3,
+    39.98,
+    116.32,
+    39.995
+  ],
+  "crs": "EPSG:32650",
+  "osm_timestamp": "2026-07-04 20:22:01",
+  "path_graph": "tests/fixtures/maps/beijing_fixture/graph.graphml",
+  "path_edges": "tests/fixtures/maps/beijing_fixture/edges.parquet",
+  "path_nodes": "tests/fixtures/maps/beijing_fixture/nodes.parquet"
+}
