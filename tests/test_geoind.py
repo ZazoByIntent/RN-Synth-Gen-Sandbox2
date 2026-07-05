@@ -28,9 +28,7 @@ def make_view(n_points: int = 50) -> TrajectoryView:
 def mean_displacement_m(view: TrajectoryView, mech: GeoIndistinguishability) -> float:
     original = view.as_gps()
     noisy = mech.apply(view).payload
-    dists = [
-        haversine_m(a[0], a[1], b[0], b[1]) for a, b in zip(original, noisy, strict=True)
-    ]
+    dists = [haversine_m(a[0], a[1], b[0], b[1]) for a, b in zip(original, noisy, strict=True)]
     return sum(dists) / len(dists)
 
 

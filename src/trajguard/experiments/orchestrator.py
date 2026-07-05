@@ -2,14 +2,18 @@
 
 import csv
 import hashlib
+import itertools
 import json
+import math
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
@@ -17,16 +21,21 @@ import yaml
 from trajguard.attacks.base import Attack, BackgroundKnowledge
 from trajguard.datamodel import CleanTrajectory, MatchedTrajectory, MetricValue
 from trajguard.datasets.base import DatasetLoader
-from trajguard.datasets.cleaning import CleaningConfig, clean
+from trajguard.datasets.cleaning import CleaningConfig, clean, haversine_m
 from trajguard.datasets.split import split_by_user
 from trajguard.evaluation.metrics import LinkageRate, SampledMetric, TopKAccuracy, evaluate
+from trajguard.evaluation.utility import UTILITY_METRICS
 from trajguard.experiments import builtins as _builtins  # registers first-party implementations
 from trajguard.experiments import registry
+from trajguard.maps.base import RoadNetwork
 from trajguard.matching.base import MapMatcher, match_many
 from trajguard.privacy.base import PrivacyMechanism
-from trajguard.representation import TrajectoryView
+from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
+from trajguard.representation import Grid, TrajectoryView
 
 _ = _builtins  # imported for its registration side effects
+
+_HEADLINE = "top1_acc"  # metric pivoted into matrix.csv and the tradeoff y-axis
 
 
 class ConsistencyError(ValueError):
@@ -47,6 +56,21 @@ class AttackSpec:
 
 
 @dataclass(frozen=True)
+class MechanismSpec:
+    """One mechanism variant: registry id plus grid-expanded single-value params."""
+
+    mech_id: str
+    params: tuple[tuple[str, Any], ...]  # sorted (key, value) pairs
+
+    @property
+    def ref(self) -> str:
+        """Human-readable arm label used in pool refs, result ids, and reports."""
+        if not self.params:
+            return self.mech_id
+        return self.mech_id + ":" + ",".join(f"{k}={v}" for k, v in self.params)
+
+
+@dataclass(frozen=True)
 class RunConfig:
     """A fully validated experiment configuration."""
 
@@ -54,6 +78,7 @@ class RunConfig:
     seed: int
     output_dir: Path
     cache_dir: Path
+    protected_dir: Path
     map_source: str
     map_region: str
     map_bbox: tuple[float, float, float, float]
@@ -69,13 +94,16 @@ class RunConfig:
     k_candidates: int
     min_match_score: float
     fractions: dict[str, float]
-    mechanisms: tuple[str, ...]
+    mechanisms: tuple[MechanismSpec, ...]
     attacks: tuple[AttackSpec, ...]
     metric_names: tuple[str, ...]
     top_k: int
+    utility_names: tuple[str, ...]
+    utility_grid: tuple[int, int]  # (n_rows, n_cols)
     bootstrap_n: int
     bootstrap_ci: float
     export: tuple[str, ...]
+    plots: tuple[str, ...]
 
 
 def _req(d: dict[str, Any], key: str, ctx: str) -> Any:
@@ -111,6 +139,36 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
     return tuple(specs)
 
 
+def _canon_param(value: Any) -> Any:
+    """Canonicalize numeric parameter values so YAML ``1`` and ``1.0`` mean the same arm."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return float(value)
+    return value
+
+
+def _mechanism_specs(mechs: list[dict[str, Any]]) -> tuple[MechanismSpec, ...]:
+    """Validate ``privacy_mechanisms`` and expand list-valued params into a grid."""
+    specs: list[MechanismSpec] = []
+    for i, m in enumerate(mechs):
+        ctx = f"privacy_mechanisms[{i}]"
+        mech_id = str(_req(m, "id", ctx))
+        params = m.get("params", {})
+        if not isinstance(params, dict):
+            raise ValueError(f"config: {ctx}.params must be a mapping")
+        grid: dict[str, list[Any]] = {}
+        for key, value in params.items():
+            values = value if isinstance(value, list) else [value]
+            if not values:
+                raise ValueError(f"config: {ctx}.params.{key} must not be empty")
+            grid[str(key)] = [_canon_param(v) for v in values]
+        keys = sorted(grid)
+        for combo in itertools.product(*(grid[k] for k in keys)):
+            specs.append(MechanismSpec(mech_id, tuple(zip(keys, combo, strict=True))))
+    return tuple(specs)
+
+
 def load_config(path: str | Path) -> RunConfig:
     """Parse and validate an experiment YAML into a RunConfig (manual validation)."""
     raw = yaml.safe_load(Path(path).read_text())
@@ -132,16 +190,34 @@ def load_config(path: str | Path) -> RunConfig:
     if scheme != "by_user":
         raise ValueError(f"config: split.scheme {scheme!r} unsupported; only 'by_user' exists")
 
-    export = tuple(str(f) for f in raw.get("reporting", {}).get("export", ["csv"]))
+    reporting = raw.get("reporting", {})
+    export = tuple(str(f) for f in reporting.get("export", ["csv"]))
     unknown_formats = set(export) - {"csv"}
     if unknown_formats:
         raise ValueError(
             f"config: reporting.export {sorted(unknown_formats)} unsupported; only 'csv' exists"
         )
+    plots = tuple(str(p) for p in reporting.get("plots", []))
+    unknown_plots = set(plots) - {"tradeoff"}
+    if unknown_plots:
+        raise ValueError(
+            f"config: reporting.plots {sorted(unknown_plots)} unsupported; only 'tradeoff' exists"
+        )
 
-    mechanisms = tuple(
-        str(_req(m, "id", "privacy_mechanisms[]")) for m in raw.get("privacy_mechanisms", [])
-    )
+    metric_names = tuple(str(m) for m in _req(metrics, "privacy", "metrics"))
+    utility_names = tuple(str(m) for m in metrics.get("utility", []))
+    unknown_utility = set(utility_names) - set(UTILITY_METRICS)
+    if unknown_utility:
+        raise ValueError(
+            f"config: metrics.utility {sorted(unknown_utility)} unsupported; "
+            f"available: {sorted(UTILITY_METRICS)}"
+        )
+    if "tradeoff" in plots and "cell_js_divergence" not in utility_names:
+        raise ValueError("config: the tradeoff plot needs 'cell_js_divergence' in metrics.utility")
+    if "tradeoff" in plots and "top1_acc" not in metric_names:
+        raise ValueError("config: the tradeoff plot needs 'top1_acc' in metrics.privacy")
+    grid_cfg = metrics.get("utility_grid", {})
+
     attacks = _req(raw, "attacks", "")
     if not attacks:
         raise ValueError("config: at least one attack is required")
@@ -151,6 +227,7 @@ def load_config(path: str | Path) -> RunConfig:
         seed=int(_req(exp, "seed", "experiment")),
         output_dir=Path(exp.get("output_dir", f"results/{exp['id']}")),
         cache_dir=Path(exp.get("cache_dir", "data/processed")),
+        protected_dir=Path(exp.get("protected_dir", "data/protected")),
         map_source=str(_req(mp, "source", "map")),
         map_region=str(_req(mp, "region", "map")),
         map_bbox=(bbox[0], bbox[1], bbox[2], bbox[3]),
@@ -171,19 +248,23 @@ def load_config(path: str | Path) -> RunConfig:
         k_candidates=int(mm.get("k_candidates", 8)),
         min_match_score=float(_req(mm, "min_match_score", "map_matching")),
         fractions={str(k): float(v) for k, v in _req(sp, "fractions", "split").items()},
-        mechanisms=mechanisms,
+        mechanisms=_mechanism_specs(raw.get("privacy_mechanisms", [])),
         attacks=_attack_specs(attacks),
-        metric_names=tuple(str(m) for m in _req(metrics, "privacy", "metrics")),
+        metric_names=metric_names,
         top_k=int(metrics.get("top_k", 5)),
+        utility_names=utility_names,
+        utility_grid=(int(grid_cfg.get("n_rows", 20)), int(grid_cfg.get("n_cols", 20))),
         bootstrap_n=int(_req(metrics, "bootstrap", "metrics").get("n", 1000)),
         bootstrap_ci=float(_req(metrics, "bootstrap", "metrics").get("ci", 0.95)),
         export=export,
+        plots=plots,
     )
 
 
 # --- pipeline -------------------------------------------------------------------
 
-_PoolCache = tuple[list[MatchedTrajectory], dict[str, CleanTrajectory], int, dict[str, int]]
+_PoolCache = tuple[list[MatchedTrajectory], dict[str, CleanTrajectory], dict[str, Any]]
+_NetProvider = Callable[[], tuple[RoadNetwork, MapMatcher]]
 
 _MATCHED_SCHEMA = pa.schema(
     [
@@ -230,6 +311,17 @@ def _version_hash(cfg: RunConfig) -> str:
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
 
 
+def _protected_hash(cfg: RunConfig, spec: MechanismSpec) -> str:
+    """Cache key of one protected release: pipeline hash × mechanism params × seed."""
+    key = {
+        "base": _version_hash(cfg),
+        "mechanism": spec.mech_id,
+        "params": [[k, v] for k, v in spec.params],
+        "seed": cfg.seed,
+    }
+    return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def _refuse_raw_write(path: Path, key: str) -> None:
     """Enforce the data/raw immutability rule for configured write locations."""
     raw_root = (Path.cwd() / "data" / "raw").resolve()
@@ -244,8 +336,9 @@ def _write_pool_cache(
     clean_by_id: dict[str, CleanTrajectory],
     dropped: int,
     split_counts: dict[str, int],
+    extra_meta: dict[str, Any] | None = None,
 ) -> None:
-    """Persist the matched pool as Parquet tables plus a small JSON sidecar."""
+    """Persist a trajectory pool as Parquet tables plus a small JSON sidecar."""
     cache.mkdir(parents=True, exist_ok=True)
     pq.write_table(  # type: ignore[no-untyped-call]
         pa.table(
@@ -281,12 +374,12 @@ def _write_pool_cache(
         cache / "clean.parquet",
     )
     # meta.json is written last: its presence marks the cache entry as complete.
-    meta = {"dropped": dropped, "split_counts": split_counts}
+    meta = {"dropped": dropped, "split_counts": split_counts, **(extra_meta or {})}
     (cache / "meta.json").write_text(json.dumps(meta))
 
 
 def _read_pool_cache(cache: Path) -> _PoolCache:
-    """Rehydrate the matched pool written by :func:`_write_pool_cache`."""
+    """Rehydrate a trajectory pool written by :func:`_write_pool_cache`."""
     matched = [
         MatchedTrajectory(
             traj_id=r["traj_id"],
@@ -318,17 +411,43 @@ def _read_pool_cache(cache: Path) -> _PoolCache:
         ).to_pylist()
     }
     meta = json.loads((cache / "meta.json").read_text())
-    return matched, clean_by_id, meta["dropped"], meta["split_counts"]
+    return matched, clean_by_id, meta
 
 
-def _matched_pool(cfg: RunConfig) -> _PoolCache:
+def _net_provider(cfg: RunConfig) -> _NetProvider:
+    """Memoized road-network + matcher factory: loads at most once, only on demand.
+
+    Both the raw pipeline and protected re-matching need the network, but on a
+    fully warm cache neither does — so nothing is loaded until somebody asks.
+    """
+    ctx: list[tuple[RoadNetwork, MapMatcher] | None] = [None]
+
+    def provide() -> tuple[RoadNetwork, MapMatcher]:
+        current = ctx[0]
+        if current is None:
+            source_cls = registry.get("map_source", cfg.map_source)
+            net = source_cls(cfg.map_region, cfg.map_bbox, cfg.map_crs, cfg.map_dir).load()
+            matcher_cls = registry.get("matcher", cfg.matcher_id)
+            matcher = matcher_cls(
+                radius_m=cfg.radius_m, gps_error_m=cfg.gps_error_m, k_candidates=cfg.k_candidates
+            )
+            current = (net, matcher)
+            ctx[0] = current
+        return current
+
+    return provide
+
+
+def _matched_pool(
+    cfg: RunConfig, provide: _NetProvider
+) -> tuple[list[MatchedTrajectory], dict[str, CleanTrajectory], int, dict[str, int]]:
     """Load-or-compute the matched trajectory pool, cached by version hash."""
     cache = cfg.cache_dir / _version_hash(cfg)
     if (cache / "meta.json").exists():
-        return _read_pool_cache(cache)
+        matched, clean_by_id, meta = _read_pool_cache(cache)
+        return matched, clean_by_id, meta["dropped"], meta["split_counts"]
 
-    source_cls = registry.get("map_source", cfg.map_source)
-    net = source_cls(cfg.map_region, cfg.map_bbox, cfg.map_crs, cfg.map_dir).load()
+    net, matcher = provide()
     loader = registry.get("dataset", cfg.dataset_id)(cfg.dataset_path)
     cleaned: list[CleanTrajectory] = []
     for raw in loader.iter_trajectories():
@@ -340,10 +459,6 @@ def _matched_pool(cfg: RunConfig) -> _PoolCache:
     for t in labelled:
         split_counts[t.split or "none"] = split_counts.get(t.split or "none", 0) + 1
 
-    matcher_cls = registry.get("matcher", cfg.matcher_id)
-    matcher: MapMatcher = matcher_cls(
-        radius_m=cfg.radius_m, gps_error_m=cfg.gps_error_m, k_candidates=cfg.k_candidates
-    )
     matched, dropped = match_many(matcher, labelled, net, cfg.min_match_score)
     matched_ids = {m.traj_id for m in matched}
     clean_by_id = {t.traj_id: t for t in labelled if t.traj_id in matched_ids}
@@ -367,47 +482,101 @@ def _build_metrics(cfg: RunConfig) -> list[SampledMetric]:
     return metrics
 
 
+@dataclass(frozen=True)
+class _Pool:
+    """One attackable arm: its matched pool, its released clean form, and stats."""
+
+    matched: list[MatchedTrajectory]
+    clean_by_id: dict[str, CleanTrajectory]
+    rematch_dropped: int
+    spent_budget: float | None
+
+
+def _noisy_clean(source: CleanTrajectory, payload: Any) -> CleanTrajectory:
+    """A CleanTrajectory carrying the released (noisy) points, geometry recomputed."""
+    pts = tuple((float(lat), float(lon), float(t)) for lat, lon, t in payload)
+    length = sum(haversine_m(a[0], a[1], b[0], b[1]) for a, b in itertools.pairwise(pts))
+    lats = [p[0] for p in pts]
+    lons = [p[1] for p in pts]
+    return replace(
+        source,
+        points=pts,
+        bbox=(min(lons), min(lats), max(lons), max(lats)),
+        length_m=length,
+        mean_speed=length / source.duration_s if source.duration_s > 0 else 0.0,
+    )
+
+
 def _protected_pool(
+    cfg: RunConfig,
+    spec: MechanismSpec,
     mech: PrivacyMechanism,
-    mech_id: str,
     matched: list[MatchedTrajectory],
     clean_by_id: dict[str, CleanTrajectory],
-) -> list[MatchedTrajectory]:
-    """Apply the mechanism to every trajectory and return the attackable pool.
+    provide: _NetProvider,
+) -> _Pool:
+    """Apply one mechanism variant and build its attackable pool.
 
-    An output identical to its input leaves map matching unchanged, so the
-    existing matched trajectory is reused; anything else needs re-matching (P5).
+    Identity output reuses the raw matched pool directly. A perturbing mechanism
+    yields a noisy release for every source trajectory; the release is re-matched
+    (attacker-side snapping back onto the network) and cached under protected_dir
+    keyed by pipeline hash × mechanism params × seed. clean.parquet keeps the full
+    release — including trajectories that failed re-matching — because the utility
+    metrics measure the mechanism, not the attacker-visible survivors.
     """
-    pool: list[MatchedTrajectory] = []
+    cache = cfg.protected_dir / _protected_hash(cfg, spec)
+    if (cache / "meta.json").exists():
+        pool, noisy_by_id, meta = _read_pool_cache(cache)
+        return _Pool(pool, noisy_by_id, meta["dropped"], meta.get("spent_budget"))
+
+    payloads: dict[str, Any] = {}
+    identity = True
     for m in matched:
         view = TrajectoryView(clean=clean_by_id[m.traj_id], matched=m)
         protected = mech.apply(view)
-        if protected.payload != view.as_gps():
-            raise NotImplementedError(
-                f"mechanism {mech_id!r} perturbs its input; "
-                "re-matching protected trajectories lands in P5"
-            )
-        pool.append(m)
-    return pool
+        payloads[m.traj_id] = protected.payload
+        identity = identity and protected.payload == view.as_gps()
+    if identity:
+        return _Pool(matched, clean_by_id, 0, mech.spent_budget())
+
+    noisy_by_id = {tid: _noisy_clean(clean_by_id[tid], p) for tid, p in payloads.items()}
+    net, matcher = provide()
+    pool, dropped = match_many(
+        matcher, [noisy_by_id[m.traj_id] for m in matched], net, cfg.min_match_score
+    )
+    spent = mech.spent_budget()
+    _write_pool_cache(
+        cache,
+        pool,
+        noisy_by_id,
+        dropped,
+        {},
+        extra_meta={
+            "mechanism": spec.ref,
+            "params": dict(spec.params),
+            "seed": cfg.seed,
+            "spent_budget": spent,
+        },
+    )
+    return _Pool(pool, noisy_by_id, dropped, spent)
 
 
 def _target_pools(
     cfg: RunConfig,
     matched: list[MatchedTrajectory],
     clean_by_id: dict[str, CleanTrajectory],
-) -> dict[str, list[MatchedTrajectory]]:
+    mech_plans: list[tuple[MechanismSpec, PrivacyMechanism]],
+    provide: _NetProvider,
+) -> dict[str, _Pool]:
     """Build every attackable pool requested by the configured attacks' scopes."""
     scopes = {s for spec in cfg.attacks for s in spec.target_scopes}
-    pools: dict[str, list[MatchedTrajectory]] = {}
+    pools: dict[str, _Pool] = {}
     if "raw" in scopes:
-        pools["raw"] = matched
+        pools["raw"] = _Pool(matched, clean_by_id, 0, None)
     if "protected" in scopes:
-        for mech_id in cfg.mechanisms:
-            mech_cls = registry.get("mechanism", mech_id)
-            if not issubclass(mech_cls, PrivacyMechanism):  # pragma: no cover - registry enforces
-                raise TypeError(f"mechanism {mech_id!r} is not a PrivacyMechanism")
-            pools[f"protected:{mech_id}"] = _protected_pool(
-                mech_cls(), mech_id, matched, clean_by_id
+        for mspec, mech in mech_plans:
+            pools[f"protected:{mspec.ref}"] = _protected_pool(
+                cfg, mspec, mech, matched, clean_by_id, provide
             )
     return pools
 
@@ -422,6 +591,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     started = time.perf_counter()
     _refuse_raw_write(cfg.output_dir, "experiment.output_dir")
     _refuse_raw_write(cfg.cache_dir, "experiment.cache_dir")
+    _refuse_raw_write(cfg.protected_dir, "experiment.protected_dir")
 
     # Consistency check (design T1): the authoritative region is the loader's.
     loader_cls = registry.get("dataset", cfg.dataset_id)
@@ -439,7 +609,8 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             f"loader {native!r}"
         )
 
-    # Resolve every configured attack before the expensive pipeline (fail fast).
+    # Resolve attacks and instantiate every mechanism variant before the
+    # expensive pipeline (fail fast on unknown names or rejected params).
     plans: list[tuple[AttackSpec, type[Attack]]] = []
     for spec in cfg.attacks:
         attack_cls = registry.get("attack", spec.attack_type)
@@ -452,34 +623,141 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 f"target_scope {sorted(unsupported)}"
             )
         plans.append((spec, attack_cls))
+    mech_plans: list[tuple[MechanismSpec, PrivacyMechanism]] = []
+    for mspec in cfg.mechanisms:
+        mech_cls = registry.get("mechanism", mspec.mech_id)
+        if not issubclass(mech_cls, PrivacyMechanism):  # pragma: no cover - registry enforces
+            raise TypeError(f"mechanism {mspec.mech_id!r} is not a PrivacyMechanism")
+        try:
+            mech = mech_cls(**dict(mspec.params), seed=cfg.seed)
+        except TypeError as err:
+            raise ValueError(f"config: mechanism {mspec.ref!r} rejected its params: {err}") from err
+        mech_plans.append((mspec, mech))
 
-    matched, clean_by_id, dropped, split_counts = _matched_pool(cfg)
+    provide = _net_provider(cfg)
+    matched, clean_by_id, dropped, split_counts = _matched_pool(cfg, provide)
     metrics = _build_metrics(cfg)
-    pools = _target_pools(cfg, matched, clean_by_id)
+    pools = _target_pools(cfg, matched, clean_by_id, mech_plans, provide)
 
     all_values: list[MetricValue] = []
+    attack_rows: list[tuple[str, int, list[MetricValue]]] = []  # (ref, known_points, values)
+    probe_counts: dict[str, int] = {}
     for spec, attack_cls in plans:
         for ref, pool in pools.items():
             if ref.split(":", 1)[0] not in spec.target_scopes:
                 continue
+            # Probes always come from the raw pool (attacker knowledge, design
+            # §6.1); the raw arm is the same population via leave-one-out.
+            aux = None if ref == "raw" else matched
             for k in spec.known_points:
                 attack = attack_cls()
                 attack.configure(
                     BackgroundKnowledge(known_points=k, distance=spec.distance, seed=cfg.seed)
                 )
-                result = attack.run(pool, None)
+                result = attack.run(pool.matched, aux)
                 result = replace(
                     result,
                     exp_id=cfg.exp_id,
                     target_data_ref=ref,
                     result_id=f"{spec.attack_type}:{ref}:k{k}",
                 )
-                all_values.extend(
-                    evaluate(result, metrics, cfg.bootstrap_n, cfg.bootstrap_ci, cfg.seed)
-                )
+                probe_counts[ref] = len(result.predictions)
+                values = evaluate(result, metrics, cfg.bootstrap_n, cfg.bootstrap_ci, cfg.seed)
+                all_values.extend(values)
+                attack_rows.append((ref, k, values))
 
-    _write_results(cfg, all_values, matched, dropped, split_counts, time.perf_counter() - started)
+    grid = Grid(bbox=cfg.map_bbox, n_rows=cfg.utility_grid[0], n_cols=cfg.utility_grid[1])
+    utility_by_ref: dict[str, dict[str, float]] = {}
+    for ref, pool in pools.items():
+        if not ref.startswith("protected:") or not cfg.utility_names:
+            continue
+        ids = sorted(set(clean_by_id) & set(pool.clean_by_id))
+        raw_release = [clean_by_id[i] for i in ids]
+        noisy_release = [pool.clean_by_id[i] for i in ids]
+        rng = np.random.default_rng(cfg.seed)
+        for name in cfg.utility_names:
+            point, lo, hi = UTILITY_METRICS[name](
+                raw_release,
+                noisy_release,
+                grid=grid,
+                n_bootstrap=cfg.bootstrap_n,
+                ci=cfg.bootstrap_ci,
+                rng=rng,
+            )
+            all_values.append(
+                MetricValue(
+                    metric_id=f"utility:{ref}:{name}",
+                    result_id=f"utility:{ref}",
+                    name=name,
+                    value=point,
+                    ci_low=lo,
+                    ci_high=hi,
+                    n_bootstrap=cfg.bootstrap_n,
+                )
+            )
+            utility_by_ref.setdefault(ref, {})[name] = point
+
+    arms = {
+        ref: {
+            "n_pool": len(pool.matched),
+            "n_gallery_users": len({t.user_id for t in pool.matched}),
+            "n_probes": probe_counts.get(ref),
+            "n_rematch_dropped": pool.rematch_dropped,
+            "spent_budget": pool.spent_budget,
+        }
+        for ref, pool in pools.items()
+    }
+    matrix = _matrix_rows(list(pools), attack_rows)
+    _write_results(
+        cfg,
+        all_values,
+        matched,
+        dropped,
+        split_counts,
+        time.perf_counter() - started,
+        arms,
+        matrix,
+    )
+    if "tradeoff" in cfg.plots:
+        plot_tradeoff(_tradeoff_points(matrix, utility_by_ref), cfg.output_dir / "tradeoff.png")
     return all_values
+
+
+_Matrix = tuple[list[int], list[tuple[str, dict[int, float]]]]
+
+
+def _matrix_rows(refs: list[str], attack_rows: list[tuple[str, int, list[MetricValue]]]) -> _Matrix:
+    """Pivot the headline metric into (known_points columns, target-ref rows)."""
+    cells: dict[tuple[str, int], float] = {}
+    for ref, k, values in attack_rows:
+        for v in values:
+            if v.name == _HEADLINE:
+                cells[(ref, k)] = v.value
+    ks = sorted({k for _, k in cells})
+    rows = [(ref, {k: cells[(ref, k)] for k in ks if (ref, k) in cells}) for ref in refs]
+    return ks, [(ref, kv) for ref, kv in rows if kv]
+
+
+def _tradeoff_points(
+    matrix: _Matrix, utility_by_ref: dict[str, dict[str, float]]
+) -> list[TradeoffPoint]:
+    """(cell JSD, headline accuracy at the largest known_points, arm label) per arm."""
+    ks, rows = matrix
+    if not ks:
+        return []
+    k_max = ks[-1]
+    points: list[TradeoffPoint] = []
+    for ref, kv in rows:
+        if k_max not in kv:
+            continue
+        x = 0.0 if ref == "raw" else utility_by_ref.get(ref, {}).get("cell_js_divergence", math.nan)
+        points.append((x, kv[k_max], ref))
+    return points
+
+
+def _finite_or_none(x: float | None) -> float | None:
+    """NaN/inf → None so run.json stays valid RFC JSON."""
+    return None if x is None or not math.isfinite(x) else x
 
 
 def _write_results(
@@ -489,6 +767,8 @@ def _write_results(
     dropped: int,
     split_counts: dict[str, int],
     runtime_s: float,
+    arms: dict[str, dict[str, Any]],
+    matrix: _Matrix,
 ) -> None:
     """Write the exported formats and run.json under the experiment output directory."""
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
@@ -498,6 +778,13 @@ def _write_results(
             writer.writerow(["result_id", "metric", "value", "ci_low", "ci_high", "n_bootstrap"])
             for v in values:
                 writer.writerow([v.result_id, v.name, v.value, v.ci_low, v.ci_high, v.n_bootstrap])
+        ks, rows = matrix
+        if rows:
+            with (cfg.output_dir / "matrix.csv").open("w", newline="") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(["target", *[f"k={k}" for k in ks]])
+                for ref, kv in rows:
+                    writer.writerow([ref, *[kv.get(k, "") for k in ks]])
 
     run_record = {
         "exp_id": cfg.exp_id,
@@ -508,14 +795,15 @@ def _write_results(
         "n_matched": len(matched),
         "n_dropped": dropped,
         "split_counts": split_counts,
+        "arms": arms,
         "runtime_s": round(runtime_s, 3),
         "metrics": [
             {
                 "result_id": v.result_id,
                 "metric": v.name,
-                "value": v.value,
-                "ci_low": v.ci_low,
-                "ci_high": v.ci_high,
+                "value": _finite_or_none(v.value),
+                "ci_low": _finite_or_none(v.ci_low),
+                "ci_high": _finite_or_none(v.ci_high),
             }
             for v in values
         ],
