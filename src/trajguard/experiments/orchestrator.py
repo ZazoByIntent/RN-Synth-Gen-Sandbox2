@@ -622,6 +622,16 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 f"config: attack {spec.attack_type!r} does not support "
                 f"target_scope {sorted(unsupported)}"
             )
+        # The run loop builds attacks with no arguments; an attack whose constructor
+        # needs params the orchestrator cannot supply (e.g. reconstruction's epsilon)
+        # must die here, not after the expensive pipeline.
+        try:
+            attack_cls()
+        except TypeError as err:
+            raise ValueError(
+                f"config: attack {spec.attack_type!r} takes constructor params "
+                f"the orchestrator does not supply: {err}"
+            ) from err
         plans.append((spec, attack_cls))
     mech_plans: list[tuple[MechanismSpec, PrivacyMechanism]] = []
     for mspec in cfg.mechanisms:
