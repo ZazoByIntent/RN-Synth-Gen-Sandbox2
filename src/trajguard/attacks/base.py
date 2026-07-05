@@ -1,12 +1,19 @@
 """Attack interface (design §2.3)."""
 
 from abc import ABC, abstractmethod
-from typing import Any, TypeAlias
+from dataclasses import dataclass
+from typing import Any
 
 from trajguard.datamodel import AttackResult
 
-BackgroundKnowledge: TypeAlias = Any
-"""Attacker prior knowledge (known target points, mechanism params, ...); real type lands in P4."""
+
+@dataclass(frozen=True, slots=True)
+class BackgroundKnowledge:
+    """What the attacker knows about the target before the attack runs."""
+
+    known_points: int  # number of spatio-temporal points known about each target
+    distance: str = "dtw"  # trajectory distance used for nearest-neighbour linkage
+    seed: int = 0  # for any stochastic knowledge selection (evenly-spaced is deterministic)
 
 
 class Attack(ABC):
