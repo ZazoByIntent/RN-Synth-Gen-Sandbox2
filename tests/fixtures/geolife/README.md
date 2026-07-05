@@ -19,3 +19,7 @@ Planted defects the cleaning tests assert on:
 All other trajectories are seeded random walks (120 points, 2 s interval, ~20 m steps
 ≈ 36 km/h) that must survive cleaning. Some points carry altitude `-777` (Geolife's
 invalid marker) to exercise the altitude-dropping path.
+
+These trajectories do **not** follow streets — for map-matching tests and the sanity
+notebook use the road-following set in `../geolife_onroad/` (P2), where routes are
+paths in the committed `beijing_fixture` graph.
