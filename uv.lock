@@ -2371,6 +2371,7 @@ source = { editable = "." }
 dependencies = [
     { name = "geopandas" },
     { name = "leuvenmapmatching" },
+    { name = "matplotlib" },
     { name = "networkx" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -2383,7 +2384,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "ipykernel" },
-    { name = "matplotlib" },
     { name = "mypy" },
     { name = "nbconvert" },
     { name = "pytest" },
@@ -2395,6 +2395,7 @@ dev = [
 requires-dist = [
     { name = "geopandas", specifier = ">=1.0" },
     { name = "leuvenmapmatching", specifier = ">=1.1" },
+    { name = "matplotlib", specifier = ">=3.8" },
     { name = "networkx", specifier = ">=3.0" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "osmnx", specifier = ">=2.0" },
@@ -2406,7 +2407,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "ipykernel", specifier = ">=6.29" },
-    { name = "matplotlib", specifier = ">=3.8" },
     { name = "mypy", specifier = ">=1.10" },
     { name = "nbconvert", specifier = ">=7.16" },
     { name = "pytest", specifier = ">=8.0" },

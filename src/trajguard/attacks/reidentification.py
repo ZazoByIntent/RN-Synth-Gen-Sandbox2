@@ -26,10 +26,15 @@ class Ranking:
 class ReidentificationAttack(Attack):
     """Links a probe trajectory to a known individual by nearest-neighbour DTW.
 
-    Leave-one-out over the matched pool: every trajectory whose user has at least
-    two matched trajectories is a probe; the attacker knows ``known_points``
-    evenly-spaced points of it and searches the gallery (all other trajectories)
-    for the nearest match, deduplicated to one distance per user.
+    Probes come from ``aux`` (the attacker's raw knowledge, design §6.1) when
+    given, else from ``target`` itself (leave-one-out over one pool). Every probe
+    trajectory whose user has at least two trajectories in the probe source is
+    attacked: the attacker knows ``known_points`` evenly-spaced points of it and
+    searches the gallery (``target`` minus the probe's own traj_id) for the
+    nearest match, deduplicated to one distance per user. Keeping the probe set
+    fixed on the raw pool makes raw and protected arms comparable: a probe whose
+    user has no surviving gallery trajectory simply fails to link (indicator 0),
+    it is never dropped from the denominator.
     """
 
     target_scope = {"raw", "protected"}
@@ -44,27 +49,29 @@ class ReidentificationAttack(Attack):
         self._knowledge = knowledge
 
     def run(self, target: Sequence[MatchedTrajectory], aux: Any = None) -> AttackResult:
-        """Run leave-one-out reidentification over the matched trajectories.
+        """Reidentify probes (from ``aux``, or ``target`` itself) against ``target``.
 
         The orchestrator stamps ``exp_id`` and ``target_data_ref`` onto the result.
         """
         started = time.perf_counter()
+        probes: Sequence[MatchedTrajectory] = target if aux is None else aux
         by_user: dict[str, list[int]] = defaultdict(list)
-        for i, traj in enumerate(target):
+        for i, traj in enumerate(probes):
             by_user[traj.user_id].append(i)
         probeable = {u for u, idxs in by_user.items() if len(idxs) >= 2}
 
-        coords = [_xy(t) for t in target]
+        gallery_coords = [_xy(t) for t in target]
+        probe_coords = gallery_coords if aux is None else [_xy(t) for t in probes]
         rankings: list[Ranking] = []
-        for i, traj in enumerate(target):
+        for i, traj in enumerate(probes):
             if traj.user_id not in probeable:
                 continue
-            known = _evenly_spaced(coords[i], self._knowledge.known_points)
+            known = _evenly_spaced(probe_coords[i], self._knowledge.known_points)
             best: dict[str, float] = {}
             for j, other in enumerate(target):
-                if j == i:
+                if other.traj_id == traj.traj_id:
                     continue
-                d = _dtw(known, coords[j])
+                d = _dtw(known, gallery_coords[j])
                 if other.user_id not in best or d < best[other.user_id]:
                     best[other.user_id] = d
             ranked = sorted(best.items(), key=lambda kv: kv[1])

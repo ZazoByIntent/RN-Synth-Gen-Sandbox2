@@ -18,7 +18,10 @@ def _print_summary(config_path: str) -> None:
 
     print(f"\nexperiment: {cfg.exp_id}")
     print(f"results:    {cfg.output_dir}/metrics.csv\n")
-    header = f"{'result':<36} {'metric':<12} {'value':>7}  {cfg.bootstrap_ci:.0%} CI"
+    # mechanism-variant refs make result ids long; size the columns to the data
+    rwidth = max([len(r) for r in by_result] + [len("result")])
+    mwidth = max([len(v.name) for v in values] + [len("metric")])
+    header = f"{'result':<{rwidth}} {'metric':<{mwidth}} {'value':>9}  {cfg.bootstrap_ci:.0%} CI"
     print(header)
     print("-" * len(header))
     for result_id in sorted(by_result):
@@ -28,7 +31,7 @@ def _print_summary(config_path: str) -> None:
                 if v.ci_low is not None and v.ci_high is not None
                 else ""
             )
-            print(f"{result_id:<36} {v.name:<12} {v.value:>7.3f}  {ci}")
+            print(f"{result_id:<{rwidth}} {v.name:<{mwidth}} {v.value:>9.3f}  {ci}")
 
 
 def main() -> None:

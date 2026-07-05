@@ -20,6 +20,10 @@ class PrivacyMechanism(ABC):
 
     guarantee: str  # "none" | "geo-ind" | "ldp" | "central-dp" | "k-anon"
 
+    def __init__(self, seed: int = 0) -> None:
+        """Store the config seed; stochastic mechanisms build their Generator from it."""
+        self.seed = seed
+
     @abstractmethod
     def apply(self, traj: TrajectoryView, **params: Any) -> ProtectedTrajectory:
         """Return the protected version of one trajectory view."""
