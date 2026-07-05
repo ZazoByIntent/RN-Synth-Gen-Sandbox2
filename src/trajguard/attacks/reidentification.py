@@ -11,6 +11,7 @@ import numpy as np
 from trajguard.attacks.base import Attack, BackgroundKnowledge
 from trajguard.datamodel import AttackResult, MatchedTrajectory
 from trajguard.experiments.registry import register
+from trajguard.geometry import dtw
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +72,7 @@ class ReidentificationAttack(Attack):
             for j, other in enumerate(target):
                 if other.traj_id == traj.traj_id:
                     continue
-                d = _dtw(known, gallery_coords[j])
+                d = dtw(known, gallery_coords[j])
                 if other.user_id not in best or d < best[other.user_id]:
                     best[other.user_id] = d
             ranked = sorted(best.items(), key=lambda kv: kv[1])
@@ -108,18 +109,3 @@ def _evenly_spaced(seq: np.ndarray, k: int) -> np.ndarray:
     idx = np.linspace(0, n - 1, k).round().astype(int)
     sampled: np.ndarray = seq[idx]
     return sampled
-
-
-def _dtw(a: np.ndarray, b: np.ndarray) -> float:
-    """Dynamic time warping distance between two (x, y) point sequences (metres)."""
-    n, m = len(a), len(b)
-    if n == 0 or m == 0:
-        return float("inf")
-    cost = np.full((n + 1, m + 1), np.inf)
-    cost[0, 0] = 0.0
-    for i in range(1, n + 1):
-        ai = a[i - 1]
-        for j in range(1, m + 1):
-            d = float(np.hypot(ai[0] - b[j - 1, 0], ai[1] - b[j - 1, 1]))
-            cost[i, j] = d + min(cost[i - 1, j], cost[i, j - 1], cost[i - 1, j - 1])
-    return float(cost[n, m])

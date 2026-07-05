@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from trajguard.attacks.base import BackgroundKnowledge
-from trajguard.attacks.reidentification import Ranking, ReidentificationAttack, _dtw, _evenly_spaced
+from trajguard.attacks.reidentification import Ranking, ReidentificationAttack, _evenly_spaced
 from trajguard.datamodel import AttackResult, MatchedTrajectory
 from trajguard.evaluation.metrics import LinkageRate, TopKAccuracy, bootstrap_ci, evaluate
 from trajguard.experiments import registry
@@ -35,14 +35,6 @@ POOL = [
 
 def test_attack_registered() -> None:
     assert registry.get("attack", "reidentification") is ReidentificationAttack
-
-
-def test_dtw_identity_and_symmetry() -> None:
-    a = np.array([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)])
-    b = np.array([(0.0, 1.0), (1.0, 1.0), (2.0, 1.0)])
-    assert _dtw(a, a) == 0.0
-    assert _dtw(a, b) == _dtw(b, a)
-    assert _dtw(a, b) > 0.0
 
 
 def test_evenly_spaced_uses_all_when_k_exceeds_length() -> None:

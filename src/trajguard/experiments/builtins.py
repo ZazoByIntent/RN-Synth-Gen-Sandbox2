@@ -11,6 +11,7 @@ from trajguard.evaluation import metrics
 from trajguard.maps import osm
 from trajguard.matching import leuven
 from trajguard.privacy import geoind, none
+from trajguard.synthesis import markov
 
 # Referencing the modules keeps linters happy; importing them did the registration.
-_IMPLEMENTATIONS = (reidentification, geolife, metrics, osm, leuven, none, geoind)
+_IMPLEMENTATIONS = (reidentification, geolife, metrics, osm, leuven, none, geoind, markov)
