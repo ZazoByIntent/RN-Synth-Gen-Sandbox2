@@ -1,10 +1,18 @@
 """PrivacyMechanism interface (design §2.3)."""
 
+import hashlib
+import json
 from abc import ABC, abstractmethod
 from typing import Any
 
 from trajguard.datamodel import ProtectedTrajectory
 from trajguard.representation import TrajectoryView
+
+
+def params_hash(params: dict[str, Any]) -> str:
+    """Stable short hash of a mechanism/generator parameter dict (versioning key)."""
+    payload = json.dumps(params, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 class PrivacyMechanism(ABC):

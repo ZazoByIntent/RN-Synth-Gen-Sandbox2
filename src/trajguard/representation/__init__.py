@@ -1,6 +1,5 @@
 """Trajectory representation layer (design §2.2, module 4)."""
 
-from typing import Any, TypeAlias
+from trajguard.representation.views import Grid, TrajectoryView
 
-TrajectoryView: TypeAlias = Any
-"""Adapter exposing one trajectory as GPS / segments / cells / ...; real class lands in P3."""
+__all__ = ["Grid", "TrajectoryView"]
