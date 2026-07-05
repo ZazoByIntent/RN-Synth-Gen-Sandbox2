@@ -28,8 +28,11 @@ def plot_tradeoff(points: list[TradeoffPoint], out_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(7.0, 5.0))
     if finite:
         ax.plot([p[0] for p in finite], [p[1] for p in finite], marker="o")
-        for x, y, label in finite:
-            ax.annotate(label, (x, y), textcoords="offset points", xytext=(6, 4), fontsize=8)
+        ax.margins(x=0.12)
+        for i, (x, y, label) in enumerate(finite):
+            short = label.rsplit(":", 1)[-1]  # "raw", "none", "epsilon=0.1", ...
+            offset = (6, 6) if i % 2 == 0 else (6, -12)  # alternate to reduce overlap
+            ax.annotate(short, (x, y), textcoords="offset points", xytext=offset, fontsize=8)
     ax.set_xlabel("utility loss (cell JS divergence, bits)")
     ax.set_ylabel("reidentification top-1 accuracy")
     ax.set_ylim(-0.05, 1.05)
