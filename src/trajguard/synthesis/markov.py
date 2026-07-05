@@ -29,10 +29,11 @@ class MarkovGenerator(SyntheticGenerator):
     the train split only (design T3: strict train/test/synthetic separation).
     """
 
-    def __init__(
-        self, order: int = 1, alpha: float = 1.0, max_len: int = 50, seed: int = 0
-    ) -> None:
-        """Order-k n-gram with additive smoothing ``alpha`` and a generation length cap."""
+    def __init__(self, order: int = 1, alpha: float = 1.0, max_len: int = 50) -> None:
+        """Order-k n-gram with additive smoothing ``alpha`` and a generation length cap.
+
+        Sampling randomness comes solely from the ``seed`` argument to :meth:`generate`.
+        """
         if order < 1:
             raise ValueError(f"order must be >= 1, got {order}")
         if alpha <= 0:
@@ -40,7 +41,6 @@ class MarkovGenerator(SyntheticGenerator):
         self.order = order
         self.alpha = alpha
         self.max_len = max_len
-        self.seed = seed
         self._counts: dict[tuple[int, ...], Counter[int]] = {}
         self._vocab: tuple[int, ...] = ()  # observed real edge ids, sorted
         self._symbols: tuple[int, ...] = ()  # vocab + (_END,): the "next" symbol space

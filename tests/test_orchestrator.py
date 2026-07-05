@@ -153,6 +153,19 @@ def test_unknown_attack_type_fails_loudly(tmp_path: Path) -> None:
         run(write_config(tmp_path, cfg))
 
 
+def test_unconstructible_attack_fails_before_pipeline(tmp_path: Path) -> None:
+    # reconstruction needs epsilon, which the orchestrator cannot supply; the config
+    # points at an empty maps dir, so passing requires failing before any pipeline work.
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {
+        "type": "reconstruction",
+        "attacker": {"known_points": [3]},
+        "target_scope": ["protected"],
+    }
+    with pytest.raises(ValueError, match="'reconstruction' takes constructor params"):
+        run(write_config(tmp_path, cfg))
+
+
 def test_unknown_map_source_fails_loudly(tmp_path: Path) -> None:
     cfg = base_config(tmp_path, tmp_path / "maps")
     cfg["map"]["source"] = "postgis"

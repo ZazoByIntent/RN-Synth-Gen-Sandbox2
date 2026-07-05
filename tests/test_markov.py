@@ -2,13 +2,13 @@
 
 import pytest
 
-from trajguard.datamodel import CleanTrajectory, MatchedTrajectory
+from trajguard.datamodel import CleanTrajectory, MatchedTrajectory, Split
 from trajguard.experiments import registry
 from trajguard.representation import TrajectoryView
 from trajguard.synthesis.markov import MarkovGenerator
 
 
-def view(edges: tuple[int, ...], split: str | None = "train", tid: str = "t") -> TrajectoryView:
+def view(edges: tuple[int, ...], split: Split | None = "train", tid: str = "t") -> TrajectoryView:
     """A view carrying a matched edge sequence and a split label (for the fit guard)."""
     matched = MatchedTrajectory(
         traj_id=tid,
