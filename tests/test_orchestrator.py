@@ -3,16 +3,20 @@
 import csv
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
 
-from trajguard.experiments.orchestrator import ConsistencyError, run
+from trajguard.datamodel import CleanTrajectory, MatchedTrajectory, ProtectedTrajectory
+from trajguard.experiments.orchestrator import ConsistencyError, _protected_pool, run
+from trajguard.privacy.base import PrivacyMechanism
+from trajguard.representation import TrajectoryView
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def base_config(tmp_path: Path, maps_dir: Path, region: str = "beijing") -> dict:
+def base_config(tmp_path: Path, maps_dir: Path, region: str = "beijing") -> dict[str, Any]:
     """A fixture-scale config: on-road Geolife fixtures + a small committed network."""
     return {
         "experiment": {
@@ -70,7 +74,7 @@ def beijing_maps_dir(tmp_path: Path) -> Path:
     return tmp_path / "maps"
 
 
-def write_config(tmp_path: Path, cfg: dict) -> Path:
+def write_config(tmp_path: Path, cfg: dict[str, Any]) -> Path:
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(cfg))
     return path
@@ -128,12 +132,107 @@ def test_run_is_deterministic(tmp_path: Path, beijing_maps_dir: Path) -> None:
     assert [v.value for v in first] == [v.value for v in second]
 
 
-def test_matched_pool_is_cached(tmp_path: Path, beijing_maps_dir: Path) -> None:
+def test_matched_pool_is_cached_as_parquet(tmp_path: Path, beijing_maps_dir: Path) -> None:
     cfg = base_config(tmp_path, beijing_maps_dir)
     config_path = write_config(tmp_path, cfg)
     run(config_path)
-    cache_files = list((tmp_path / "cache").glob("*.pkl"))
-    assert len(cache_files) == 1  # matched pool cached by version hash
-    assert cache_files[0].stem  # non-empty version hash filename
+    entries = list((tmp_path / "cache").iterdir())
+    assert len(entries) == 1  # matched pool cached under one version-hash directory
+    files = {p.name for p in entries[0].iterdir()}
+    assert files == {"matched.parquet", "clean.parquet", "meta.json"}
     run(config_path)  # second run reuses the cache without error
-    assert len(list((tmp_path / "cache").glob("*.pkl"))) == 1
+    assert len(list((tmp_path / "cache").iterdir())) == 1
+
+
+# --- loud failures for config knobs the orchestrator does not (yet) support ------
+
+
+def test_unknown_attack_type_fails_loudly(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["type"] = "membership_inference"
+    with pytest.raises(KeyError, match="membership_inference"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_unknown_map_source_fails_loudly(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["map"]["source"] = "postgis"
+    with pytest.raises(KeyError, match="postgis"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_unsupported_split_scheme_rejected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["split"]["scheme"] = "random"
+    with pytest.raises(ValueError, match="by_user"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_unknown_export_format_rejected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["reporting"] = {"export": ["xlsx"]}
+    with pytest.raises(ValueError, match="xlsx"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_synthetic_target_scope_rejected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["target_scope"] = ["raw", "synthetic"]
+    with pytest.raises(ValueError, match="synthetic"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_cache_dir_under_data_raw_rejected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["experiment"]["cache_dir"] = "data/raw/cache"
+    with pytest.raises(ValueError, match="immutable"):
+        run(write_config(tmp_path, cfg))
+
+
+# --- the protected arm goes through PrivacyMechanism.apply -----------------------
+
+
+class _ShiftMechanism(PrivacyMechanism):
+    """Test double: a mechanism that visibly perturbs its input."""
+
+    guarantee = "geo-ind"
+
+    def apply(self, traj: TrajectoryView, **params: Any) -> ProtectedTrajectory:
+        shifted = tuple((lat + 0.001, lon, t) for lat, lon, t in traj.as_gps())
+        return ProtectedTrajectory(
+            traj_id=f"shift/{traj.traj_id}",
+            source_traj_id=traj.traj_id,
+            mechanism_id="shift",
+            params_hash="test",
+            guarantee=self.guarantee,
+            epsilon=1.0,
+            payload=shifted,
+            map_id=traj.map_id,
+        )
+
+    def spent_budget(self) -> float | None:
+        return 1.0
+
+
+def test_perturbing_mechanism_is_rejected_until_p5() -> None:
+    clean = CleanTrajectory(
+        traj_id="t1",
+        user_id="u",
+        points=((39.98, 116.31, 0.0), (39.99, 116.31, 5.0)),
+        bbox=(116.31, 39.98, 116.31, 39.99),
+        duration_s=5.0,
+        length_m=1100.0,
+        mean_speed=10.0,
+        cleaning_flags=(),
+    )
+    matched = MatchedTrajectory(
+        traj_id="t1",
+        user_id="u",
+        map_id="m",
+        edge_seq=(1,),
+        matched_points=((0.0, 0.0, 0.0, 0.0),),
+        match_score=1.0,
+        frac_matched=1.0,
+    )
+    with pytest.raises(NotImplementedError, match="P5"):
+        _protected_pool(_ShiftMechanism(), "shift", [matched], {"t1": clean})

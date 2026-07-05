@@ -4,13 +4,13 @@ import argparse
 from collections import defaultdict
 
 from trajguard.datamodel import MetricValue
-from trajguard.experiments.orchestrator import load_config, run
+from trajguard.experiments.orchestrator import load_config, run_experiment
 
 
 def _print_summary(config_path: str) -> None:
     """Run an experiment and print a per-target metric table with bootstrap CIs."""
-    values = run(config_path)
     cfg = load_config(config_path)
+    values = run_experiment(cfg)
 
     by_result: dict[str, list[MetricValue]] = defaultdict(list)
     for v in values:
@@ -18,14 +18,17 @@ def _print_summary(config_path: str) -> None:
 
     print(f"\nexperiment: {cfg.exp_id}")
     print(f"results:    {cfg.output_dir}/metrics.csv\n")
-    header = f"{'target : k':<28} {'metric':<12} {'value':>7}  95% CI"
+    header = f"{'result':<36} {'metric':<12} {'value':>7}  {cfg.bootstrap_ci:.0%} CI"
     print(header)
     print("-" * len(header))
     for result_id in sorted(by_result):
-        label = result_id.removeprefix("reidentification:")
         for v in by_result[result_id]:
-            ci = f"[{v.ci_low:.3f}, {v.ci_high:.3f}]" if v.ci_low is not None else ""
-            print(f"{label:<28} {v.name:<12} {v.value:>7.3f}  {ci}")
+            ci = (
+                f"[{v.ci_low:.3f}, {v.ci_high:.3f}]"
+                if v.ci_low is not None and v.ci_high is not None
+                else ""
+            )
+            print(f"{result_id:<36} {v.name:<12} {v.value:>7.3f}  {ci}")
 
 
 def main() -> None:
