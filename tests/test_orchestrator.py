@@ -148,8 +148,8 @@ def test_matched_pool_is_cached_as_parquet(tmp_path: Path, beijing_maps_dir: Pat
 
 def test_unknown_attack_type_fails_loudly(tmp_path: Path) -> None:
     cfg = base_config(tmp_path, tmp_path / "maps")
-    cfg["attacks"][0]["type"] = "membership_inference"
-    with pytest.raises(KeyError, match="membership_inference"):
+    cfg["attacks"][0]["type"] = "no_such_attack"
+    with pytest.raises(KeyError, match="no_such_attack"):
         run(write_config(tmp_path, cfg))
 
 

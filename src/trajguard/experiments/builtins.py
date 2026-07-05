@@ -5,7 +5,7 @@ orchestrator addresses implementations by name, so this module is the single pla
 that pulls them all in. Importing it is the registration side effect.
 """
 
-from trajguard.attacks import reidentification
+from trajguard.attacks import membership, reidentification
 from trajguard.datasets import geolife
 from trajguard.evaluation import metrics
 from trajguard.maps import osm
@@ -14,4 +14,14 @@ from trajguard.privacy import geoind, none
 from trajguard.synthesis import markov
 
 # Referencing the modules keeps linters happy; importing them did the registration.
-_IMPLEMENTATIONS = (reidentification, geolife, metrics, osm, leuven, none, geoind, markov)
+_IMPLEMENTATIONS = (
+    reidentification,
+    membership,
+    geolife,
+    metrics,
+    osm,
+    leuven,
+    none,
+    geoind,
+    markov,
+)
