@@ -65,6 +65,33 @@ def test_probes_link_to_correct_user() -> None:
         assert list(ranking.distances) == sorted(ranking.distances)
 
 
+def test_probes_from_aux_keep_population_fixed_across_arms() -> None:
+    """With aux probes, the denominator stays the raw pool even if the gallery shrank."""
+    attack = ReidentificationAttack()
+    attack.configure(BackgroundKnowledge(known_points=4))
+    shrunken_gallery = [t for t in POOL if t.traj_id != "A2"]  # A2 "did not survive"
+    result = attack.run(shrunken_gallery, aux=POOL)
+    assert len(result.predictions) == 4  # probes still defined by the raw pool
+    by_probe = {r.true_user: r for r in result.predictions}
+    # B is untouched, still linked; A lost a gallery trajectory but stays in the denominator
+    assert by_probe["B"].users[0] == "B"
+    for ranking in result.predictions:
+        assert len(ranking.users) == len(set(ranking.users))
+
+
+def test_empty_gallery_yields_failed_links_not_missing_probes() -> None:
+    """An empty (or fully dropped) release: every probe fails, none disappears."""
+    attack = ReidentificationAttack()
+    attack.configure(BackgroundKnowledge(known_points=4))
+    result = attack.run([], aux=POOL)
+    assert len(result.predictions) == 4
+    for ranking in result.predictions:
+        assert ranking.users == ()
+    # metrics read 0.0 (failed links), not NaN (missing probes)
+    assert TopKAccuracy(1).compute(result) == {"top1_acc": 0.0}
+    assert LinkageRate().compute(result) == {"linkage_rate": 0.0}
+
+
 def make_result(rankings: list[Ranking]) -> AttackResult:
     return AttackResult(
         result_id="r",
