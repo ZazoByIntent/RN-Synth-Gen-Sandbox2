@@ -1,6 +1,7 @@
 """Tests for the reidentification attack and the privacy metrics."""
 
 import numpy as np
+import pytest
 
 from trajguard.attacks.base import BackgroundKnowledge
 from trajguard.attacks.reidentification import Ranking, ReidentificationAttack, _dtw, _evenly_spaced
@@ -108,5 +109,12 @@ def test_evaluate_builds_metric_values() -> None:
     assert {v.name for v in values} == {"top1_acc", "linkage_rate"}
     for v in values:
         assert v.n_bootstrap == 200
+        assert v.ci_low is not None and v.ci_high is not None
         assert v.ci_low <= v.value <= v.ci_high
         assert v.result_id == "r"
+
+
+def test_unsupported_distance_rejected() -> None:
+    attack = ReidentificationAttack()
+    with pytest.raises(ValueError, match="dtw"):
+        attack.configure(BackgroundKnowledge(known_points=4, distance="hausdorff"))

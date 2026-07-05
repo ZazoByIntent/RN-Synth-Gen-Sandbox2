@@ -39,6 +39,10 @@ class ReidentificationAttack(Attack):
 
     def configure(self, knowledge: BackgroundKnowledge) -> None:
         """Set the attacker's background knowledge (k points, distance)."""
+        if knowledge.distance != "dtw":
+            raise ValueError(
+                f"reidentification implements only 'dtw', got {knowledge.distance!r}"
+            )
         self._knowledge = knowledge
 
     def run(self, target: Sequence[MatchedTrajectory], aux: Any = None) -> AttackResult:
