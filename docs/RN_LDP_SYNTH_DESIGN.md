@@ -196,10 +196,11 @@ budget conservation, not a claimed-first technique.
 
 ## 10. Limitations
 
-1. **No empirical attack evaluation yet.** The LiRA hook exists (`sequence_log_prob`), but
-   `MembershipInferenceAttack` hardcodes `MarkovGenerator` shadows; honest MIA against this generator
-   needs a shadow-factory generalisation (follow-up). Re-identification against synthetic pools requires
-   orchestrator wiring (`target_scope: synthetic` is rejected by design today).
+1. **Attack evaluation is fixture-scale only (so far).** Honest LiRA now runs against this generator
+   (same-class shadows via the shadow factory; §12) at the 20-trajectory fixture scale — single seed,
+   coarse TPR granularity, no cross-seed error bars. Larger-scale MIA (Geolife-sized populations) and
+   re-identification against synthetic pools (needs orchestrator `target_scope: synthetic` wiring)
+   remain open.
 2. **Zone granularity is a bias-variance knob.** Coarse grids lose spatial detail; fine grids blow up |Z|
    and |F| and hence GRR/OUE variance. Defaults (12×12) are untuned; tuning must use public data only.
 3. **Decode truncations.** Zones unreachable from the current decode position truncate walks (0 on the
@@ -230,7 +231,40 @@ budget conservation, not a claimed-first technique.
   (EPSG:3794, `config/maps.yaml`) is the reserved region for real synthetic-population runs per the
   map/dataset consistency rule (T1: never paired with Geolife attacks); building it requires the OSM
   download CLI and is deliberately out of this slice.
-- **Evaluation plan:** utility via `cell_js_divergence`/`length_dist_error` (paired variants need an
-  unpaired analogue for population synthesis — evaluation-side follow-up); privacy via the empirical
-  randomizer ratio test (in-tree), then MIA (TPR@FPR ∈ {0.001, 0.01}, AUC) after the shadow-factory
-  follow-up, and re-identification once synthetic pools enter the run loop.
+- **Evaluation plan:** utility via the unpaired population metrics
+  (`evaluation.utility.unpaired_cell_js_divergence` / `unpaired_length_w1`; the paired dispatch-table
+  variants assume a raw↔released bijection population synthesis doesn't have); privacy via the empirical
+  randomizer ratio test (in-tree) and LiRA with same-class shadows
+  (`MembershipInferenceAttack(shadow_factory=...)`); re-identification once synthetic pools enter the
+  run loop. First measured numbers: §12.
+
+## 12. Measured evidence (fixture scale)
+
+Produced by `python -m trajguard.experiments.rnldp_eval` (committed module; deterministic in its seed).
+Protocol: 20 public shortest-path seed trajectories on `beijing_fixture`; 10 members fit the target,
+all 20 are MIA candidates; LiRA with 16 same-class shadows (per-index seeds); utility = unpaired metrics
+between the member population and an equal-sized synthetic release; Markov = non-private ceiling under
+the identical protocol. Seed 20260706.
+
+| Arm | MIA AUC | TPR@FPR=0.01 | TPR@FPR=0.1 | Cell JSD (bits) | Length W1 (m) |
+|---|---|---|---|---|---|
+| rn_ldp_synth @ ε=0.5 | 0.650 | 0.30 | 0.30 | 0.335 [0.289, 0.666] | 230 [167, 950] |
+| rn_ldp_synth @ ε=2 | 0.460 | 0.00 | 0.30 | 0.314 [0.275, 0.618] | 316 [185, 1092] |
+| rn_ldp_synth @ ε=8 | 0.470 | 0.10 | 0.20 | 0.374 [0.299, 0.633] | 452 [270, 1125] |
+| rn_ldp_synth @ ε=80 | 1.000 | 1.00 | 1.00 | 0.341 [0.222, 0.773] | 271 [195, 719] |
+| Markov (non-private ceiling) | 0.970 | 0.70 | 1.00 | 0.051 [0.057, 0.243] | 1536 [817, 2572] |
+
+Reading (with the small-n caveats of §10.1 firmly attached):
+
+- **Privacy at working budgets.** At ε ∈ {0.5, 2, 8} LiRA is at chance (AUC 0.46–0.65; with 10 members /
+  10 non-members the null-AUC jitter is ≈±0.13, so 0.65 at ε=0.5 is within noise). TPR granularity is
+  0.1 per member; FPR=0.01 is the zero-false-positive regime at this n.
+- **The attack has teeth.** At ε=80 (a deliberately meaningless budget) the same attack achieves
+  AUC 1.0 / TPR 1.0 — with near-noiseless aggregates over 10 members, each member visibly shifts
+  π̂/λ̂/P̂. The chance-level results at working ε are therefore not an artefact of a weak attack.
+- **The non-private ceiling is fully attackable** (Markov AUC 0.97), as expected for a memorizing model.
+- **Utility price.** Spatial structure costs ≈0.3 bits of cell JSD vs the Markov ceiling's 0.05 at this
+  population size — the honest LDP cost at n=10 reporting devices; the JSD is nearly flat in ε because
+  frequency-oracle noise at this n dominates the budget effect. Trip-length fidelity is *better* than
+  the non-private Markov (W1 230–452 m vs 1536 m): the mechanism spends budget on an explicit length
+  distribution and calibrates decode inflation, whereas the Markov baseline has no length model at all.
