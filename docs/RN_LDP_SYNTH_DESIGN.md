@@ -268,3 +268,8 @@ Reading (with the small-n caveats of §10.1 firmly attached):
   frequency-oracle noise at this n dominates the budget effect. Trip-length fidelity is *better* than
   the non-private Markov (W1 230–452 m vs 1536 m): the mechanism spends budget on an explicit length
   distribution and calibrates decode inflation, whereas the Markov baseline has no length model at all.
+- **CI reading note.** The bracketed intervals are percentile bootstraps under *independent* per-side
+  resampling; for a non-negative statistic sitting near its zero boundary the replicates are
+  systematically noisier than the point estimate, so an interval can sit entirely above it — the Markov
+  cell-JSD row (0.051 [0.057, 0.243]) is exactly this artifact, not a precision interval around 0.051.
+  It is the only such case in the table.

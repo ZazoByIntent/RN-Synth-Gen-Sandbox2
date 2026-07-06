@@ -71,7 +71,9 @@ class MembershipInferenceAttack(Attack):
         self.alpha = alpha
         self.subsample = subsample
         self._shadow_factory: Callable[[int], ShadowGenerator] = shadow_factory or (
-            lambda _k: MarkovGenerator(order=order, alpha=alpha)
+            # Bind to the live attributes, not the constructor locals, so a caller
+            # adjusting attack.order/attack.alpha post-construction stays consistent.
+            lambda _k: MarkovGenerator(order=self.order, alpha=self.alpha)
         )
         self._seed = 0
 
