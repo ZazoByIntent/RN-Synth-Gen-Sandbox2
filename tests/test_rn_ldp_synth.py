@@ -79,9 +79,7 @@ def train_views(fixture_network: RoadNetwork) -> list[TrajectoryView]:
 
 @pytest.fixture(scope="module")
 def gen(fixture_network: RoadNetwork, train_views: list[TrajectoryView]) -> RNLDPSynthGenerator:
-    g = RNLDPSynthGenerator(
-        fixture_network, epsilon=2.0, n_rows=10, n_cols=10, l_max=12, seed=11
-    )
+    g = RNLDPSynthGenerator(fixture_network, epsilon=2.0, n_rows=10, n_cols=10, l_max=12, seed=11)
     g.fit(train_views)
     return g
 
@@ -158,9 +156,7 @@ def test_generate_before_fit_raises(fixture_network: RoadNetwork) -> None:
         RNLDPSynthGenerator(fixture_network, seed=0).generate(1, seed=0)
 
 
-def test_budget_accounting(
-    fixture_network: RoadNetwork, gen: RNLDPSynthGenerator
-) -> None:
+def test_budget_accounting(fixture_network: RoadNetwork, gen: RNLDPSynthGenerator) -> None:
     """The four stage budgets sum exactly to epsilon; spent_budget reports it after fit."""
     g = RNLDPSynthGenerator(fixture_network, epsilon=1.5, budget_split=(1.0, 1.0, 1.0, 1.0))
     assert sum(g.stage_epsilons) == pytest.approx(1.5)
@@ -176,14 +172,10 @@ def test_high_epsilon_preserves_start_zones_and_lengths(
     fixture_network: RoadNetwork, train_views: list[TrajectoryView]
 ) -> None:
     """Utility smoke test: with negligible noise the synthetic population tracks the train one."""
-    g = RNLDPSynthGenerator(
-        fixture_network, epsilon=80.0, n_rows=10, n_cols=10, l_max=12, seed=2
-    )
+    g = RNLDPSynthGenerator(fixture_network, epsilon=80.0, n_rows=10, n_cols=10, l_max=12, seed=2)
     g.fit(train_views)
     train_starts = {g.zone_sequence(v.as_segments())[0] for v in train_views}
-    train_mean = float(
-        np.mean([len(g.zone_sequence(v.as_segments())) - 1 for v in train_views])
-    )
+    train_mean = float(np.mean([len(g.zone_sequence(v.as_segments())) - 1 for v in train_views]))
     syn = g.generate(40, seed=9)
     starts = [g.zone_sequence(s.payload)[0] for s in syn]
     assert sum(s in train_starts for s in starts) / len(starts) >= 0.8
@@ -215,6 +207,7 @@ def test_sequence_log_prob_ranks_coherent_above_incoherent(
         (a, b) not in set(gen.zone_arcs)
         for a, b in itertools.pairwise(gen.zone_sequence(incoherent))
     )
+
     # Total log-prob is length-dependent, so compare per zone step: floor-hit
     # transitions (~log 1e-12 each) must dominate any coherent trajectory's average.
     def per_step(seq: tuple[int, ...]) -> float:

@@ -152,9 +152,7 @@ class RNLDPSynthGenerator(SyntheticGenerator):
                     arcs.add((zi, zj))
         self.zone_arcs: tuple[tuple[int, int], ...] = tuple(sorted(arcs))
         if not self.zone_arcs:
-            raise ValueError(
-                "network collapses into a single zone; increase n_rows/n_cols"
-            )
+            raise ValueError("network collapses into a single zone; increase n_rows/n_cols")
         self._arc_index = {arc: i for i, arc in enumerate(self.zone_arcs)}
         self._out_arcs: dict[int, list[tuple[int, int]]] = {}  # zone -> [(arc_idx, target)]
         for idx, (i, j) in enumerate(self.zone_arcs):
@@ -320,9 +318,7 @@ class RNLDPSynthGenerator(SyntheticGenerator):
                 break
             probs = rows[z]
             remaining = steps - step
-            keep = [
-                k for k, (_a, j) in enumerate(outs) if self._hops[j, z_end] <= remaining - 1
-            ]
+            keep = [k for k, (_a, j) in enumerate(outs) if self._hops[j, z_end] <= remaining - 1]
             if keep:
                 sub = probs[keep]
                 idx = keep[int(rng.choice(len(keep), p=_normalized(sub)))]
