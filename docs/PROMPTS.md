@@ -11,10 +11,10 @@ Splošno pravilo: **eno fazo naenkrat, ena veja, en PR.** Ne prilepi več faz sk
 ## Enkratni uvodni prompt (pred P0)
 
 ```
-Read CLAUDE.md and docs/IMPLEMENTATION_PLAN.md in full, and skim
-docs/Tehnicna_zasnova_eksperimentalno_okolje.md so you have the architecture in mind.
+Read CLAUDE.md, docs/ARCHITECTURE.md and docs/IMPLEMENTATION_PLAN.md in full. Only
+consult docs/Tehnicna_zasnova_eksperimentalno_okolje.md if something is unclear.
 Do not write any code yet. When done, summarise back to me in 5 bullet points:
-(1) the vertical-slice principle, (2) the five ABCs and where they live,
+(1) the vertical-slice principle, (2) the seven ABCs and where they live,
 (3) the map/dataset consistency rule, (4) the definition of done, (5) how phases map
 to branches/PRs. Then wait.
 ```
@@ -28,8 +28,9 @@ We're doing phase P0 from docs/IMPLEMENTATION_PLAN.md. Start in plan mode.
 
 Goal: repo scaffolding, tooling, the datamodel schemas, the registry, and the seven
 ABCs (MapSource, DatasetLoader, MapMatcher, PrivacyMechanism, SyntheticGenerator,
-Attack, Metric) as defined in section 2.3 and section 4 of the design doc. No domain
-logic yet — the ABCs have abstract methods and docstrings only.
+Attack, Metric) as defined in section 2.3 and section 4 of the design doc and
+summarised in English in docs/ARCHITECTURE.md. No domain logic yet — the ABCs have
+abstract methods and docstrings only.
 
 Keep it lean: datamodel entities are frozen dataclasses (no pydantic — plain PyYAML
 plus manual validation will handle config later). No placeholder modules, no empty
@@ -213,5 +214,7 @@ report. Show me the generated report on the current results.
 Review the diff for this phase as a fresh reviewer. Check against CLAUDE.md: are the
 interfaces respected, is determinism handled (explicit seeds), is data/raw untouched,
 are there tests that actually run, and is the map/dataset consistency rule intact?
+Also check the docs: is the Status line in CLAUDE.md updated to reflect this phase,
+and does docs/ARCHITECTURE.md still match what was built (fix drift in this PR)?
 List any violations with file and line. Don't fix anything yet — just report.
 ```
