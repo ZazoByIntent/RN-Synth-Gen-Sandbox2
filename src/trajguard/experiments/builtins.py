@@ -5,7 +5,7 @@ orchestrator addresses implementations by name, so this module is the single pla
 that pulls them all in. Importing it is the registration side effect.
 """
 
-from trajguard.attacks import membership, reconstruction, reidentification
+from trajguard.attacks import attribute, membership, reconstruction, reidentification
 from trajguard.datasets import geolife
 from trajguard.evaluation import metrics
 from trajguard.maps import osm
@@ -18,6 +18,7 @@ _IMPLEMENTATIONS = (
     reidentification,
     membership,
     reconstruction,
+    attribute,
     geolife,
     metrics,
     osm,
