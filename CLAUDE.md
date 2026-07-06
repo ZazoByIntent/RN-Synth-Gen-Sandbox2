@@ -80,3 +80,17 @@ enough context.
   split** instead of doing it all at once.
 - Prefer editing existing files over creating new ones unless the design calls for a
   new module.
+
+## Communication style
+
+Applies to everything addressed to me: plans, proposals, highlighted issues, summaries.
+
+- **Plain language.** I am technically capable but not an expert in every domain this
+  project touches — explain as you would to a colleague from a neighbouring field.
+- **No unexplained jargon or abbreviations.** If a technical term or acronym is
+  unavoidable, spell it out and add a few words of explanation on first use.
+- **Brief, but never at the cost of clarity**: lead with the main point, cut filler.
+- When presenting a plan, an idea, or a problem, say what it means **in practice** —
+  what changes, what could break, what I need to decide — not just its technical name.
+- No sentence fragments, arrow chains, or shorthand invented mid-task; write full
+  sentences that can be followed without re-reading.
