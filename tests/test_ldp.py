@@ -67,7 +67,8 @@ def test_grr_estimate_recovers_true_distribution() -> None:
     for v in values:
         counts[grr_perturb(int(v), k, EPS, rng)] += 1
     est = grr_estimate(counts, n, EPS)
-    assert np.abs(est / n - true).sum() < 0.06
+    # GRR L1 at these params runs ~0.03-0.07 across seeds; a wrong estimator is off by ~0.4+.
+    assert np.abs(est / n - true).sum() < 0.12
 
 
 def test_oue_estimate_recovers_true_distribution() -> None:

@@ -166,6 +166,8 @@ def test_budget_accounting(
     assert sum(g.stage_epsilons) == pytest.approx(1.5)
     assert g.stage_epsilons == pytest.approx((0.375, 0.375, 0.375, 0.375))
     assert g.spent_budget() is None
+    # Unequal default split pins the stage ORDER (s, e, l, t) — a transposition fails here.
+    assert gen.stage_epsilons == pytest.approx((0.3, 0.3, 0.4, 1.0))
     assert sum(gen.stage_epsilons) == pytest.approx(2.0)
     assert gen.spent_budget() == pytest.approx(2.0)
 
@@ -184,11 +186,11 @@ def test_high_epsilon_preserves_start_zones_and_lengths(
     )
     syn = g.generate(40, seed=9)
     starts = [g.zone_sequence(s.payload)[0] for s in syn]
-    assert sum(s in train_starts for s in starts) / len(starts) >= 0.6
+    assert sum(s in train_starts for s in starts) / len(starts) >= 0.8
     syn_mean = float(np.mean([len(g.zone_sequence(s.payload)) - 1 for s in syn]))
     # Public inflation calibration keeps decoded trips near the sampled walk scale
-    # (measured ratio ~1.0 on this fixture); band catches both stretch and collapse.
-    assert train_mean * 0.5 <= syn_mean <= train_mean * 1.5 + 1
+    # (measured: overlap 1.0, length ratio 1.03 on this fixture at these seeds).
+    assert train_mean * 0.6 <= syn_mean <= train_mean * 1.4 + 1
 
 
 def test_sequence_log_prob_finite(
@@ -200,9 +202,70 @@ def test_sequence_log_prob_finite(
         assert math.isfinite(gen.sequence_log_prob(syn.payload))
 
 
+def test_sequence_log_prob_ranks_coherent_above_incoherent(
+    gen: RNLDPSynthGenerator, fixture_network: RoadNetwork, train_views: list[TrajectoryView]
+) -> None:
+    """The MIA hook must penalize infeasible zone transitions, not just return a number."""
+    ends, _ = _edge_tables(fixture_network)
+    rng = np.random.default_rng(3)
+    all_edges = sorted(ends)
+    incoherent = tuple(int(all_edges[i]) for i in rng.choice(len(all_edges), size=6, replace=False))
+    # A scattered edge pick crosses non-adjacent zones, so it hits the probability floor.
+    assert any(
+        (a, b) not in set(gen.zone_arcs)
+        for a, b in itertools.pairwise(gen.zone_sequence(incoherent))
+    )
+    # Total log-prob is length-dependent, so compare per zone step: floor-hit
+    # transitions (~log 1e-12 each) must dominate any coherent trajectory's average.
+    def per_step(seq: tuple[int, ...]) -> float:
+        return gen.sequence_log_prob(seq) / max(len(gen.zone_sequence(seq)), 1)
+
+    train_scores = [per_step(tuple(v.as_segments())) for v in train_views[:5]]
+    assert min(train_scores) > per_step(incoherent)
+
+
 def test_sequence_log_prob_rejects_unknown_edge(gen: RNLDPSynthGenerator) -> None:
     with pytest.raises(ValueError, match="road network"):
         gen.sequence_log_prob((99_999_999,))
+
+
+def test_fit_handles_single_zone_trajectory(fixture_network: RoadNetwork) -> None:
+    """The l=0 dummy-transition branch: a one-edge trajectory encodes and synthesizes."""
+    ends, _ = _edge_tables(fixture_network)
+    single = _view((sorted(ends)[0],), tid="single")
+    g = RNLDPSynthGenerator(fixture_network, epsilon=1.0, seed=4)
+    g.fit([single])
+    out = g.generate(3, seed=1)
+    assert len(out) == 3
+    assert all(len(s.payload) >= 1 for s in out)
+
+
+def test_walk_truncates_gracefully_at_sink_zones_and_dead_ends(
+    gen: RNLDPSynthGenerator, fixture_network: RoadNetwork
+) -> None:
+    """Sink zones stop walks; dead-end nodes make _route_into_zone return None."""
+    sinks = set(range(gen.n_zones)) - {i for i, _ in gen.zone_arcs}
+    rng = np.random.default_rng(5)
+    uniform = np.full(gen.n_zones, 1.0 / gen.n_zones)
+    if sinks:
+        pi = np.zeros(gen.n_zones)
+        pi[next(iter(sinks))] = 1.0
+        walk = gen._sample_walk(rng, 5, pi, uniform, gen._row_probs)
+        assert walk == [next(iter(sinks))]
+    ends, _ = _edge_tables(fixture_network)
+    tails = {u for u, _ in ends.values()}
+    dead_ends = {v for _, v in ends.values()} - tails
+    if dead_ends:
+        assert gen._route_into_zone(next(iter(dead_ends)), 0, rng) is None
+    assert sinks or dead_ends, "fixture unexpectedly has neither sinks nor dead ends"
+
+
+def test_zone_rep_weights_are_valid_distributions(gen: RNLDPSynthGenerator) -> None:
+    """Representative-edge weights must be finite probability vectors for every zone."""
+    for reps, weights in gen._zone_reps.values():
+        assert len(reps) == len(weights)
+        assert np.all(np.isfinite(weights))
+        assert float(weights.sum()) == pytest.approx(1.0)
 
 
 def test_constructor_validation(fixture_network: RoadNetwork) -> None:

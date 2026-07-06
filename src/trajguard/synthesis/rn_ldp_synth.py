@@ -192,7 +192,9 @@ class RNLDPSynthGenerator(SyntheticGenerator):
         for z in range(self.n_zones):
             reps = zone_scc_edges.get(z) or zone_edges[z]
             weights = np.array([edge_len[e] for e in reps], dtype=float)
-            self._zone_reps[z] = (reps, weights / weights.sum())
+            # _normalized guards the all-zero-length case (OSM loop/connector artifacts),
+            # which would otherwise store NaN probabilities and crash rng.choice later.
+            self._zone_reps[z] = (reps, _normalized(weights))
             tails: dict[int, int] = {}
             for eid in reps:
                 u = self._edge_ends[eid][0]
