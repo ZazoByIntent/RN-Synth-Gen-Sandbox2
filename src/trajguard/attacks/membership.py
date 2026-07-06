@@ -2,9 +2,9 @@
 
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -19,6 +19,14 @@ EdgeSeq = tuple[int, ...]
 _MIN_SD = 1e-6  # floor on the shadow-score std so the likelihood ratio stays finite
 
 
+class ShadowGenerator(Protocol):
+    """What LiRA needs from a shadow generator: fit on views, score edge sequences."""
+
+    def fit(self, train: Sequence[TrajectoryView]) -> None: ...
+
+    def sequence_log_prob(self, edge_seq: Sequence[int]) -> float: ...
+
+
 @dataclass(frozen=True, slots=True)
 class MembershipScore:
     """One candidate's LiRA score and its ground-truth membership (for evaluation)."""
@@ -31,18 +39,27 @@ class MembershipScore:
 class MembershipInferenceAttack(Attack):
     """LiRA-lite: shadow generators + a Gaussian likelihood-ratio membership score.
 
-    For each candidate the attacker splits ``n_shadow`` MarkovGenerators (trained on
+    For each candidate the attacker splits ``n_shadow`` shadow generators (trained on
     random subsets of a shadow pool) into IN (trained with the candidate) and OUT
     (without), fits a Gaussian to the candidate's ``sequence_log_prob`` under each
     group, and scores the log-prob under the real generator as the log-likelihood
     ratio ``logN(obs; in) - logN(obs; out)``. Higher ⇒ more likely a training member.
     Reports TPR@FPR ∈ {0.001, 0.01} and AUC via :func:`membership_report`.
+
+    Shadows default to ``MarkovGenerator(order, alpha)``; an honest attack against a
+    different generator class passes ``shadow_factory`` (called with the shadow index,
+    so implementations can derive distinct per-shadow seeds).
     """
 
     target_scope = {"synthetic"}
 
     def __init__(
-        self, n_shadow: int = 16, order: int = 1, alpha: float = 1.0, subsample: float = 0.5
+        self,
+        n_shadow: int = 16,
+        order: int = 1,
+        alpha: float = 1.0,
+        subsample: float = 0.5,
+        shadow_factory: Callable[[int], ShadowGenerator] | None = None,
     ) -> None:
         """LiRA-lite with ``n_shadow`` shadow generators each on a ``subsample`` of the pool."""
         if n_shadow < 2:
@@ -53,6 +70,9 @@ class MembershipInferenceAttack(Attack):
         self.order = order
         self.alpha = alpha
         self.subsample = subsample
+        self._shadow_factory: Callable[[int], ShadowGenerator] = shadow_factory or (
+            lambda _k: MarkovGenerator(order=order, alpha=alpha)
+        )
         self._seed = 0
 
     def configure(self, knowledge: BackgroundKnowledge) -> None:
@@ -102,14 +122,14 @@ class MembershipInferenceAttack(Attack):
 
     def _train_shadows(
         self, pool: list[EdgeSeq], rng: np.random.Generator
-    ) -> tuple[list[MarkovGenerator], list[set[int]]]:
+    ) -> tuple[list[ShadowGenerator], list[set[int]]]:
         """Fit ``n_shadow`` generators, each on a random subset; record the indices each saw."""
         k = max(1, round(self.subsample * len(pool)))
-        shadows: list[MarkovGenerator] = []
+        shadows: list[ShadowGenerator] = []
         members: list[set[int]] = []
-        for _ in range(self.n_shadow):
+        for shadow_idx in range(self.n_shadow):
             idx = {int(i) for i in rng.choice(len(pool), size=k, replace=False)}
-            gen = MarkovGenerator(order=self.order, alpha=self.alpha)
+            gen = self._shadow_factory(shadow_idx)
             gen.fit([_seq_view(pool[i]) for i in sorted(idx)])
             shadows.append(gen)
             members.append(idx)
