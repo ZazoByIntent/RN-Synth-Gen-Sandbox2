@@ -805,6 +805,7 @@ def _write_results(
         "n_matched": len(matched),
         "n_dropped": dropped,
         "split_counts": split_counts,
+        "bootstrap": {"n": cfg.bootstrap_n, "ci": cfg.bootstrap_ci},
         "arms": arms,
         "runtime_s": round(runtime_s, 3),
         "metrics": [
