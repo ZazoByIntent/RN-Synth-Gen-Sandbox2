@@ -498,10 +498,14 @@ def _environment() -> Environment:
 
 
 def _refuse_raw_write(path: Path) -> None:
-    """Enforce the data/raw immutability rule for the report output directory."""
-    raw_root = (Path.cwd() / "data" / "raw").resolve()
-    resolved = path.resolve()
-    if resolved == raw_root or raw_root in resolved.parents:
+    """Enforce the data/raw immutability rule for the report output directory.
+
+    Component-based and cwd-independent (see orchestrator._under_data_raw): any
+    ``data/raw`` segment in the resolved path counts, so an absolute path into the
+    real immutable dir is caught even when the process runs from a subdirectory.
+    """
+    parts = path.resolve().parts
+    if any(parts[i : i + 2] == ("data", "raw") for i in range(len(parts) - 1)):
         raise ValueError(f"output dir {str(path)!r} is under data/raw/, which is immutable")
 
 

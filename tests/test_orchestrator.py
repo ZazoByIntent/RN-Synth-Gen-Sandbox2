@@ -166,6 +166,45 @@ def test_unconstructible_attack_fails_before_pipeline(tmp_path: Path) -> None:
         run(write_config(tmp_path, cfg))
 
 
+def test_poi_inference_attack_rejected_before_pipeline(tmp_path: Path) -> None:
+    # poi_inference constructs with all-default args, so it clears the constructor probe;
+    # it consumes clean GPS, not the matched pool, so the run loop would crash after the
+    # pipeline. An empty maps dir means passing requires failing before any pipeline work.
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {
+        "type": "poi_inference",
+        "attacker": {"known_points": [3]},
+        "target_scope": ["protected"],
+    }
+    with pytest.raises(ValueError, match="not wired into the orchestrator"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_data_raw_guard_catches_absolute_path_from_any_cwd(
+    tmp_path: Path, beijing_maps_dir: Path
+) -> None:
+    # An absolute path into a data/raw dir that is NOT under cwd: the old cwd-anchored
+    # guard would have missed it; the component-based guard rejects it wherever it lives.
+    cfg = base_config(tmp_path, beijing_maps_dir)
+    cfg["experiment"]["cache_dir"] = str(tmp_path / "data" / "raw" / "cache")
+    with pytest.raises(ValueError, match="immutable"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_version_hash_tracks_built_map_snapshot(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    # Rebuilding the map in place (new OSM snapshot, same bbox) must change the pool-cache
+    # key so the stale processed pool is not silently reused.
+    from trajguard.experiments.orchestrator import _version_hash
+
+    cfg = load_config(write_config(tmp_path, base_config(tmp_path, beijing_maps_dir)))
+    before = _version_hash(cfg)
+    meta_path = beijing_maps_dir / "beijing" / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta["osm_timestamp"] = "2099-01-01 00:00:00"
+    meta_path.write_text(json.dumps(meta))
+    assert _version_hash(cfg) != before
+
+
 def test_unknown_map_source_fails_loudly(tmp_path: Path) -> None:
     cfg = base_config(tmp_path, tmp_path / "maps")
     cfg["map"]["source"] = "postgis"

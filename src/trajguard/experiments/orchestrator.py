@@ -5,6 +5,7 @@ import hashlib
 import itertools
 import json
 import math
+import os
 import subprocess
 import time
 from collections.abc import Callable
@@ -36,6 +37,14 @@ from trajguard.representation import Grid, TrajectoryView
 _ = _builtins  # imported for its registration side effects
 
 _HEADLINE = "top1_acc"  # metric pivoted into matrix.csv and the tradeoff y-axis
+
+# Attacks the run loop can actually drive: it configures with no constructor args and
+# calls run(matched_pool, aux), the reidentification contract (the P4 vertical slice).
+# Other families (membership: synthetic + shadows; reconstruction: point sequences +
+# epsilon; poi: clean GPS + timestamps) have standalone harnesses and tests, but the
+# run loop would feed them the wrong inputs — so a config naming them is rejected up
+# front rather than crashing mid-pipeline. They join here as they are wired in.
+_ORCHESTRATOR_ATTACKS = frozenset({"reidentification"})
 
 
 class ConsistencyError(ValueError):
@@ -293,10 +302,33 @@ _CLEAN_SCHEMA = pa.schema(
 )
 
 
+def _built_map_timestamp(cfg: RunConfig) -> str:
+    """OSM snapshot timestamp recorded when the network under ``map_dir`` was built.
+
+    Folded into the pool-cache key so rebuilding a map in place (fresh OSM data, same
+    region/bbox) invalidates the stale processed pool instead of silently reusing it.
+    Returns "" when the map is not yet built (the pipeline then fails later at load()).
+    """
+    meta = cfg.map_dir / cfg.map_region / "meta.json"
+    if not meta.exists():
+        return ""
+    try:
+        return str(json.loads(meta.read_text()).get("osm_timestamp", ""))
+    except (OSError, ValueError):
+        return ""
+
+
 def _version_hash(cfg: RunConfig) -> str:
     """Stable hash of the pre-attack pipeline configuration (design §3)."""
     key = {
-        "map": [cfg.map_source, cfg.map_region, cfg.map_crs, cfg.map_bbox],
+        "map": [
+            cfg.map_source,
+            cfg.map_region,
+            cfg.map_crs,
+            cfg.map_bbox,
+            str(cfg.map_dir),
+            _built_map_timestamp(cfg),
+        ],
         "dataset": [cfg.dataset_id, str(cfg.dataset_path)],
         "cleaning": asdict(cfg.cleaning),
         "matching": [
@@ -322,11 +354,21 @@ def _protected_hash(cfg: RunConfig, spec: MechanismSpec) -> str:
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
 
 
+def _under_data_raw(path: Path) -> bool:
+    """True if ``path`` resolves to, or inside, a ``data/raw`` directory.
+
+    Component-based and cwd-independent: anchoring the forbidden root to ``Path.cwd()``
+    would miss an absolute path into the real ``data/raw`` when the process runs from a
+    subdirectory. Any ``data/raw`` segment counts, a deliberately conservative default
+    for an immutability guard on the project's one immutable input.
+    """
+    parts = path.resolve().parts
+    return any(parts[i : i + 2] == ("data", "raw") for i in range(len(parts) - 1))
+
+
 def _refuse_raw_write(path: Path, key: str) -> None:
     """Enforce the data/raw immutability rule for configured write locations."""
-    raw_root = (Path.cwd() / "data" / "raw").resolve()
-    resolved = path.resolve()
-    if resolved == raw_root or raw_root in resolved.parents:
+    if _under_data_raw(path):
         raise ValueError(f"config: {key} {str(path)!r} is under data/raw/, which is immutable")
 
 
@@ -373,9 +415,13 @@ def _write_pool_cache(
         ),
         cache / "clean.parquet",
     )
-    # meta.json is written last: its presence marks the cache entry as complete.
+    # meta.json marks the entry complete and is swapped in atomically: a crash mid-write
+    # leaves only the .tmp file, so a reader never sees a truncated marker (which would
+    # otherwise poison the cache with an unrecoverable JSONDecodeError on every rerun).
     meta = {"dropped": dropped, "split_counts": split_counts, **(extra_meta or {})}
-    (cache / "meta.json").write_text(json.dumps(meta))
+    tmp = cache / "meta.json.tmp"
+    tmp.write_text(json.dumps(meta))
+    os.replace(tmp, cache / "meta.json")
 
 
 def _read_pool_cache(cache: Path) -> _PoolCache:
@@ -632,6 +678,14 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 f"config: attack {spec.attack_type!r} takes constructor params "
                 f"the orchestrator does not supply: {err}"
             ) from err
+        # Constructs fine but consumes a different input contract than the run loop
+        # supplies (e.g. poi_inference wants clean GPS, not the matched pool): fail
+        # fast here instead of crashing after the expensive pipeline.
+        if spec.attack_type not in _ORCHESTRATOR_ATTACKS:
+            raise ValueError(
+                f"config: attack {spec.attack_type!r} is not wired into the orchestrator's "
+                f"run loop yet; only {sorted(_ORCHESTRATOR_ATTACKS)} runs end-to-end"
+            )
         plans.append((spec, attack_cls))
     mech_plans: list[tuple[MechanismSpec, PrivacyMechanism]] = []
     for mspec in cfg.mechanisms:
@@ -713,7 +767,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             "n_gallery_users": len({t.user_id for t in pool.matched}),
             "n_probes": probe_counts.get(ref),
             "n_rematch_dropped": pool.rematch_dropped,
-            "spent_budget": pool.spent_budget,
+            "spent_budget": _finite_or_none(pool.spent_budget),
         }
         for ref, pool in pools.items()
     }
@@ -787,7 +841,18 @@ def _write_results(
             writer = csv.writer(fh)
             writer.writerow(["result_id", "metric", "value", "ci_low", "ci_high", "n_bootstrap"])
             for v in values:
-                writer.writerow([v.result_id, v.name, v.value, v.ci_low, v.ci_high, v.n_bootstrap])
+                # Sanitize non-finite floats to blank, matching run.json, so a NaN from a
+                # degenerate arm doesn't land in the CSV as literal "nan".
+                writer.writerow(
+                    [
+                        v.result_id,
+                        v.name,
+                        _finite_or_none(v.value),
+                        _finite_or_none(v.ci_low),
+                        _finite_or_none(v.ci_high),
+                        v.n_bootstrap,
+                    ]
+                )
         ks, rows = matrix
         if rows:
             with (cfg.output_dir / "matrix.csv").open("w", newline="") as fh:

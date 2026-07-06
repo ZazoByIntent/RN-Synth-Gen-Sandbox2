@@ -70,7 +70,12 @@ class OSMMapSource(MapSource):
                 f"run: python -m trajguard.maps.build config/maps.yaml --region {self.region}"
             )
         meta = json.loads(meta_path.read_text())
-        graph = ox.load_graphml(self.out_dir / _GRAPH_FILE)
+        # load_graphml recasts only osmnx's own default node attrs (x, y, ...); our
+        # custom lon/lat would round-trip as strings unless declared, diverging from
+        # build() which leaves them float.
+        graph = ox.load_graphml(
+            self.out_dir / _GRAPH_FILE, node_dtypes={"lon": float, "lat": float}
+        )
         nodes = gpd.read_parquet(self.out_dir / _NODES_FILE)
         edges = gpd.read_parquet(self.out_dir / _EDGES_FILE)
         return RoadNetwork(

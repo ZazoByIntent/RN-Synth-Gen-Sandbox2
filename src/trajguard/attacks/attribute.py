@@ -48,9 +48,12 @@ class PoiInferenceAttack(Attack):
     ``dwell_s``), then estimate home as the centroid of night-hour stays and work as the centroid
     of day-hour stays. The attack works in GPS degrees with haversine distances because geo-ind
     releases GPS points (``privacy/geoind.py``); ground truth is the same procedure on the
-    unprotected trajectories passed as ``aux``. ``target_scope`` declares ``synthetic`` for design
-    symmetry, but the Markov generator emits edge sequences with no coordinates or timestamps, so
-    only ``protected`` releases (and the raw sanity baseline) are runnable today. Local time is
+    unprotected trajectories passed as ``aux``. ``target_scope`` is ``{"protected", "synthetic"}``
+    per design §6.4, but the Markov generator emits edge sequences with no coordinates or
+    timestamps, so only ``protected`` releases are meaningful today (``tests/test_attribute.py``
+    also exercises the raw sanity baseline directly). This attack consumes clean GPS points, not
+    the matched pool the orchestrator's reidentification-shaped run loop supplies, so it is not
+    wired in there yet — a config naming it is rejected up front. Local time is
     ``UTC + tz_offset_h``; Geolife timestamps are GMT and Beijing is +8.
     """
 
