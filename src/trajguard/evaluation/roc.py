@@ -54,8 +54,17 @@ def tpr_at_fpr(scores: np.ndarray, labels: np.ndarray, fpr_target: float) -> flo
     if n_pos == 0 or n_neg == 0:
         return float("nan")
     order = np.argsort(-scores, kind="mergesort")
+    sorted_scores = scores[order]
     lab = labels[order]
-    tpr = np.cumsum(lab == 1) / n_pos
-    fpr = np.cumsum(lab == 0) / n_neg
+    tp = np.cumsum(lab == 1)
+    fp = np.cumsum(lab == 0)
+    # Tied scores share a threshold: a real classifier must take a whole tie group as
+    # positive or none of it, so only the last index of each equal-score run is a
+    # reachable operating point. Walking element-by-element would expose partial-tie
+    # prefixes that no threshold can produce, inflating the reported TPR.
+    boundary = np.ones(len(sorted_scores), dtype=bool)
+    boundary[:-1] = sorted_scores[:-1] != sorted_scores[1:]
+    tpr = tp[boundary] / n_pos
+    fpr = fp[boundary] / n_neg
     admissible = fpr <= fpr_target
     return float(tpr[admissible].max()) if bool(admissible.any()) else 0.0

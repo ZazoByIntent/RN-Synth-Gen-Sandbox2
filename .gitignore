@@ -13,6 +13,9 @@ dist/
 # Experiment outputs
 results/
 
+# Generated reports (regenerable via `trajguard report`)
+reports/
+
 # OSMnx HTTP response cache
 cache/
 

@@ -1,10 +1,11 @@
-"""Command-line entry point: ``trajguard run <config>`` (design §10, argparse)."""
+"""Command-line entry points: ``trajguard run|report`` (design §10, argparse)."""
 
 import argparse
 from collections import defaultdict
 
 from trajguard.datamodel import MetricValue
 from trajguard.experiments.orchestrator import load_config, run_experiment
+from trajguard.reporting.report import generate_report
 
 
 def _print_summary(config_path: str) -> None:
@@ -40,10 +41,15 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     run_p = sub.add_parser("run", help="run an experiment from a YAML config")
     run_p.add_argument("config", help="path to an experiment YAML")
+    report_p = sub.add_parser("report", help="aggregate results/ into a Markdown risk report")
+    report_p.add_argument("--results", default="results", help="directory of experiment outputs")
+    report_p.add_argument("--out", default="reports", help="directory to write the report into")
     args = parser.parse_args()
 
     if args.command == "run":
         _print_summary(args.config)
+    elif args.command == "report":
+        print(f"report: {generate_report(args.results, args.out)}")
 
 
 if __name__ == "__main__":

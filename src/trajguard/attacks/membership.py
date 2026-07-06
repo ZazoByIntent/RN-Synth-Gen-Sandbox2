@@ -136,9 +136,14 @@ def _log_lr(obs: float, in_lp: list[float], out_lp: list[float]) -> float:
 
 
 def _gaussian(xs: list[float]) -> tuple[float, float]:
-    """Mean and (floored) std of a shadow-score sample."""
+    """Mean and (floored) unbiased std of a shadow-score sample.
+
+    ``ddof=1`` (Carlini 2022's estimator) for n>1; a singleton group has no spread, so
+    it falls to the floor ``_MIN_SD`` rather than the NaN ``std(ddof=1)`` would give.
+    """
     arr = np.asarray(xs, dtype=float)
-    return float(arr.mean()), max(float(arr.std()), _MIN_SD)
+    sd = float(arr.std(ddof=1)) if arr.size > 1 else 0.0
+    return float(arr.mean()), max(sd, _MIN_SD)
 
 
 def _log_normal_pdf(x: float, mu: float, sd: float) -> float:

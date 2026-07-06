@@ -96,6 +96,18 @@ def test_tpr_at_fpr_zero_false_positive_regime() -> None:
     assert tpr_at_fpr(blocked, np.array([0, 1, 1, 0]), 0.001) == 0.0
 
 
+def test_tpr_at_fpr_is_tie_safe_and_order_invariant() -> None:
+    # all scores tied: no threshold separates the classes, so the only zero-FP point is
+    # TPR=0 — and it must not depend on how equal scores happen to be ordered.
+    assert tpr_at_fpr(np.array([5.0, 5.0, 5.0]), np.array([1, 0, 1]), 0.001) == 0.0
+    assert tpr_at_fpr(np.array([5.0, 5.0, 5.0]), np.array([0, 1, 1]), 0.001) == 0.0
+    # a member tied with the top non-member cannot be counted ahead of it at low FPR
+    tied_top = np.array([9.0, 9.0, 4.0, 0.0])
+    assert tpr_at_fpr(tied_top, np.array([1, 0, 1, 0]), 0.001) == 0.0
+    # relax the target until the whole tie group (1 TP, 1 FP) is admissible -> TPR 1.0
+    assert tpr_at_fpr(tied_top, np.array([1, 0, 1, 0]), 0.5) == 1.0
+
+
 def test_invalid_params_rejected() -> None:
     with pytest.raises(ValueError, match="n_shadow"):
         MembershipInferenceAttack(n_shadow=1)

@@ -41,3 +41,7 @@ def test_fixture_map_roundtrip(fixture_maps_dir: Path) -> None:
     assert net.nodes["x"].between(100_000, 900_000).all()
     assert net.nodes["lon"].between(116.29, 116.33).all()
     assert net.nodes["lat"].between(39.97, 40.00).all()
+    # graph node dict lon/lat come back as floats (build() leaves them float; load_graphml
+    # would otherwise round-trip these custom attrs as strings)
+    _, data = next(iter(net.graph.nodes(data=True)))
+    assert isinstance(data["lon"], float) and isinstance(data["lat"], float)
