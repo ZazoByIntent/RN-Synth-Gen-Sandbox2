@@ -26,3 +26,7 @@ data/*/*
 # Built road networks
 maps/*
 !maps/.gitkeep
+
+# Images written by the visual recipes in docs/RUNNING.md §4
+/beijing_map.png
+/trajectory_before_after.png
