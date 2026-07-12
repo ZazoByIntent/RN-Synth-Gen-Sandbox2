@@ -1,0 +1,102 @@
+# trajguard risk report
+
+Generated {{ generated_at }} from `{{ results_dir }}` — {{ runs|length }} experiment run{{ "s" if runs|length != 1 else "" }}.
+
+## Runs
+
+| experiment | pipeline | commit | seed | created | matched | dropped | split | bootstrap | runtime |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{% for run in runs %}
+| {{ run.exp_id }} | `{{ run.config_hash }}` | {{ ("`" ~ run.git_commit[:10] ~ "`") if run.git_commit else "–" }} | {{ run.seed }} | {{ run.created_at }} | {{ run.n_matched }} | {{ run.n_dropped }} | {{ run.split_label }} | {{ run.bootstrap_label }} | {{ "%.1f"|format(run.runtime_s) }} s |
+{% endfor %}
+
+## Risk matrix
+
+One row per released arm, one column per attack family. Each cell is the family's
+headline metric at the attacker's largest `known_points` (`@k`), with its bootstrap CI.
+Higher means more risk, except metrics named `*_m` (errors in metres), where a lower
+error means a more successful attack.
+
+{% for m in matrices %}
+{% if matrices|length > 1 %}
+### Pipeline `{{ m.config_hash }}` ({{ m.exp_ids|join(", ") }})
+
+{% endif %}
+{% if m.columns %}
+| target |{% for attack, metric in m.columns %} {{ attack }} — {{ metric }} |{% endfor %}
+
+| --- |{% for c in m.columns %} --- |{% endfor %}
+
+{% for target in m.targets %}
+| {{ target }} |{% for attack, metric in m.columns %} {{ m.cells.get((target, attack)) | cell }} |{% endfor %}
+
+{% endfor %}
+{% else %}
+No attack results in this pipeline group.
+{% endif %}
+
+{% endfor %}
+## Attack detail
+
+{% for s in attack_sections %}
+### {{ s.attack }} — `{{ s.exp_id }}`
+
+| target | k |{% for metric in s.metrics %} {{ metric }} |{% endfor %}
+
+| --- | --- |{% for metric in s.metrics %} --- |{% endfor %}
+
+{% for row in s.rows %}
+| {{ row.target }} | {{ row.known_points if row.known_points is not none else "–" }} |{% for metric in s.metrics %} {{ row.cells.get(metric) | vci }} |{% endfor %}
+
+{% endfor %}
+
+{% endfor %}
+## Utility (protected release vs raw)
+
+{% if utility_sections %}
+{% for s in utility_sections %}
+### `{{ s.exp_id }}`
+
+| target |{% for metric in s.metrics %} {{ metric }} |{% endfor %}
+
+| --- |{% for metric in s.metrics %} --- |{% endfor %}
+
+{% for row in s.rows %}
+| {{ row.target }} |{% for metric in s.metrics %} {{ row.cells.get(metric) | vci }} |{% endfor %}
+
+{% endfor %}
+
+{% endfor %}
+{% else %}
+No utility metrics in these results.
+
+{% endif %}
+## Arm health
+
+Pool and probe sizes per arm; `re-match dropped` counts released trajectories that no
+longer matched the road network (protection by destroying the release).
+
+| experiment | target | pool | gallery users | probes | re-match dropped | spent budget |
+| --- | --- | --- | --- | --- | --- | --- |
+{% for run in runs %}
+{% for target, arm in run.arms %}
+| {{ run.exp_id }} | {{ target }} | {{ arm.get("n_pool", "–") }} | {{ arm.get("n_gallery_users", "–") }} | {{ arm.get("n_probes") if arm.get("n_probes") is not none else "–" }} | {{ arm.get("n_rematch_dropped", "–") }} | {{ arm.get("spent_budget") | num }} |
+{% endfor %}
+{% endfor %}
+
+## Privacy–utility tradeoff
+
+{% if plots %}
+{% for p in plots %}
+![privacy–utility tradeoff for {{ p.exp_id }}]({{ p.filename }})
+
+{% endfor %}
+{% else %}
+No run had both `top1_acc` and `cell_js_divergence` results; tradeoff plots skipped.
+
+{% endif %}
+## Exported files
+
+{% for f in files %}
+- `{{ f }}`
+{% endfor %}

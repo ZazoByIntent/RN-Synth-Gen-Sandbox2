@@ -1,0 +1,63 @@
+# Geo-indistinguishability vs reidentification on Geolife (design §8, P5).
+# Real Geolife needs a Microsoft licence; drop the .plt tree at dataset.path to run.
+#
+# epsilon is the geo-ind level per unit_m=100 m (mechanism default), so the grid
+# {0.1, 1, 10} spans mean planar-Laplace displacements of 2 km / 200 m / 20 m.
+# At epsilon=0.1 expect few or no trajectories to survive re-matching: the arm
+# then reads ~0 attack accuracy with the survivor counts recorded in run.json
+# ("protection by destroying the release" — the utility metrics quantify it).
+experiment:
+  id: geolife_geoind_reid
+  seed: 42
+  output_dir: results/geolife_geoind_reid
+
+map:
+  source: osm
+  region: beijing            # must equal the Geolife native region (orchestrator enforces)
+  bbox: [116.20, 39.75, 116.55, 40.05]
+  crs: EPSG:32650
+
+dataset:
+  id: geolife
+  path: data/raw/geolife
+  native_region: beijing
+
+cleaning:
+  max_speed_kmh: 200
+  min_points: 20
+  min_length_m: 500
+  resample_s: 5
+
+map_matching:
+  matcher: leuven            # fmm is the eventual production matcher (design §8); leuven now
+  k_candidates: 8
+  radius_m: 50
+  gps_error_m: 20
+  min_match_score: 0.6
+
+split:
+  scheme: by_user
+  fractions: {train: 0.5, test: 0.2, shadow: 0.2, attack: 0.1}
+
+privacy_mechanisms:
+  - id: none
+  - id: geo_indistinguishability
+    params: {epsilon: [0.1, 1.0, 10.0]}   # expands into one arm per value
+
+attacks:
+  - type: reidentification
+    attacker:
+      known_points: [3, 5, 10]   # points the attacker knows about each target
+      distance: dtw
+    target_scope: [raw, protected]
+
+metrics:
+  privacy: [top1_acc, topk_acc, linkage_rate]
+  top_k: 5
+  utility: [cell_js_divergence, length_dist_error]
+  utility_grid: {n_rows: 20, n_cols: 20}
+  bootstrap: {n: 1000, ci: 0.95}
+
+reporting:
+  export: [csv]
+  plots: [tradeoff]          # top1_acc (at max known_points) vs cell JS divergence
