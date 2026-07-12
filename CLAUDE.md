@@ -27,6 +27,7 @@ Whoever completes a phase updates this line in the same PR.
   sanity notebook, experiments, report, RN-LDP-Synth sweep) with expected outputs
   and troubleshooting. Read when running things or diagnosing a run.
 - `docs/CODEBASE_PHASE_GUIDE.md` — plain-language walkthrough of the whole codebase;
+  `docs/CODEBASE_STRUCTURE.md` — layout and design decisions for new developers;
   `docs/RN_LDP_SYNTH_DESIGN.md` — design of the RN-LDP-Synth v1 mechanism.
 
 For a typical task, this file + ARCHITECTURE.md + the current phase of the plan is
