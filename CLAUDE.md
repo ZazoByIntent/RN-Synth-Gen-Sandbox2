@@ -5,7 +5,9 @@ doctoral project. This file is the constitution for the repo; read it every sess
 
 ## Status
 
-**Nothing is implemented yet — the repo contains only docs. Next phase: P0.**
+**All phases P0–P7 are implemented and merged; RN-LDP-Synth has a working v1
+prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). Next: systematic parameter-sweep
+runs (S4) and follow-up work.**
 Whoever completes a phase updates this line in the same PR.
 
 ## Doc map (read on demand — do not load everything up front)
@@ -21,6 +23,11 @@ Whoever completes a phase updates this line in the same PR.
   fix ARCHITECTURE.md in the same PR); the golden rules below beat both.
 - `docs/PROMPTS.md` — per-phase prompts the maintainer pastes into fresh sessions.
   Not standing instructions — act on them only when pasted.
+- `docs/RUNNING.md` — setup and every runnable entry point (tests, map builds,
+  sanity notebook, experiments, report, RN-LDP-Synth sweep) with expected outputs
+  and troubleshooting. Read when running things or diagnosing a run.
+- `docs/CODEBASE_PHASE_GUIDE.md` — plain-language walkthrough of the whole codebase;
+  `docs/RN_LDP_SYNTH_DESIGN.md` — design of the RN-LDP-Synth v1 mechanism.
 
 For a typical task, this file + ARCHITECTURE.md + the current phase of the plan is
 enough context.
