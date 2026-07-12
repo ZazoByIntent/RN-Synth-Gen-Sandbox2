@@ -113,3 +113,29 @@ def test_invalid_params_rejected() -> None:
         MembershipInferenceAttack(n_shadow=1)
     with pytest.raises(ValueError, match="subsample"):
         MembershipInferenceAttack(subsample=1.5)
+
+
+def test_shadow_factory_is_called_once_per_shadow_with_its_index() -> None:
+    calls: list[int] = []
+
+    def factory(k: int) -> MarkovGenerator:
+        calls.append(k)
+        return MarkovGenerator(order=1)
+
+    attack = MembershipInferenceAttack(n_shadow=4, shadow_factory=factory)
+    attack.configure(BackgroundKnowledge(known_points=0, seed=0))
+    result = attack.run(real_generator(), (UNIVERSE, CANDIDATES))
+    assert calls == [0, 1, 2, 3]
+    assert len(result.predictions) == len(CANDIDATES)
+
+
+def test_default_shadow_factory_matches_previous_behaviour() -> None:
+    """Passing no factory must reproduce the historical MarkovGenerator shadows exactly."""
+    gen = real_generator()
+    default = run_attack(seed=7).run(gen, (UNIVERSE, CANDIDATES))
+    explicit = MembershipInferenceAttack(
+        n_shadow=16, shadow_factory=lambda _k: MarkovGenerator(order=1, alpha=1.0)
+    )
+    explicit.configure(BackgroundKnowledge(known_points=0, seed=7))
+    via_factory = explicit.run(gen, (UNIVERSE, CANDIDATES))
+    assert [p.score for p in default.predictions] == [p.score for p in via_factory.predictions]
