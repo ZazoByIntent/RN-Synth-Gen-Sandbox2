@@ -379,7 +379,11 @@ Carlini 2022). These are score-based metrics, so the `ci_low`/`ci_high` columns
 stay empty by design: the confidence interval comes from repetitions
 (`trajguard repeat`, §7.1), not from within-run bootstrap. The shipped config
 runs the non-private `markov` baseline, where the attack *should* score high —
-that arm is the memorization ceiling to compare private generators against.
+that arm is the memorization ceiling to compare private generators against —
+plus the `rn_ldp_synth` prototype at ε ∈ {0.5, 2.0, 8.0}, one arm per ε with
+same-class shadows sharing that ε. Read those rows against the markov ceiling:
+a working privacy mechanism pulls `auc` toward 0.5 and the low-FPR TPR toward
+zero as ε shrinks.
 
 ## 8. Aggregate risk report
 

@@ -47,6 +47,9 @@ privacy_mechanisms: []       # no protected arms here: MIA targets the fitted ge
 synthetic_generators:
   - id: markov               # non-private baseline (memorizes the train split)
     params: {order: 1}
+  - id: rn_ldp_synth         # LDP prototype (docs/RN_LDP_SYNTH_DESIGN.md): one arm
+    params: {epsilon: [0.5, 2.0, 8.0]}   # per epsilon; same-class shadows share the
+                                         # arm's epsilon; grid/l_max keep v1 defaults
 
 attacks:
   - type: membership_inference

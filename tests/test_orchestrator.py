@@ -421,6 +421,28 @@ def test_membership_inference_runs_end_to_end(tmp_path: Path, beijing_maps_dir: 
     assert [v.value for v in run(write_config(tmp_path, cfg))] == [v.value for v in values]
 
 
+def test_membership_runs_against_rn_ldp_synth_arm(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """The private generator arm builds via the injected network and per-shadow seeds."""
+    cfg = mia_config(tmp_path, beijing_maps_dir)
+    cfg["synthetic_generators"].append(
+        {
+            "id": "rn_ldp_synth",
+            "params": {"epsilon": 80.0, "n_rows": 10, "n_cols": 10, "l_max": 12},
+        }
+    )
+    cfg["attacks"][0]["attacker"] = {"n_shadow": 4, "subsample": 0.5}
+    values = run(write_config(tmp_path, cfg))
+
+    mia = {v.result_id for v in values if v.result_id.startswith("membership_inference:")}
+    assert mia == {
+        "membership_inference:synthetic:markov:order=1",
+        "membership_inference:synthetic:rn_ldp_synth:epsilon=80.0,l_max=12,n_cols=10,n_rows=10",
+    }
+    rn = {v.name: v.value for v in values if "rn_ldp_synth" in v.result_id}
+    assert set(rn) == {"auc", "tpr@fpr=0.25"}
+    assert 0.0 <= rn["auc"] <= 1.0
+
+
 def test_data_raw_guard_catches_absolute_path_from_any_cwd(
     tmp_path: Path, beijing_maps_dir: Path
 ) -> None:
