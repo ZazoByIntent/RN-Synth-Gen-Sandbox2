@@ -20,9 +20,11 @@ odvisnost — prepleteno seme, opisano pri O3 — ki spremeni sestavo vala 1 v r
 **Stanje izvedbe (ista veja, 4. avgust 2026):** val 0 (`a2067b9`), korak 1a — ločitev semen in
 `dataset.max_users` (`8fac2fb`), korak 1b — `trajguard repeat` s 95 % intervalom čez ponovitve
 (`9005c2f`), korak 1c — rekonstrukcija v zanki orkestratorja (`4466008`), korak 1d —
-`poi_inference` v zanki orkestratorja (`c24cb48`). S tem sta O2 in O3 zaprta, O1 pa delno
-(rekonstrukcija in `poi_inference` da, `membership_inference` še ne). Naslednji korak je **1e**,
-ki ima oblikovni predpogoj (glej opombo ob koncu razdelka 4).
+`poi_inference` v zanki orkestratorja (`c24cb48`), korak 1e — `membership_inference` in
+razdelek `synthetic_generators` v orkestratorju (`0608755`, `9388cc8`). S tem so O1, O2 in O3
+zaprti in **val 1 je zaključen**: vsi štirje scenariji tečejo iz ene konfiguracije. Naslednje
+delo je val 2 (blokiran, dokler ni sheme `Rezultati_predloga`) ali val 3 (A3 nima blokad) —
+izbira je avtorjeva.
 
 **To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
 Prvotno besedilo ni bilo recenzirano; spodnja različica vključuje izid recenzije.
@@ -222,10 +224,12 @@ združitev:
   (`clean_by_id` namesto `matched`; cilj je izdana veja, resnica surova, ujemanje po
   `user_id`) in prenos njegovih metrik (razdalja dom/delo v metrih, delež lokaliziranih
   uporabnikov) z bootstrap intervali v `metrics.csv`;
-- **1e** — `membership_inference` v zanko orkestratorja: največji od treh, ker konfiguracija
-  danes sploh nima razdelka za generatorje (`RunConfig`, `orchestrator.py`); prinese svoji
-  metriki AUC in TPR pri nizkem FPR iz `evaluation/roc.py`; zgled priprave je obstoječi
-  samostojni pogon `experiments/rnldp_eval.py`.
+- **1e — izvedeno (`0608755`, `9388cc8`)** — `membership_inference` v zanki orkestratorja:
+  nov razdelek `synthetic_generators` (mreža parametrov kot pri mehanizmih), strogi LiRA
+  protokol po odločitvi avtorja (senčni modeli: razrez shadow + poizvedovane kandidatne
+  poti; člani iz train, ne-člani iz test), senčni modeli istega razreda po zgledu
+  `rnldp_eval`; metriki AUC in TPR pri nizkem FPR kot točkovni vrednosti brez intervala
+  znotraj zagona (interval čez ponovitve da `trajguard repeat`).
 
 Šele ko to stoji, je razdelek 7.1 izvedljiv iz ene konfiguracije. Val se ujema z mejnikom S4.
 
@@ -259,11 +263,11 @@ popravkom poročila (glej razdelek 1.1), ne z implementacijo.
 ### Naslednji konkreten korak
 
 **[recenzija — prvotni predlog M1 + O2 + O3 je umaknjen** iz razlogov, opisanih pri valu 1.]
-Val 0 ter koraki 1a, 1b, 1c in 1d so izvedeni (glej oznake zgoraj). Naslednji je korak **1e**:
-`membership_inference` v zanko orkestratorja. Ta korak ima oblikovni predpogoj — odločitev,
-kako konfiguracija sploh opiše generatorje (`synthetic_generators` v YAML; danes `RunConfig`
-nima razdelka zanje) — zato se ne začne kot mehanska priključitev, ampak v načrtovalnem
-načinu s predlogom oblike konfiguracije (glej tudi opombo ob koncu razdelka 4).
+Val 0 in celoten val 1 (koraki 1a–1e) so izvedeni (glej oznake zgoraj); razdelek 7.1 poročila
+je s tem izvedljiv iz ene konfiguracije. Naslednje delo ni določeno enolično: val 2 ostaja
+blokiran na shemi `Rezultati_predloga` (datoteki `IZV_nacrt_eksperimentov.xlsx` in
+`IZV_porocilo.docx` nista v repozitoriju), znotraj vala 3 pa A3 (rekonstrukcija z omejitvijo
+cestnega omrežja) nima blokad. Izbira med njima je avtorjeva.
 
 ---
 
@@ -340,6 +344,7 @@ pokaži. Če bi se korak dotaknil več kot ~5 datotek, predlagaj razrez namesto
 da ga izvedeš naenkrat.
 ```
 
-Za korak **1e** (`membership_inference`) prompt namenoma še ni napisan: pred njim je treba
-odločiti, kako konfiguracija sploh opiše generatorje (`synthetic_generators` v YAML), kar je
-oblikovna odločitev in ne mehanska priključitev. Napiši ga takrat, ko bo 1d končan.
+Korak **1e** je bil izveden brez posebnega prompta: oblikovne odločitve (oblika razdelka
+`synthetic_generators`, strogi LiRA protokol, metrike brez intervala znotraj zagona) je avtor
+sprejel v pogovoru 4. avgusta 2026 in so povzete v razdelkih 0 in 2. Prompt za morebitni
+naslednji korak napiši ob izbiri med valom 2 in valom 3.
