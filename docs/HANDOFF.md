@@ -300,14 +300,14 @@ za koristnega trajno, sodi v `docs/PROMPTS.md`.
 Preberi CLAUDE.md in docs/HANDOFF.md.
 
 HANDOFF je recenziran in delno izveden načrt: val 0 ter koraki 1a, 1b in 1c so
-končani na veji claude/handoff-document-review-2fnmdo (zadnji commit 4466008).
-Ločena semena (experiment.split_seed), velikost vzorca (dataset.max_users),
-ponovitve (trajguard repeat) in rekonstrukcija v orkestratorju že obstajajo —
-ne implementiraj jih znova; prepričaj se v kodi.
+končani na veji claude/handoff-document-review-2fnmdo (seznam commitov je v
+razdelku 0). Ločena semena (experiment.split_seed), velikost vzorca
+(dataset.max_users), ponovitve (trajguard repeat) in rekonstrukcija v
+orkestratorju že obstajajo — ne implementiraj jih znova; prepričaj se v kodi.
 
 Tvoja naloga je korak 1d: priključi poi_inference v zanko orkestratorja, po
-zgledu koraka 1c (glej _reconstruction_values v experiments/orchestrator.py
-in commit 4466008). Zaporedje in razrez sta bila potrjena v recenziji, zato
+zgledu koraka 1c (glej _reconstruction_values v experiments/orchestrator.py).
+Zaporedje in razrez sta bila potrjena v recenziji, zato
 načrtovalni način ni potreben; če med izvedbo naletiš na odločitev, ki je
 HANDOFF ne pokriva, se ustavi in vprašaj.
 
