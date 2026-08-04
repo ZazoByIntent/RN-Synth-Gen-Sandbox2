@@ -1,0 +1,63 @@
+# Membership inference (LiRA) against synthetic generators on Geolife (design §6.2).
+# Real Geolife needs a Microsoft licence; drop the .plt tree at dataset.path to run.
+#
+# The attack asks, per trajectory: was this exact path in the generator's training
+# set? Strict protocol (fair MIA, design T3): the target generator fits on the
+# train split only; candidates are train paths (members) vs test paths
+# (non-members); the attacker's shadow generators are same-class models trained on
+# the shadow split plus the candidate paths it queries. The markov arm is the
+# non-private ceiling — it memorizes, so the attack should score high there.
+experiment:
+  id: geolife_synth_mia
+  seed: 42                   # run seed: shadow subsets, generator fit noise
+  split_seed: 42             # population seed: user subsample + split; pin it and vary
+                             # only seed for repetitions (trajguard run <cfg> --seed N)
+  output_dir: results/geolife_synth_mia
+
+map:
+  source: osm
+  region: beijing            # must equal the Geolife native region (orchestrator enforces)
+  bbox: [116.20, 39.75, 116.55, 40.05]
+  crs: EPSG:32650
+
+dataset:
+  id: geolife
+  path: data/raw/geolife
+  native_region: beijing
+
+cleaning:
+  max_speed_kmh: 200
+  min_points: 20
+  min_length_m: 500
+  resample_s: 5
+
+map_matching:
+  matcher: leuven
+  k_candidates: 8
+  radius_m: 50
+  gps_error_m: 20
+  min_match_score: 0.6
+
+split:
+  scheme: by_user
+  fractions: {train: 0.5, test: 0.2, shadow: 0.2, attack: 0.1}
+
+privacy_mechanisms: []       # no protected arms here: MIA targets the fitted generators
+
+synthetic_generators:
+  - id: markov               # non-private baseline (memorizes the train split)
+    params: {order: 1}
+
+attacks:
+  - type: membership_inference
+    target_scope: [synthetic]
+    attacker: {n_shadow: 16, subsample: 0.5}
+    fprs: [0.001, 0.01]      # Carlini low-FPR operating points (design §6.2)
+
+metrics:
+  privacy: []                # MIA brings its own family metrics (auc, tpr@fpr=...)
+  bootstrap: {n: 1000, ci: 0.95}   # unused by MIA rows: score-based, CI across seeds
+                                   # comes from trajguard repeat instead
+
+reporting:
+  export: [csv]

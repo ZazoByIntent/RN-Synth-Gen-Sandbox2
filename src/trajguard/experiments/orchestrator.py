@@ -2,6 +2,7 @@
 
 import csv
 import hashlib
+import inspect
 import itertools
 import json
 import math
@@ -22,6 +23,7 @@ from pyproj import Transformer
 
 from trajguard.attacks.attribute import attribute_report
 from trajguard.attacks.base import Attack, BackgroundKnowledge
+from trajguard.attacks.membership import membership_report
 from trajguard.attacks.reconstruction import reconstruction_report
 from trajguard.datamodel import CleanTrajectory, MatchedTrajectory, MetricValue
 from trajguard.datasets.base import DatasetLoader
@@ -37,6 +39,7 @@ from trajguard.privacy.base import PrivacyMechanism
 from trajguard.privacy.geoind import GeoIndistinguishability
 from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
 from trajguard.representation import Grid, TrajectoryView
+from trajguard.synthesis.base import SyntheticGenerator
 
 _ = _builtins  # imported for its registration side effects
 
@@ -47,12 +50,11 @@ _HEADLINE = "top1_acc"  # metric pivoted into matrix.csv and the tradeoff y-axis
 # own preparation (noisy vs true point sequences in projected metres, mechanism
 # params handed to the attacker per design §6.3) and runs only against
 # geo_indistinguishability arms; poi_inference reads each protected arm's released
-# clean GPS pool against the raw pool, matched per user. The remaining family
-# (membership: synthetic targets + shadow models) has a standalone harness and
-# tests, but the run loop would feed it the wrong inputs — so a config naming it
-# is rejected up front rather than crashing mid-pipeline. It joins here once the
-# config grows a generator section.
-_ORCHESTRATOR_ATTACKS = frozenset({"reidentification", "reconstruction", "poi_inference"})
+# clean GPS pool against the raw pool, matched per user; membership_inference runs
+# LiRA against each fitted synthetic_generators arm with same-class shadows.
+_ORCHESTRATOR_ATTACKS = frozenset(
+    {"reidentification", "reconstruction", "poi_inference", "membership_inference"}
+)
 
 
 class ConsistencyError(ValueError):
@@ -73,6 +75,8 @@ class AttackSpec:
     motion_m: float | None = None  # reconstruction only: fixed curvature-prior scale (m)
     poi_params: tuple[tuple[str, Any], ...] = ()  # poi_inference only: stay-point knobs
     threshold_m: float | None = None  # poi_inference only: localised-user cutoff (m)
+    mia_params: tuple[tuple[str, Any], ...] = ()  # membership only: LiRA knobs
+    fprs: tuple[float, ...] = ()  # membership only: TPR@FPR operating points
 
 
 @dataclass(frozen=True)
@@ -117,6 +121,7 @@ class RunConfig:
     min_match_score: float
     fractions: dict[str, float]
     mechanisms: tuple[MechanismSpec, ...]
+    generators: tuple[MechanismSpec, ...]  # synthetic_generators arms (same shape)
     attacks: tuple[AttackSpec, ...]
     metric_names: tuple[str, ...]
     top_k: int
@@ -141,11 +146,11 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
         ctx = f"attacks[{i}]"
         attack_type = str(_req(a, "type", ctx))
         scopes = tuple(str(s) for s in a.get("target_scope", ["raw"]))
-        unknown_scopes = set(scopes) - {"raw", "protected"}
+        unknown_scopes = set(scopes) - {"raw", "protected", "synthetic"}
         if unknown_scopes:
             raise ValueError(
-                f"config: {ctx}.target_scope {sorted(unknown_scopes)} unsupported "
-                "(synthetic targets land in a later phase)"
+                f"config: {ctx}.target_scope {sorted(unknown_scopes)} unsupported; "
+                "expected a subset of ['raw', 'protected', 'synthetic']"
             )
         if attack_type == "reconstruction":
             # The attacker's knowledge is the arm's mechanism parameters (design
@@ -217,6 +222,45 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                 )
             )
             continue
+        if attack_type == "membership_inference":
+            # LiRA's knobs are the shadow count and the subsample rate; the shadow
+            # models themselves are same-class generators built per arm by the run
+            # loop, so reid-style keys (and shadow hyperparameters) are a config
+            # mistake. fprs sets the TPR@FPR operating points of the report.
+            attacker = a.get("attacker", {})
+            allowed = {"n_shadow", "subsample"}
+            unknown_keys = set(attacker) - allowed
+            if unknown_keys:
+                raise ValueError(
+                    f"config: {ctx}.attacker keys {sorted(unknown_keys)} unsupported for "
+                    f"membership_inference (expected a subset of {sorted(allowed)})"
+                )
+            if set(scopes) != {"synthetic"}:
+                raise ValueError(
+                    f"config: {ctx}.target_scope must be ['synthetic'] for "
+                    f"membership_inference, got {list(scopes)}"
+                )
+            mia: dict[str, Any] = {}
+            if "n_shadow" in attacker:
+                mia["n_shadow"] = int(attacker["n_shadow"])
+            if "subsample" in attacker:
+                mia["subsample"] = float(attacker["subsample"])
+            fprs = tuple(float(f) for f in a.get("fprs", [0.001, 0.01]))
+            if not fprs or any(not 0.0 < f < 1.0 for f in fprs):
+                raise ValueError(
+                    f"config: {ctx}.fprs must be non-empty fractions in (0, 1), got {list(fprs)}"
+                )
+            specs.append(
+                AttackSpec(
+                    attack_type=attack_type,
+                    known_points=(),
+                    distance="dtw",
+                    target_scopes=scopes,
+                    mia_params=tuple(sorted(mia.items())),
+                    fprs=fprs,
+                )
+            )
+            continue
         attacker = _req(a, "attacker", ctx)
         known = tuple(int(k) for k in _req(attacker, "known_points", f"{ctx}.attacker"))
         if not known:
@@ -241,11 +285,18 @@ def _canon_param(value: Any) -> Any:
     return value
 
 
-def _mechanism_specs(mechs: list[dict[str, Any]]) -> tuple[MechanismSpec, ...]:
-    """Validate ``privacy_mechanisms`` and expand list-valued params into a grid."""
+def _variant_specs(
+    entries: list[dict[str, Any]], section: str, canon: bool = True
+) -> tuple[MechanismSpec, ...]:
+    """Validate a ``{id, params}`` config list and expand list-valued params into a grid.
+
+    Mechanism params are canonicalized (YAML ``1`` == ``1.0``) because they feed cache
+    keys; generator params are kept verbatim (``canon=False``) — they go straight into
+    constructors that may require real ints (e.g. the Markov ``order``).
+    """
     specs: list[MechanismSpec] = []
-    for i, m in enumerate(mechs):
-        ctx = f"privacy_mechanisms[{i}]"
+    for i, m in enumerate(entries):
+        ctx = f"{section}[{i}]"
         mech_id = str(_req(m, "id", ctx))
         params = m.get("params", {})
         if not isinstance(params, dict):
@@ -255,7 +306,7 @@ def _mechanism_specs(mechs: list[dict[str, Any]]) -> tuple[MechanismSpec, ...]:
             values = value if isinstance(value, list) else [value]
             if not values:
                 raise ValueError(f"config: {ctx}.params.{key} must not be empty")
-            grid[str(key)] = [_canon_param(v) for v in values]
+            grid[str(key)] = [_canon_param(v) if canon else v for v in values]
         keys = sorted(grid)
         for combo in itertools.product(*(grid[k] for k in keys)):
             specs.append(MechanismSpec(mech_id, tuple(zip(keys, combo, strict=True))))
@@ -354,7 +405,10 @@ def load_config(path: str | Path) -> RunConfig:
         k_candidates=int(mm.get("k_candidates", 8)),
         min_match_score=float(_req(mm, "min_match_score", "map_matching")),
         fractions={str(k): float(v) for k, v in _req(sp, "fractions", "split").items()},
-        mechanisms=_mechanism_specs(raw.get("privacy_mechanisms", [])),
+        mechanisms=_variant_specs(raw.get("privacy_mechanisms", []), "privacy_mechanisms"),
+        generators=_variant_specs(
+            raw.get("synthetic_generators", []), "synthetic_generators", canon=False
+        ),
         attacks=_attack_specs(attacks),
         metric_names=metric_names,
         top_k=int(metrics.get("top_k", 5)),
@@ -857,6 +911,108 @@ def _poi_inference_values(
     return values
 
 
+def _generator_ctor(
+    gen_cls: Callable[..., Any], params: dict[str, Any], cfg: RunConfig, provide: _NetProvider
+) -> Callable[[int], Any]:
+    """Seed-offset factory for one generator arm; injects network/seed where accepted.
+
+    Generator constructors differ (MarkovGenerator wants neither, RNLDPSynthGenerator
+    wants both), so injection is signature-driven: ``network`` comes from the memoized
+    provider, ``seed`` is ``cfg.seed + offset``. Offset 0 builds the target generator;
+    ``1000 + k`` builds the k-th same-class shadow (the ``rnldp_eval`` convention).
+    """
+    sig = inspect.signature(gen_cls)
+
+    def make(seed_offset: int) -> Any:
+        kwargs = dict(params)
+        if "network" in sig.parameters:
+            kwargs["network"] = provide()[0]
+        if "seed" in sig.parameters:
+            kwargs["seed"] = cfg.seed + seed_offset
+        return gen_cls(**kwargs)
+
+    return make
+
+
+def _mia_pool(
+    matched: list[MatchedTrajectory], clean_by_id: dict[str, CleanTrajectory]
+) -> tuple[list[tuple[int, ...]], list[tuple[int, bool]], list[MatchedTrajectory]]:
+    """Strict LiRA inputs from the split pools (fair MIA, design T3).
+
+    The shadow pool is the shadow split — the attacker's own background data — plus
+    the candidate sequences themselves (train members, test non-members), which the
+    attacker legitimately knows because it queries them. Uniform shadow subsampling
+    then lands each candidate inside roughly half the shadows (its IN group) and
+    outside the rest (OUT), without the shadows ever seeing non-candidate train data.
+    Returns ``(pool, candidates, train_matched)``.
+    """
+
+    def of_split(split: str) -> list[MatchedTrajectory]:
+        return [m for m in matched if clean_by_id[m.traj_id].split == split]
+
+    train_m, test_m, shadow_m = of_split("train"), of_split("test"), of_split("shadow")
+    if not train_m or not test_m:
+        raise ValueError(
+            f"membership_inference needs matched trajectories in both the train "
+            f"(members: {len(train_m)}) and test (non-members: {len(test_m)}) splits"
+        )
+    base = [tuple(int(e) for e in m.edge_seq) for m in shadow_m]
+    members = [tuple(int(e) for e in m.edge_seq) for m in train_m]
+    nonmembers = [tuple(int(e) for e in m.edge_seq) for m in test_m]
+    n0 = len(base)
+    candidates = [(n0 + i, i < len(members)) for i in range(len(members) + len(nonmembers))]
+    return base + members + nonmembers, candidates, train_m
+
+
+def _membership_values(
+    cfg: RunConfig,
+    spec: AttackSpec,
+    attack_cls: Callable[..., Attack],
+    matched: list[MatchedTrajectory],
+    clean_by_id: dict[str, CleanTrajectory],
+    gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]],
+) -> list[MetricValue]:
+    """Run LiRA membership inference against every fitted generator arm (design §6.2).
+
+    Per arm: the target generator fits on the train split (its release contract), and
+    the attack scores train members against test non-members using same-class shadow
+    generators from the arm's factory. AUC and TPR@FPR are score-based point values,
+    so the CI columns stay empty by design — the interval across seeds comes from
+    ``trajguard repeat``.
+    """
+    pool, candidates, train_m = _mia_pool(matched, clean_by_id)
+    values: list[MetricValue] = []
+    for gspec, make in gen_plans:
+        target = make(0)
+        target.fit([TrajectoryView(clean=clean_by_id[m.traj_id], matched=m) for m in train_m])
+        attack = attack_cls(
+            **dict(spec.mia_params),
+            shadow_factory=lambda k, _make=make: _make(1000 + k),
+        )
+        attack.configure(BackgroundKnowledge(known_points=0, distance="dtw", seed=cfg.seed))
+        ref = f"synthetic:{gspec.ref}"
+        result_id = f"membership_inference:{ref}"
+        result = replace(
+            attack.run(target, (pool, candidates)),
+            exp_id=cfg.exp_id,
+            target_data_ref=ref,
+            result_id=result_id,
+        )
+        values.extend(
+            MetricValue(
+                metric_id=f"{result_id}:{name}",
+                result_id=result_id,
+                name=name,
+                value=val,
+                ci_low=None,
+                ci_high=None,
+                n_bootstrap=None,
+            )
+            for name, val in membership_report(result, fprs=spec.fprs).items()
+        )
+    return values
+
+
 def run(config_path: str | Path) -> list[MetricValue]:
     """Load a config file, run the experiment, and return all metric values."""
     return run_experiment(load_config(config_path))
@@ -925,6 +1081,21 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                     "sanity baseline)"
                 )
             _poi_attack(attack_cls, spec)
+        elif spec.attack_type == "membership_inference":
+            # LiRA needs fitted generator arms plus member (train) and non-member
+            # (test) candidates; the constructor validates its own knobs
+            # (n_shadow >= 2, subsample in (0, 1)) — probe it before the pipeline.
+            if not cfg.generators:
+                raise ValueError(
+                    "config: membership_inference targets synthetic generators, but "
+                    "synthetic_generators is empty"
+                )
+            if cfg.fractions.get("train", 0.0) <= 0.0 or cfg.fractions.get("test", 0.0) <= 0.0:
+                raise ValueError(
+                    "config: membership_inference needs non-zero train (members) and "
+                    "test (non-members) split fractions"
+                )
+            attack_cls(**dict(spec.mia_params))
         else:
             # The reid-shaped loop builds attacks with no arguments; an attack whose
             # constructor needs params the orchestrator cannot supply must die here,
@@ -949,6 +1120,19 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         mech_plans.append((mspec, mech))
 
     provide = _net_provider(cfg)
+    gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]] = []
+    for gspec in cfg.generators:
+        gen_cls = registry.get("generator", gspec.mech_id)
+        if not issubclass(gen_cls, SyntheticGenerator):  # pragma: no cover - registry enforces
+            raise TypeError(f"generator {gspec.mech_id!r} is not a SyntheticGenerator")
+        # Constructing may need the road network (rn_ldp_synth), so fail fast on
+        # misspelled param names via the signature instead of instantiating here.
+        try:
+            inspect.signature(gen_cls).bind_partial(**dict(gspec.params))
+        except TypeError as err:
+            raise ValueError(f"config: generator {gspec.ref!r} rejected its params: {err}") from err
+        gen_plans.append((gspec, _generator_ctor(gen_cls, dict(gspec.params), cfg, provide)))
+
     matched, clean_by_id, dropped, split_counts = _matched_pool(cfg, provide)
     metrics = _build_metrics(cfg)
     pools = _target_pools(cfg, matched, clean_by_id, mech_plans, provide)
@@ -967,6 +1151,11 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             continue
         if spec.attack_type == "poi_inference":
             all_values.extend(_poi_inference_values(cfg, spec, attack_cls, pools, clean_by_id))
+            continue
+        if spec.attack_type == "membership_inference":
+            all_values.extend(
+                _membership_values(cfg, spec, attack_cls, matched, clean_by_id, gen_plans)
+            )
             continue
         for ref, pool in pools.items():
             if ref.split(":", 1)[0] not in spec.target_scopes:

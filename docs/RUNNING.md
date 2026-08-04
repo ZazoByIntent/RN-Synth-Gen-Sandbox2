@@ -355,6 +355,32 @@ interval reflects variance *between* repetitions; the bootstrap interval inside
 each seed's `metrics.csv` reflects resampling uncertainty *within* one run — do
 not mix the two in report tables.
 
+## 7.2 Experiment: membership inference against synthetic generators
+
+```sh
+uv run trajguard run config/experiments/geolife_synth_mia.yaml
+```
+
+Answers a different question than sections 6–7: not "can the attacker link or
+undo a noisy release" but "did the generator memorize its training data". The
+attack (LiRA — likelihood-ratio membership inference) asks, per trajectory:
+was this exact path in the generator's training set? The target generator is
+fitted on the train split; members are train paths, non-members test paths, and
+the attacker's shadow generators — same-class models used to calibrate the
+score — train on the shadow split plus the queried candidate paths, never on
+the rest of the training data (fair-MIA rule from `CLAUDE.md`).
+
+**Expected outcome:** one `membership_inference:synthetic:<generator>` row set
+per generator arm in `metrics.csv` with `auc` (how well the attacker separates
+members from non-members; 0.5 is chance, 1.0 is certain) and one `tpr@fpr=…`
+row per configured operating point (the fraction of true members caught while
+keeping false accusations below that rate — the honest headline number per
+Carlini 2022). These are score-based metrics, so the `ci_low`/`ci_high` columns
+stay empty by design: the confidence interval comes from repetitions
+(`trajguard repeat`, §7.1), not from within-run bootstrap. The shipped config
+runs the non-private `markov` baseline, where the attack *should* score high —
+that arm is the memorization ceiling to compare private generators against.
+
 ## 8. Aggregate risk report
 
 ```sh

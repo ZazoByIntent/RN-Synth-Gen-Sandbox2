@@ -272,6 +272,155 @@ def test_poi_inference_requires_a_mechanism_arm(tmp_path: Path) -> None:
         run(write_config(tmp_path, cfg))
 
 
+# --- 1e: membership inference against synthetic generator arms -------------------
+
+
+def mia_config(tmp_path: Path, maps_dir: Path) -> dict[str, Any]:
+    """base_config with the MIA attack against a markov generator arm."""
+    cfg = base_config(tmp_path, maps_dir)
+    cfg["privacy_mechanisms"] = []
+    cfg["synthetic_generators"] = [{"id": "markov", "params": {"order": 1}}]
+    cfg["attacks"] = [
+        {
+            "type": "membership_inference",
+            "target_scope": ["synthetic"],
+            "attacker": {"n_shadow": 8, "subsample": 0.5},
+            "fprs": [0.25],  # fixture scale: few non-members, so the FPR floor is coarse
+        }
+    ]
+    return cfg
+
+
+def test_membership_rejects_reid_attacker_keys(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["attacker"] = {"known_points": [3]}
+    with pytest.raises(ValueError, match="unsupported for membership_inference"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_membership_target_scope_must_be_synthetic(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["target_scope"] = ["protected"]
+    with pytest.raises(ValueError, match="must be \\['synthetic'\\]"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_membership_requires_a_generator_arm(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["synthetic_generators"] = []
+    with pytest.raises(ValueError, match="synthetic_generators"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_membership_rejects_bad_fprs(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["fprs"] = [1.5]
+    with pytest.raises(ValueError, match="fprs"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_membership_rejects_bad_lira_knobs(tmp_path: Path) -> None:
+    # The attack constructor validates n_shadow >= 2; the probe must fire before
+    # any pipeline work (the empty maps dir would crash any pipeline stage).
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["attacker"] = {"n_shadow": 1}
+    with pytest.raises(ValueError, match="n_shadow"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_unknown_generator_fails_loudly(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["synthetic_generators"] = [{"id": "no_such_generator"}]
+    with pytest.raises(KeyError, match="no_such_generator"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_misspelled_generator_param_rejected(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["synthetic_generators"] = [{"id": "markov", "params": {"orderr": 1}}]
+    with pytest.raises(ValueError, match="rejected its params"):
+        run(write_config(tmp_path, cfg))
+
+
+def _mia_traj(traj_id: str, user: str, split: str, edges: tuple[int, ...]) -> tuple[Any, Any]:
+    """A minimal (matched, clean) pair carrying just an edge sequence and a split label."""
+    from trajguard.datamodel import CleanTrajectory, MatchedTrajectory
+
+    matched = MatchedTrajectory(
+        traj_id=traj_id,
+        user_id=user,
+        map_id="beijing",
+        edge_seq=edges,
+        matched_points=(),
+        match_score=1.0,
+        frac_matched=1.0,
+    )
+    clean = CleanTrajectory(
+        traj_id=traj_id,
+        user_id=user,
+        points=((0.0, 0.0, 0.0),),
+        bbox=(0.0, 0.0, 0.0, 0.0),
+        duration_s=0.0,
+        length_m=0.0,
+        mean_speed=0.0,
+        cleaning_flags=(),
+        split=split,
+    )
+    return matched, clean
+
+
+def test_mia_pool_builds_the_strict_shadow_protocol() -> None:
+    """Shadow split first as the attacker's base, then train members, then test
+    non-members as labelled candidates; the attack split stays out entirely."""
+    from trajguard.experiments.orchestrator import _mia_pool
+
+    pairs = [
+        _mia_traj("t1", "u1", "train", (1, 2)),
+        _mia_traj("t2", "u1", "train", (2, 3)),
+        _mia_traj("s1", "u2", "shadow", (7, 8)),
+        _mia_traj("e1", "u3", "test", (4, 5)),
+        _mia_traj("a1", "u4", "attack", (9, 9)),
+    ]
+    matched = [m for m, _ in pairs]
+    clean_by_id = {c.traj_id: c for _, c in pairs}
+    pool, candidates, train_m = _mia_pool(matched, clean_by_id)
+    assert pool == [(7, 8), (1, 2), (2, 3), (4, 5)]
+    assert candidates == [(1, True), (2, True), (3, False)]
+    assert [m.traj_id for m in train_m] == ["t1", "t2"]
+
+
+def test_mia_pool_requires_members_and_nonmembers() -> None:
+    from trajguard.experiments.orchestrator import _mia_pool
+
+    pairs = [_mia_traj("t1", "u1", "train", (1, 2))]
+    matched = [m for m, _ in pairs]
+    clean_by_id = {c.traj_id: c for _, c in pairs}
+    with pytest.raises(ValueError, match="non-members"):
+        _mia_pool(matched, clean_by_id)
+
+
+def test_membership_inference_runs_end_to_end(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """End to end: one MIA row set per generator arm, score-based metrics without CI."""
+    cfg = mia_config(tmp_path, beijing_maps_dir)
+    values = run(write_config(tmp_path, cfg))
+
+    mia = [v for v in values if v.result_id.startswith("membership_inference:")]
+    assert {v.result_id for v in mia} == {"membership_inference:synthetic:markov:order=1"}
+    by_name = {v.name: v for v in mia}
+    assert set(by_name) == {"auc", "tpr@fpr=0.25"}
+    auc = by_name["auc"]
+    assert 0.0 <= auc.value <= 1.0
+    # markov memorizes the tiny fixture train split: the non-private ceiling beats chance
+    assert auc.value > 0.5
+    # score-based metrics carry no within-run CI by design; repeat gives the interval
+    assert auc.ci_low is None and auc.ci_high is None and auc.n_bootstrap is None
+    rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
+    mia_rows = [r for r in rows if r["result_id"].startswith("membership_inference:")]
+    assert mia_rows and all(r["ci_low"] == "" and r["ci_high"] == "" for r in mia_rows)
+    # deterministic under the same seeds
+    assert [v.value for v in run(write_config(tmp_path, cfg))] == [v.value for v in values]
+
+
 def test_data_raw_guard_catches_absolute_path_from_any_cwd(
     tmp_path: Path, beijing_maps_dir: Path
 ) -> None:
