@@ -121,6 +121,30 @@ Expect the same matches but a noticeably slower run, and skip the overview plot 
 (it would draw every street in Beijing). The per-trajectory panels stay fast because
 they crop to each path's surroundings.
 
+## 3.1 End-to-end pipeline walkthrough notebook (works offline)
+
+`notebooks/02_pipeline_walkthrough.ipynb` is a presentation-ready tour of every
+stage and every runnable combination in the benchmark: bare maps → raw trajectories
+→ cleaning → map matching → representation views → splits → anonymization (with and
+without re-matching) → synthetic generation → all four attack families → utility
+metrics → a full orchestrated experiment → the risk report → the RN-LDP-Synth
+evidence sweep. Like the sanity notebook it runs entirely from `tests/fixtures/`
+by default (set `USE_REAL_DATA = True` in the setup cell to point it at your full
+`maps/beijing` build and Geolife download instead).
+
+Run it headlessly, or interactively, exactly like the sanity notebook:
+
+```sh
+uv run jupyter nbconvert --to notebook --execute --inplace notebooks/02_pipeline_walkthrough.ipynb
+```
+
+**Expected outcome:** every cell executes without errors; along the way you get the
+registry tables (implemented vs planned components), per-stage data-frame previews,
+match-quality numbers on the fixture slice, attack results for all four families,
+and at the end a small orchestrated run whose `tradeoff.png` is displayed inline.
+Note that no automation executes the notebooks (CI runs only `ruff`, `mypy`,
+`pytest`), so re-run them manually after changes that alter their outputs.
+
 ## 4. Quick visual recipes
 
 Two small standalone scripts for common "let me just look at it" needs. Both write a

@@ -9,9 +9,14 @@ in poročilo `IZV_porocilo.docx` (delovni skelet, poglavja 1–3 izpolnjena).
 
 ## 0. Kako brati ta dokument — preberi preden karkoli spremeniš
 
-**To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila,
-in ni bil recenziran. Naslednja seja naj ga obravnava kot **osnutek kolega, ki ga je treba
-recenzirati**, ne kot potrjen načrt dela.
+**Recenzija je bila opravljena 4. avgusta 2026** (veja `claude/handoff-document-review-2fnmdo`):
+od 24 postavk razdelka 1 je 20 potrjenih, štiri popravljene (O4, O5, O6 in razdelek 1.3 — vse
+štiri so podcenjevale, kar v kodi že obstaja), ovržena ni nobena. Popravki so vpisani neposredno
+v besedilo spodaj in označeni z **[recenzija]**. Recenzija je našla tudi eno spregledano
+odvisnost — prepleteno seme, opisano pri O3 — ki spremeni sestavo vala 1 v razdelku 2.
+
+**To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
+Prvotno besedilo ni bilo recenzirano; spodnja različica vključuje izid recenzije.
 
 Pričakovani prvi rezultat naslednje seje **ni koda, ampak recenzija**: za vsako trditev v
 razdelku 1 potrdi, ovrzi ali popravi, in za predlagano zaporedje v razdelku 2 povej, ali se z
@@ -65,6 +70,12 @@ sintetičnimi potmi je konceptualno sporna, ker sintetične poti ne pripadajo no
 osebi. Morda je ceneje popraviti poročilo. A4 je smiseln le, če se dogovorimo, kaj »poznan
 vhodni vzorec« sploh pomeni; poročilo tega ne opredeli.
 
+**[recenzija]** Dvom pri A2 je potrjen: rešuje se **v poročilu**, ne v kodi. Smiselno
+zasebnostno vprašanje za sintezo je »ali si je generator zapomnil učne podatke«, kar že meri
+napad s sklepanjem o članstvu (`membership.py`, obseg `{"synthetic"}`). Poročilo §4.1 naj pravi:
+perturbacija se ocenjuje z reidentifikacijo, sinteza s sklepanjem o članstvu. A2 s tem odpade
+iz načrta implementacije. A4 ostane blokiran, dokler avtor ne opredeli »poznanega vzorca«.
+
 ### 1.2 Metrike
 
 | # | Vrzel | Zahteva | Preveri |
@@ -75,11 +86,24 @@ vhodni vzorec« sploh pomeni; poročilo tega ne opredeli.
 | M4 | Ujemanje segmentov (edge recall/precision) | zasnova §6.3 | ni implementirano |
 | M5 | Balanced accuracy, F1, preciznost, priklic | zasnova §6.4 | vezano na A1 |
 
+**[recenzija]** M1 ni mehansko opravilo: uvodni komentar `evaluation/roc.py:1-6` namerno
+utemeljuje, zakaj metrike na zveznih ocenah (AUC, TPR@FPR) ne sodijo v razred `SampledMetric`,
+ki predpostavlja binarne indikatorje po sondi. Registracija zahteva oblikovno odločitev o
+razširitvi vmesnika `Metric` — zato M1 ne stoji sam, ampak se rešuje po družinah napadov ob
+priključitvi v orkestrator (glej popravljeni val 1). Pri M3 je vrzel manjša, kot je zapisano:
+`UTILITY_METRICS` že vsebuje `cell_js_divergence` in `length_dist_error`
+(`evaluation/utility.py:118-121`); manjkata le analogiji za trajanje in hitrost po istem vzorcu.
+
 ### 1.3 Zaščitni mehanizmi
 
 Implementirana sta `none` in `geo_indistinguishability`. Zasnova §7 in poročilo §6.1
 predvidevata še: prostorsko zaokroževanje, časovno redčenje, naivni Gaussov šum, točkovni LDP,
 SquareWave, segmentno perturbacijo, k-anonimnost in kombinirane mehanizme.
+
+**[recenzija]** Prvotno besedilo je spregledalo `src/trajguard/privacy/ldp.py`: gradnika
+točkovnega LDP poročanja (GRR in OUE) že obstajata in sta testirana (`tests/test_ldp.py`),
+namenoma kot funkciji in ne kot mehanizma (`ldp.py:1-16`). Točkovni LDP in LDPTrace iz vala 4
+sta zato cenejša od prvotne ocene.
 
 ### 1.4 Generatorji
 
@@ -110,6 +134,33 @@ kavlja (`views.py:84` in `:88`).
 semeni in združevanje v skripti. Presodi, ali je vgradnja v orkestrator res boljša od tanke
 skripte, preden se lotiš posega v jedro.
 
+**[recenzija]** Popravki k tej skupini:
+
+- **O3 — tanka skripta da, a šele po ločitvi semen.** Eno samo `experiment.seed` danes hkrati
+  krmili delitev uporabnikov (`orchestrator.py:503` in razpršilni ključ `:341`), šum mehanizma
+  (`:696`) in znanje napadalca (`:719`). Ponovitve z različnimi semeni bi torej vsakič na novo
+  razdelile uporabnike (kršitev zlatega pravila o enkratni delitvi), pomešale varianco delitve
+  z varianco šuma in ob vsakem semenu razveljavile predpomnilnik ujetih poti. Predpogoj je
+  ločitev semena delitve od semena zagona v orkestratorju (poseg v eno datoteko); zanka
+  ponovitev in združevanje potem sodita v tanko skripto — precedens je `experiments/rnldp_eval.py`.
+  Pri združevanju ločuj dve vrsti intervalov zaupanja: bootstrap znotraj enega zagona in
+  interval čez ponovitve (varianca med semeni).
+- **O4 — sestavine že obstajajo.** `run.json` že beleži seme, verzijo kode (`git_commit`) in
+  podpis konfiguracije (`config_hash`) (`orchestrator.py:864-887`); manjka le pripenjanje teh
+  stolpcev vrsticam rezultatov. Ciljne sheme ni mogoče preveriti, ker `IZV_nacrt_eksperimentov.xlsx`
+  in `IZV_porocilo.docx` **nista v repozitoriju** — val 2 je blokiran, dokler avtor sheme ne
+  priskrbi (ali se zapiše v `docs/`).
+- **O5 — spregledan je `reporting/report.py`.** Ukaz `trajguard report` že združuje vse zagone
+  v tabele, matriko tveganj in Markdown poročilo (`report.py:224`, `:304`, `:512`). Manjkajo
+  štirje načrtovani grafi, izhodišče pa je bistveno boljše od »obstaja samo `plot_tradeoff()`«.
+- **O6 — čas se beleži na dveh ravneh:** po napadu (`AttackResult.runtime_s`) in za celoten
+  zagon (`orchestrator.py:875`). Pomnilniške špice in pravil za krčenje obsega res ni.
+- **Dodatno (spregledano v prvotnem besedilu):** vodilna metrika je trdo kodirana —
+  `matrix.csv` in graf kompromisa vrtita samo `top1_acc` (`orchestrator.py:39`); priključitev
+  drugih družin zahteva vodilno metriko po družini, preslikava v `report.py:23-28` že obstaja.
+  Velikost vzorca (O2) mora v razpršilni ključ predpomnilnika, sicer si različne velikosti
+  delijo isti predpomnjeni bazen.
+
 ### 1.7 Infrastruktura (namerno odloženo, horizont B)
 
 PostGIS, sledenje poskusov z MLflow, federativni pristopi, več zemljevidov hkrati.
@@ -138,44 +189,65 @@ Vodilo pri razvrščanju: **najprej tisto, kar odklene poglavje 7 poročila**, k
 rok, in šele nato širina iz zasnove. Vsak val je zaokrožena celica dela za eno vejo in en
 zahtevek za združitev.
 
-**Val 0 — dokumentacijski popravki (D1–D3, nekaj ur).** Uskladi zastarele trditve, dodaj
-opozorilo o sintetični veji, vpiši pregledni zvezek v `RUNNING.md`. Poceni in prepreči delo po
+**Val 0 — dokumentacijski popravki (D1–D4, nekaj ur). [recenzija: opravljeno v tej veji.]**
+Uskladi zastarele trditve, dodaj opozorilo o sintetični veji, vpiši pregledni zvezek v
+`RUNNING.md`, shrani manjkajoči izhod celice v zvezku 02. Poceni in prepreči delo po
 napačnem opisu. Nima odvisnosti.
 
-**Val 1 — pogon eksperimentov (M1, O2, O3, nato O1).** Po vrsti: registriraj manjkajoče metrike
-kot razrede `Metric`; dodaj velikost vzorca in seznam semen z združevanjem v povprečje in
-interval zaupanja; nato priključi preostale tri napade v zanko orkestratorja, vsakega s svojo
-pripravo vhodov. Šele ko to stoji, je razdelek 7.1 izvedljiv iz ene konfiguracije. Ta val se
-ujema z mejnikom S4, ki je v `CLAUDE.md` že označen kot naslednji korak.
-*Opozorilo o obsegu:* O1 se dotakne priprave vhodov za tri različne družine napadov in ga
-verjetno ni mogoče spraviti v isti zahtevek za združitev kot M1/O2/O3 — predvidi razrez.
+**Val 1 — pogon eksperimentov. [recenzija: sestava spremenjena.]** Prvotni predlog
+(M1 + O2 + O3, nato O1) je zamenjan, ker M1 kot samostojen korak registrira metrike brez
+odjemalca (mrtvo ogrodje, kršitev pravila o navpičnih rezinah) in ker ima O3 predpogoj —
+ločitev semen (glej popravek pri O3 zgoraj). Nova sestava, vsak korak svoj zahtevek za
+združitev:
+
+- **1a** — ločitev semena delitve od semena zagona v orkestratorju + velikost vzorca (O2),
+  vključno z vpisom obojega v razpršilni ključ predpomnilnika;
+- **1b** — tanka skripta za ponovitve: zanka čez semena, združevanje v povprečje in 95-odstotni
+  interval zaupanja čez ponovitve (ostanek O3);
+- **1c–1e** — priključitev preostalih treh napadov v zanko orkestratorja (O1), **po en zahtevek
+  na družino**, vsaka družina prinese svoje metrike v istem koraku (s tem M1 odpade kot
+  samostojna postavka): rekonstrukcija potrebuje predajo parametrov mehanizma napadu,
+  `poi_inference` preusmeritev čistih GPS bazenov, sklepanje o članstvu pa je največje, ker
+  konfiguracija danes sploh nima razdelka za generatorje (`RunConfig`, `orchestrator.py:83-115`).
+
+Šele ko to stoji, je razdelek 7.1 izvedljiv iz ene konfiguracije. Val se ujema z mejnikom S4.
 
 **Val 2 — zajem rezultatov in slike (O4, O5, O6).** Preslikava na shemo `Rezultati_predloga`,
 merjenje časa in pomnilnika, štirje načrtovani grafi. Brez tega se rezultati prepisujejo ročno,
 kar je pri petih ponovitvah krat šest vrednosti ε krat pet stopenj predznanja vir napak.
+**[recenzija]** Blokiran, dokler shema `Rezultati_predloga` ni na voljo (datoteki
+`IZV_nacrt_eksperimentov.xlsx` in `IZV_porocilo.docx` nista v repozitoriju); gradi na
+obstoječem `reporting/report.py`, ne od začetka.
 
 **Val 3 — dopolnitve znotraj obstoječih štirih scenarijev (M2, A3, A4).** Top-k POI skupaj z
 `as_poi_visits()` odklene razdelek 7.5; rekonstrukcija z omejitvijo omrežja je vsebinsko najbolj
 zanimiva za članek, ker je primerjava »z omrežjem proti brez omrežja« empirični argument za
-omrežno zavednost.
+omrežno zavednost. **[recenzija]** M2 ima podatkovni predpogoj: v repozitoriju ni nobenega vira
+točk interesa, testi pa ne smejo na omrežje — potreben je fixture sloj POI. A4 blokiran na
+odločitvi avtorja (definicija »poznanega vzorca«); A3 nima blokad.
 
 **Val 4 — širina mehanizmov (1.3) in LDPTrace (1.4).** Mehanizme dodajaj po naraščajoči
 zahtevnosti: prostorsko zaokroževanje in časovno redčenje sta skoraj trivialna in takoj dodata
 točke na krivuljo kompromisa; sledita Gaussov šum in točkovni LDP; segmentna perturbacija je
 zadnja, ker je najbližja RN-LDP-Synth in zato najbolj koristna kot primerjava. **LDPTrace
 obravnavaj prednostno znotraj tega vala**, ker brez njega razdelek 7.3 nima primerjave iz
-literature.
+literature. **[recenzija]** Točkovni LDP in LDPTrace gradita na obstoječih gradnikih v
+`privacy/ldp.py` — če postane razdelek 7.3 časovno kritičen, se LDPTrace lahko izvleče pred
+preostanek vala.
 
-**Val 5 — horizont B (A1, A2, M4, M5, 1.5, 1.7).** Drugo leto; priključi se prek obstoječih
-vmesnikov brez posegov v jedro.
+**Val 5 — horizont B (A1, M4, M5, 1.5, 1.7).** Drugo leto; priključi se prek obstoječih
+vmesnikov brez posegov v jedro. **[recenzija]** A2 je izločen iz tega vala — rešuje se s
+popravkom poročila (glej razdelek 1.1), ne z implementacijo.
 
 ### Predlagan prvi konkreten korak
 
-Če iščeš en sam, jasno omejen zahtevek za združitev: **M1 + O2 + O3** — registracija metrik ter
-velikost vzorca in ponovitve. Dotakne se `evaluation/metrics.py`, `evaluation/roc.py`,
-`experiments/orchestrator.py` in dveh konfiguracij, torej ostane znotraj pravila o petih
-datotekah, in odklene vse tabele v poglavju 7, ki potrebujejo stolpca »velikost vzorca« in
-»95 % interval zaupanja«.
+**[recenzija — prvotni predlog M1 + O2 + O3 je umaknjen** iz razlogov, opisanih pri valu 1.]
+Prvi zahtevek za združitev je bil ta dokumentacijski val 0 (D1–D4 + popravljen HANDOFF, ta
+veja). Naslednji je korak **1a**: ločitev semena delitve od semena zagona + velikost vzorca,
+z razrezom: `experiments/orchestrator.py` (ključa `experiment.split_seed` in omejitev števila
+uporabnikov, oba v razpršilni ključ), `experiments/cli.py` (možnost `--seed` za ponovitve brez
+urejanja YAML), `tests/test_orchestrator.py`, ena konfiguracija pod `config/experiments/` in
+pripadajoča vrstica v `docs/ARCHITECTURE.md` — znotraj pravila o petih datotekah.
 
 ---
 
