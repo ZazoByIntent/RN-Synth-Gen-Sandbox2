@@ -24,7 +24,8 @@ odvisnost — prepleteno seme, opisano pri O3 — ki spremeni sestavo vala 1 v r
 razdelek `synthetic_generators` v orkestratorju (`0608755`, `9388cc8`). S tem so O1, O2 in O3
 zaprti in **val 1 je zaključen**: vsi štirje scenariji tečejo iz ene konfiguracije. Naslednje
 delo je val 2 (blokiran, dokler ni sheme `Rezultati_predloga`) ali val 3 (A3 nima blokad) —
-izbira je avtorjeva.
+izbira je avtorjeva. Kjer se je med izvedbo izkazalo drugače, kot napoveduje besedilo spodaj,
+je popravek vpisan na mestu in označen z **[izvedba]** (po istem vzorcu kot **[recenzija]**).
 
 **To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
 Prvotno besedilo ni bilo recenzirano; spodnja različica vključuje izid recenzije.
@@ -172,6 +173,14 @@ skripte, preden se lotiš posega v jedro.
   Velikost vzorca (O2) mora v razpršilni ključ predpomnilnika, sicer si različne velikosti
   delijo isti predpomnjeni bazen.
 
+**[izvedba, 4. avgust 2026]** O1 je zaprt: vse štiri družine so v zanki orkestratorja
+(`_ORCHESTRATOR_ATTACKS` v `orchestrator.py`). Vzorec priključitve je pri vseh treh novih
+družinah enak — vsaka prinese svoje metrike prek svoje poročevalske funkcije v vrstice
+`MetricValue`, torej v `metrics.csv`, `run.json` in samodejno v `trajguard repeat`. Vodilna
+metrika iz opombe zgoraj pa ostaja trdo kodirana: `matrix.csv` in graf kompromisa še naprej
+vrtita samo `top1_acc` reidentifikacije, nove družine tja niso vključene. »Vodilna metrika po
+družini« torej ni bila del vala 1 in sodi v val 2 (poročanje).
+
 ### 1.7 Infrastruktura (namerno odloženo, horizont B)
 
 PostGIS, sledenje poskusov z MLflow, federativni pristopi, več zemljevidov hkrati.
@@ -232,6 +241,39 @@ združitev:
   znotraj zagona (interval čez ponovitve da `trajguard repeat`).
 
 Šele ko to stoji, je razdelek 7.1 izvedljiv iz ene konfiguracije. Val se ujema z mejnikom S4.
+
+**[izvedba, 4. avgust 2026] — popravki in spoznanja iz izvedbe korakov 1d in 1e:**
+
+- **1e je bil cenejši od napovedi »največji od treh«: posega v `attacks/membership.py` ni
+  bilo.** Strogi protokol (senčni modeli napadalca ne smejo videti učne množice) se izrazi
+  že s sestavo senčnega bazena v orkestratorju: bazen je razrez shadow plus kandidatne poti,
+  ki jih napadalec upravičeno pozna, ker po njih sprašuje; enakomerno podvzorčenje vsakega
+  kandidata samodejno uvrsti v približno polovico senčnih modelov (skupina IN). Sestavo
+  preverja enotski test `test_mia_pool_builds_the_strict_shadow_protocol`.
+- **Odločitve, sprejete v pogovoru z avtorjem (4. avgust 2026), ki jih to besedilo prej ni
+  določalo:** strogi protokol namesto zgleda iz `rnldp_eval` (tam senčni modeli vidijo del
+  učne množice, kar napadalca precenjuje); v konfiguraciji oba generatorja (markov in
+  rn_ldp_synth); AUC in TPR pri nizkem FPR kot točkovni vrednosti brez intervala znotraj
+  zagona — interval čez ponovitve da `trajguard repeat`; točke FPR nastavljive s ključem
+  `fprs` (privzeto 0.001 in 0.01).
+- **Tehnične podrobnosti, na katere naj računa nadaljnje delo:** konstruktorji generatorjev
+  se razlikujejo, zato orkestrator omrežje in seme vbrizga glede na podpis konstruktorja
+  (`_generator_ctor`); senčni modeli so istega razreda s parametri veje in semeni
+  `seed + 1000 + k`; parametri generatorjev se — drugače kot pri mehanizmih — ne
+  pretvarjajo v decimalke, ker gredo surovi v konstruktorje (Markov `order` mora ostati
+  celo število), predpomnilniški ključ pa od njih ne odvisi.
+- **1e namenoma ne generira sintetičnih izdaj in ne računa utility metrik nad sintezo:**
+  LiRA sprašuje naučeni model po verjetnosti poti (`sequence_log_prob`), ne njegovih
+  vzorcev. Predpomnjenje sintetičnih izdaj (`data/synthetic/`) zato ostaja odprto za prvi
+  korak, ki ga bo zares potreboval (npr. utility nad sintezo za razdelek 7.3 poročila;
+  samostojni `rnldp_eval` to zaenkrat pokriva na ravni fixture podatkov).
+- **Testna omejitev:** fixture populacija ima 2 uporabnika, zato v end-to-end testih
+  orkestratorja razrez shadow ostane prazen (1 uporabnik train, 1 test) in senčni bazen
+  sestavljajo samo kandidati; polni protokol z bazo pokriva zgornji enotski test. Za
+  end-to-end test s polno bazo bi bila potrebna večja fixture populacija (3+ uporabniki).
+- **1d je potekel po napovedi;** edina širitev obsega je bil popravek zastarele trditve v
+  dokumentacijskem nizu razreda v `attacks/attribute.py` (šesta datoteka), ki je trdila,
+  da napad ni priključen v orkestrator.
 
 **Val 2 — zajem rezultatov in slike (O4, O5, O6).** Preslikava na shemo `Rezultati_predloga`,
 merjenje časa in pomnilnika, štirje načrtovani grafi. Brez tega se rezultati prepisujejo ročno,
