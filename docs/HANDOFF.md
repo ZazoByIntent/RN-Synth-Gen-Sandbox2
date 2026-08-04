@@ -1,6 +1,8 @@
 # Predaja dela: vrzeli med dokumentacijo, poročilom IZV in kodo
 
 **Nastalo:** 4. avgust 2026 · **Osnovano na commitu:** `aa5eb86` · **Veja:** `claude/review-attack-scenarios-c6byzc`
+**Recenzirano in delno izvedeno:** 4. avgust 2026 · veja `claude/handoff-document-review-2fnmdo`
+(končani so val 0 ter koraki 1a, 1b in 1c; glej razdelek 2)
 **Viri:** `docs/Tehnicna_zasnova_eksperimentalno_okolje.md`, `docs/IMPLEMENTATION_PLAN.md`,
 `docs/ARCHITECTURE.md`, koda pod `src/trajguard/`, zvezek `notebooks/02_pipeline_walkthrough.ipynb`
 in poročilo `IZV_porocilo.docx` (delovni skelet, poglavja 1–3 izpolnjena).
@@ -14,6 +16,12 @@ od 24 postavk razdelka 1 je 20 potrjenih, štiri popravljene (O4, O5, O6 in razd
 štiri so podcenjevale, kar v kodi že obstaja), ovržena ni nobena. Popravki so vpisani neposredno
 v besedilo spodaj in označeni z **[recenzija]**. Recenzija je našla tudi eno spregledano
 odvisnost — prepleteno seme, opisano pri O3 — ki spremeni sestavo vala 1 v razdelku 2.
+
+**Stanje izvedbe (ista veja, 4. avgust 2026):** val 0 (`a2067b9`), korak 1a — ločitev semen in
+`dataset.max_users` (`8fac2fb`), korak 1b — `trajguard repeat` s 95 % intervalom čez ponovitve
+(`9005c2f`), korak 1c — rekonstrukcija v zanki orkestratorja (`4466008`). S tem sta O2 in O3
+zaprta, O1 pa delno (rekonstrukcija da, `poi_inference` in `membership_inference` še ne).
+Naslednji korak je **1d**.
 
 **To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
 Prvotno besedilo ni bilo recenzirano; spodnja različica vključuje izid recenzije.
@@ -200,15 +208,22 @@ odjemalca (mrtvo ogrodje, kršitev pravila o navpičnih rezinah) in ker ima O3 p
 ločitev semen (glej popravek pri O3 zgoraj). Nova sestava, vsak korak svoj zahtevek za
 združitev:
 
-- **1a** — ločitev semena delitve od semena zagona v orkestratorju + velikost vzorca (O2),
-  vključno z vpisom obojega v razpršilni ključ predpomnilnika;
-- **1b** — tanka skripta za ponovitve: zanka čez semena, združevanje v povprečje in 95-odstotni
-  interval zaupanja čez ponovitve (ostanek O3);
-- **1c–1e** — priključitev preostalih treh napadov v zanko orkestratorja (O1), **po en zahtevek
-  na družino**, vsaka družina prinese svoje metrike v istem koraku (s tem M1 odpade kot
-  samostojna postavka): rekonstrukcija potrebuje predajo parametrov mehanizma napadu,
-  `poi_inference` preusmeritev čistih GPS bazenov, sklepanje o članstvu pa je največje, ker
-  konfiguracija danes sploh nima razdelka za generatorje (`RunConfig`, `orchestrator.py:83-115`).
+- **1a — izvedeno (`8fac2fb`)** — ločitev semena delitve od semena zagona v orkestratorju +
+  velikost vzorca (O2): ključa `experiment.split_seed` in `dataset.max_users`, oba v
+  razpršilnem ključu predpomnilnika, ter `trajguard run <config> --seed N`;
+- **1b — izvedeno (`9005c2f`)** — tanka skripta za ponovitve: `trajguard repeat <config>
+  --seeds …` v `experiments/repeat.py`, združevanje v povprečje in 95-odstotni interval
+  zaupanja po Studentovi t čez ponovitve, zapis v `repetitions.csv` (ostanek O3);
+- **1c — izvedeno (`4466008`)** — rekonstrukcija v zanki orkestratorja: teče nad vsako
+  geo-ind vejo z `epsilon`/`unit_m` iz veje (napadalec pozna mehanizem, zasnova §6.3),
+  poroča `hausdorff_m`, `dtw_m`, `mean_spatial_error_m` z bootstrap intervali;
+- **1d — naslednji korak** — `poi_inference` v zanko orkestratorja: potrebuje preusmeritev
+  čistih GPS bazenov (`clean_by_id` namesto `matched`) in prenos svojih metrik (razdalja
+  dom/delo v metrih, delež lokaliziranih uporabnikov) v `metrics.csv`; brez znanih blokad;
+- **1e** — `membership_inference` v zanko orkestratorja: največji od treh, ker konfiguracija
+  danes sploh nima razdelka za generatorje (`RunConfig`, `orchestrator.py`); prinese svoji
+  metriki AUC in TPR pri nizkem FPR iz `evaluation/roc.py`; zgled priprave je obstoječi
+  samostojni pogon `experiments/rnldp_eval.py`.
 
 Šele ko to stoji, je razdelek 7.1 izvedljiv iz ene konfiguracije. Val se ujema z mejnikom S4.
 
@@ -239,21 +254,27 @@ preostanek vala.
 vmesnikov brez posegov v jedro. **[recenzija]** A2 je izločen iz tega vala — rešuje se s
 popravkom poročila (glej razdelek 1.1), ne z implementacijo.
 
-### Predlagan prvi konkreten korak
+### Naslednji konkreten korak
 
 **[recenzija — prvotni predlog M1 + O2 + O3 je umaknjen** iz razlogov, opisanih pri valu 1.]
-Prvi zahtevek za združitev je bil ta dokumentacijski val 0 (D1–D4 + popravljen HANDOFF, ta
-veja). Naslednji je korak **1a**: ločitev semena delitve od semena zagona + velikost vzorca,
-z razrezom: `experiments/orchestrator.py` (ključa `experiment.split_seed` in omejitev števila
-uporabnikov, oba v razpršilni ključ), `experiments/cli.py` (možnost `--seed` za ponovitve brez
-urejanja YAML), `tests/test_orchestrator.py`, ena konfiguracija pod `config/experiments/` in
-pripadajoča vrstica v `docs/ARCHITECTURE.md` — znotraj pravila o petih datotekah.
+Val 0 ter koraki 1a, 1b in 1c so izvedeni (glej oznake zgoraj). Naslednji je korak **1d**:
+`poi_inference` v zanko orkestratorja, po zgledu razreza 1c — validacija konfiguracije v
+`_attack_specs` (napad ima svoje parametre `dwell_s`, `radius_m`, ure, `tz_offset_h` in prag
+`threshold_m` za delež lokaliziranih), ločena priprava vhodov (čisti GPS bazeni: cilj je
+izdana veja, resnica surovi `clean_by_id`), prenos metrik iz `attribute_report` v
+`MetricValue` vrstice — razrez: `experiments/orchestrator.py`, `tests/test_orchestrator.py`,
+konfiguracija pod `config/experiments/` in `docs/RUNNING.md` — znotraj pravila o petih
+datotekah.
 
 ---
 
-## 3. Kaj pričakujem od recenzije
+## 3. Kaj sem pričakoval od recenzije — **opravljeno**
 
-Preden se karkoli implementira, naj naslednja seja predstavi:
+Ta razdelek je zgodovinski: vse štiri točke so bile izpolnjene 4. avgusta 2026, izidi so
+vpisani v razdelka 1 in 2 z oznako **[recenzija]**. Ohranjen je zato, da je razvidno, kaj je
+bilo naročeno. Za nadaljevanje dela glej razdelek 4.
+
+Naročilo se je glasilo:
 
 1. **Za vsako postavko iz razdelka 1:** potrjeno / ovrženo / popravljeno, z mestom v kodi, ki to
    dokazuje. Ovržene postavke naj se iz načrta izločijo, ne tiho preskočijo.
@@ -271,37 +292,55 @@ v istem zahtevku za združitev, ne tiho odstopanje od njega.
 
 ## 4. Prompt za novo sejo
 
-Besedilo spodaj je mišljeno za lepljenje v svežo sejo. Če se izkaže za koristnega trajno, sodi v
-`docs/PROMPTS.md`, kjer so zbrani prompti za posamezne faze.
+Besedilo spodaj je mišljeno za lepljenje v svežo sejo. Prvotni recenzijski prompt je opravil
+svoje (recenzija je vpisana v ta dokument); spodnja različica nadaljuje izvedbo. Če se izkaže
+za koristnega trajno, sodi v `docs/PROMPTS.md`.
 
 ```
 Preberi CLAUDE.md in docs/HANDOFF.md.
 
-HANDOFF je osnutek kolega iz prejšnje seje in NI potrjen načrt dela. Tvoja prva naloga
-ni implementacija, ampak recenzija.
+HANDOFF je recenziran in delno izveden načrt: val 0 ter koraki 1a, 1b in 1c so
+končani na veji claude/handoff-document-review-2fnmdo (zadnji commit 4466008).
+Ločena semena (experiment.split_seed), velikost vzorca (dataset.max_users),
+ponovitve (trajguard repeat) in rekonstrukcija v orkestratorju že obstajajo —
+ne implementiraj jih znova; prepričaj se v kodi.
 
-Naredi naslednje, v tem vrstnem redu:
+Tvoja naloga je korak 1d: priključi poi_inference v zanko orkestratorja, po
+zgledu koraka 1c (glej _reconstruction_values v experiments/orchestrator.py
+in commit 4466008). Zaporedje in razrez sta bila potrjena v recenziji, zato
+načrtovalni način ni potreben; če med izvedbo naletiš na odločitev, ki je
+HANDOFF ne pokriva, se ustavi in vprašaj.
 
-1. Za vsako postavko v razdelku 1 dokumenta HANDOFF (A1–A4, M1–M5, O1–O6, D1–D5 in
-   opisne razdelke 1.3, 1.4, 1.5, 1.7) preveri v kodi, ali trditev drži. Vsako označi
-   kot potrjeno, ovrženo ali popravljeno in navedi mesto v kodi (datoteka:vrstica), ki
-   to dokazuje. Ne zanašaj se na besedilo HANDOFF-a.
+Vsebina koraka 1d:
+- validacija v _attack_specs: napad ima svoje parametre (dwell_s, radius_m,
+  home_hours, work_hours, tz_offset_h) in prag threshold_m za delež
+  lokaliziranih uporabnikov; reid-style ključa known_points/distance zavrni;
+- priprava vhodov: cilj je izdana (zaščitena) veja kot čisti GPS bazen
+  (pool.clean_by_id), resnica surovi clean_by_id; ujemanje je po user_id,
+  ne po poteh, ujetih na ceste;
+- metrike družine iz attribute_report (home/work_error_m, home/work_localised)
+  z bootstrap intervali v MetricValue vrstice — v metrics.csv, run.json in
+  s tem samodejno v trajguard repeat;
+- konfiguracija pod config/experiments/ in razdelek v docs/RUNNING.md s
+  pričakovanim izidom.
 
-2. Posebej presodi dvoma, ki ju HANDOFF sam izpostavi:
-   - O3: ali ponovitve eksperimenta res sodijo v orkestrator ali zadošča tanka skripta;
-   - A2: ali je reidentifikacija nad sintetičnimi podatki sploh smiselna, ali je ceneje
-     popraviti poročilo.
+Pazi na dve pasti iz kode: (1) geo-ind veja z močnim šumom lahko pusti prazen
+re-matched bazen, a poi_inference tega ne potrebuje — bere clean_by_id, ki hrani
+celotno izdajo; (2) identitetna veja (mechanism none) vrne surove točke, zato je
+njen rezultat sanity vrednost blizu ničelne napake, ne prava zaščita — v testu
+to izkoristi. Fixture podatki imajo kratke poti; parametre napada (dwell_s,
+radius_m) v testni konfiguraciji prilagodi, da nastane vsaj en stay-point —
+zgled je tests/test_attribute.py.
 
-3. Povej, ali se strinjaš s predlaganim zaporedjem valov 0–5 v razdelku 2. Če ne,
-   predlagaj drugačno in utemelji.
+Commitaj na isto vejo (claude/handoff-document-review-2fnmdo) in ob koncu
+posodobi oznako stanja v docs/HANDOFF.md (razdelka 0 in 2).
 
-4. Navedi vse, kar je HANDOFF spregledal: vrzeli, ki jih ne omenja, ali odvisnosti med
-   valovi.
-
-5. Šele nato, v načrtovalnem načinu, predlagaj prvi zahtevek za združitev z razrezom po
-   datotekah. Počakaj na mojo odobritev, preden karkoli spremeniš.
-
-Velja definicija dokončanosti iz CLAUDE.md: ruff in mypy čista, test na fixturih, in
-dokaz z natančnim ukazom in izpisom. Naloge, ki bi se dotaknile več kot ~5 datotek,
-razdeli namesto da jih izvedeš naenkrat.
+Velja definicija dokončanosti iz CLAUDE.md: ruff check in mypy čista, test na
+fixturih, in dokaz z natančnim ukazom ter njegovim izpisom. Ne trdi, da deluje —
+pokaži. Če bi se korak dotaknil več kot ~5 datotek, predlagaj razrez namesto
+da ga izvedeš naenkrat.
 ```
+
+Za korak **1e** (`membership_inference`) prompt namenoma še ni napisan: pred njim je treba
+odločiti, kako konfiguracija sploh opiše generatorje (`synthetic_generators` v YAML), kar je
+oblikovna odločitev in ne mehanska priključitev. Napiši ga takrat, ko bo 1d končan.
