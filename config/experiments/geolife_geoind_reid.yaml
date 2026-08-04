@@ -8,7 +8,9 @@
 # ("protection by destroying the release" — the utility metrics quantify it).
 experiment:
   id: geolife_geoind_reid
-  seed: 42
+  seed: 42                   # run seed: mechanism noise, attacker knowledge, bootstrap
+  split_seed: 42             # population seed: user subsample + split; pin it and vary
+                             # only seed for repetitions (trajguard run <cfg> --seed N)
   output_dir: results/geolife_geoind_reid
 
 map:
@@ -21,6 +23,8 @@ dataset:
   id: geolife
   path: data/raw/geolife
   native_region: beijing
+  # max_users: 50            # optional sample size (design §6.4: 20/50/100/182); keeps
+  #                          # all trajectories of a split_seed-drawn user subset
 
 cleaning:
   max_speed_kmh: 200

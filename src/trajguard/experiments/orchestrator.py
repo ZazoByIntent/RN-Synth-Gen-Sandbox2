@@ -84,7 +84,8 @@ class RunConfig:
     """A fully validated experiment configuration."""
 
     exp_id: str
-    seed: int
+    seed: int  # run seed: mechanism noise, attacker knowledge, bootstrap resampling
+    split_seed: int  # population seed: user subsample + train/test/shadow/attack split
     output_dir: Path
     cache_dir: Path
     protected_dir: Path
@@ -96,6 +97,7 @@ class RunConfig:
     dataset_id: str
     dataset_path: Path
     dataset_native_region: str
+    max_users: int | None  # keep all trajectories of at most this many users; None = all
     cleaning: CleaningConfig
     matcher_id: str
     radius_m: float
@@ -231,9 +233,21 @@ def load_config(path: str | Path) -> RunConfig:
     if not attacks:
         raise ValueError("config: at least one attack is required")
 
+    # Two seeds (design §6.4 repetitions): split_seed pins the population and the
+    # user split; seed drives everything stochastic downstream. Defaulting
+    # split_seed to seed keeps single-run configs unchanged, while repetition
+    # runs set split_seed explicitly and vary only seed — the split stays put.
+    seed = int(_req(exp, "seed", "experiment"))
+    split_seed = int(exp.get("split_seed", seed))
+    max_users_raw = ds.get("max_users")
+    max_users = None if max_users_raw is None else int(max_users_raw)
+    if max_users is not None and max_users < 1:
+        raise ValueError(f"config: dataset.max_users must be >= 1, got {max_users}")
+
     return RunConfig(
         exp_id=str(_req(exp, "id", "experiment")),
-        seed=int(_req(exp, "seed", "experiment")),
+        seed=seed,
+        split_seed=split_seed,
         output_dir=Path(exp.get("output_dir", f"results/{exp['id']}")),
         cache_dir=Path(exp.get("cache_dir", "data/processed")),
         protected_dir=Path(exp.get("protected_dir", "data/protected")),
@@ -245,6 +259,7 @@ def load_config(path: str | Path) -> RunConfig:
         dataset_id=str(_req(ds, "id", "dataset")),
         dataset_path=Path(_req(ds, "path", "dataset")),
         dataset_native_region=str(ds.get("native_region", "")),
+        max_users=max_users,
         cleaning=CleaningConfig(
             max_speed_kmh=float(_req(cl, "max_speed_kmh", "cleaning")),
             min_points=int(_req(cl, "min_points", "cleaning")),
@@ -338,7 +353,10 @@ def _version_hash(cfg: RunConfig) -> str:
             cfg.k_candidates,
             cfg.min_match_score,
         ],
-        "split": [sorted(cfg.fractions.items()), cfg.seed],
+        # Population and split are pinned by split_seed (not the run seed), so
+        # repetition runs that vary only the run seed share this pool cache.
+        "sample": cfg.max_users,
+        "split": [sorted(cfg.fractions.items()), cfg.split_seed],
     }
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
 
@@ -500,7 +518,9 @@ def _matched_pool(
         c = clean(raw, cfg.cleaning)
         if c is not None:
             cleaned.append(c)
-    labelled = split_by_user(cleaned, cfg.fractions, cfg.seed)
+    if cfg.max_users is not None:
+        cleaned = _subsample_users(cleaned, cfg.max_users, cfg.split_seed)
+    labelled = split_by_user(cleaned, cfg.fractions, cfg.split_seed)
     split_counts: dict[str, int] = {}
     for t in labelled:
         split_counts[t.split or "none"] = split_counts.get(t.split or "none", 0) + 1
@@ -511,6 +531,23 @@ def _matched_pool(
 
     _write_pool_cache(cache, matched, clean_by_id, dropped, split_counts)
     return matched, clean_by_id, dropped, split_counts
+
+
+def _subsample_users(
+    trajs: list[CleanTrajectory], max_users: int, seed: int
+) -> list[CleanTrajectory]:
+    """Keep every trajectory of at most ``max_users`` users (design §6.4 sample sizes).
+
+    Users are drawn by a seeded permutation of the sorted user ids, so the kept
+    population is deterministic, independent of trajectory order, and nested:
+    a larger ``max_users`` under the same seed keeps a superset of the users.
+    """
+    users = sorted({t.user_id for t in trajs})
+    if len(users) <= max_users:
+        return trajs
+    rng = np.random.default_rng(seed)
+    kept = {users[i] for i in rng.permutation(len(users))[:max_users]}
+    return [t for t in trajs if t.user_id in kept]
 
 
 def _build_metrics(cfg: RunConfig) -> list[SampledMetric]:
@@ -866,6 +903,8 @@ def _write_results(
         "config_hash": _version_hash(cfg),
         "git_commit": _git_commit(),
         "seed": cfg.seed,
+        "split_seed": cfg.split_seed,
+        "max_users": cfg.max_users,
         "created_at": datetime.now(UTC).isoformat(),
         "n_matched": len(matched),
         "n_dropped": dropped,

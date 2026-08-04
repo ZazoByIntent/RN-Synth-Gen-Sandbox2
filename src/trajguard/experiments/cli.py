@@ -2,15 +2,23 @@
 
 import argparse
 from collections import defaultdict
+from dataclasses import replace
 
 from trajguard.datamodel import MetricValue
 from trajguard.experiments.orchestrator import load_config, run_experiment
 from trajguard.reporting.report import generate_report
 
 
-def _print_summary(config_path: str) -> None:
-    """Run an experiment and print a per-target metric table with bootstrap CIs."""
+def _print_summary(config_path: str, seed: int | None = None) -> None:
+    """Run an experiment and print a per-target metric table with bootstrap CIs.
+
+    ``seed`` overrides the run seed for repetition runs: split_seed (resolved at
+    load time from the YAML) stays put, so only the stochastic downstream steps
+    change, and results land in a per-seed subdirectory instead of overwriting.
+    """
     cfg = load_config(config_path)
+    if seed is not None:
+        cfg = replace(cfg, seed=seed, output_dir=cfg.output_dir / f"seed{seed}")
     values = run_experiment(cfg)
 
     by_result: dict[str, list[MetricValue]] = defaultdict(list)
@@ -41,13 +49,20 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     run_p = sub.add_parser("run", help="run an experiment from a YAML config")
     run_p.add_argument("config", help="path to an experiment YAML")
+    run_p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="override the run seed (repetitions: the split stays pinned by "
+        "experiment.split_seed; results go to <output_dir>/seed<N>)",
+    )
     report_p = sub.add_parser("report", help="aggregate results/ into a Markdown risk report")
     report_p.add_argument("--results", default="results", help="directory of experiment outputs")
     report_p.add_argument("--out", default="reports", help="directory to write the report into")
     args = parser.parse_args()
 
     if args.command == "run":
-        _print_summary(args.config)
+        _print_summary(args.config, seed=args.seed)
     elif args.command == "report":
         print(f"report: {generate_report(args.results, args.out)}")
 

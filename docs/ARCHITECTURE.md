@@ -160,6 +160,14 @@ key and seed. Parsed with plain PyYAML + manual validation — no Hydra/OmegaCon
 Full annotated example: design §8. Entry point: `trajguard run <config>` (argparse,
 registered under `[project.scripts]`).
 
+Seeds come in two kinds: `experiment.split_seed` (defaults to `experiment.seed`)
+pins the population — the optional `dataset.max_users` user subsample and the
+train/test/shadow/attack split — while `experiment.seed` drives everything
+stochastic downstream (mechanism noise, attacker knowledge, bootstrap). Repetition
+runs therefore pin `split_seed` in the YAML and vary only the run seed via
+`trajguard run <config> --seed N`, which shares the processed pool cache and
+writes results to `<output_dir>/seedN`.
+
 ## Repo layout (design §9)
 
 ```

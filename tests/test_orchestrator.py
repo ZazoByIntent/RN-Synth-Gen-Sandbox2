@@ -143,6 +143,53 @@ def test_matched_pool_is_cached_as_parquet(tmp_path: Path, beijing_maps_dir: Pat
     assert len(list((tmp_path / "cache").iterdir())) == 1
 
 
+# --- repetitions: split_seed pins the population, seed varies the noise ----------
+
+
+def test_version_hash_ignores_run_seed_when_split_seed_pinned(tmp_path: Path) -> None:
+    from trajguard.experiments.orchestrator import _version_hash
+
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["experiment"]["split_seed"] = 7
+    cfg["experiment"]["seed"] = 1
+    first = _version_hash(load_config(write_config(tmp_path, cfg)))
+    cfg["experiment"]["seed"] = 2
+    second = _version_hash(load_config(write_config(tmp_path, cfg)))
+    assert first == second  # repetition runs share the cleaned/matched pool cache
+    cfg["experiment"]["split_seed"] = 8
+    assert _version_hash(load_config(write_config(tmp_path, cfg))) != first
+
+
+def test_repetition_seeds_share_pool_but_not_noise(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """Two run seeds under one split_seed: one pool cache, one protected release each."""
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    cfg["experiment"]["split_seed"] = 7
+    for seed in (1, 2):
+        cfg["experiment"]["seed"] = seed
+        cfg["experiment"]["output_dir"] = str(tmp_path / "out" / f"seed{seed}")
+        run(write_config(tmp_path, cfg))
+    assert len(list((tmp_path / "cache").iterdir())) == 1  # same population and split
+    assert len(list((tmp_path / "protected").iterdir())) == 2  # fresh noise per seed
+    record = json.loads((tmp_path / "out" / "seed2" / "run.json").read_text())
+    assert record["seed"] == 2 and record["split_seed"] == 7
+
+
+def test_max_users_limits_population(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    cfg = base_config(tmp_path, beijing_maps_dir)
+    cfg["dataset"]["max_users"] = 1  # the fixture has 2 users
+    run(write_config(tmp_path, cfg))
+    record = json.loads((tmp_path / "out" / "run.json").read_text())
+    assert record["max_users"] == 1
+    assert record["arms"]["raw"]["n_gallery_users"] == 1
+
+
+def test_invalid_max_users_rejected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["dataset"]["max_users"] = 0
+    with pytest.raises(ValueError, match="max_users"):
+        run(write_config(tmp_path, cfg))
+
+
 # --- loud failures for config knobs the orchestrator does not (yet) support ------
 
 
