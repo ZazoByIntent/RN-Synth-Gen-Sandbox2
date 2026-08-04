@@ -315,6 +315,26 @@ the ε = 0.1 and ε = 1.0 arms dropped all 8 trajectories (`n_rematch_dropped = 
 the pattern (stronger noise → fewer survivors) is by design; the survivor counts per
 arm are always recorded in `run.json`.
 
+## 7.1 Repetitions: mean and 95% CI across seeds
+
+```sh
+uv run trajguard repeat config/experiments/geolife_geoind_reid.yaml --seeds 1 2 3 4 5
+```
+
+Runs the same experiment once per seed and aggregates every metric across the
+repetitions. The population and the train/test/shadow/attack split stay pinned by
+`experiment.split_seed` in the YAML, so the expensive cleaning/matching pool is
+computed once and shared; each seed only redraws the mechanism noise and the
+attacker's knowledge. (A single extra repetition without aggregation:
+`trajguard run <config> --seed N`.)
+
+**Expected outcome:** one `results/<exp_id>/seed<N>/` directory per seed with the
+usual artifacts, plus `results/<exp_id>/repetitions.csv` and a console table with
+the across-seed mean and a Student-t 95% confidence interval per metric. This
+interval reflects variance *between* repetitions; the bootstrap interval inside
+each seed's `metrics.csv` reflects resampling uncertainty *within* one run — do
+not mix the two in report tables.
+
 ## 8. Aggregate risk report
 
 ```sh
