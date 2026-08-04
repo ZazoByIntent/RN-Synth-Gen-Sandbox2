@@ -19,9 +19,10 @@ odvisnost — prepleteno seme, opisano pri O3 — ki spremeni sestavo vala 1 v r
 
 **Stanje izvedbe (ista veja, 4. avgust 2026):** val 0 (`a2067b9`), korak 1a — ločitev semen in
 `dataset.max_users` (`8fac2fb`), korak 1b — `trajguard repeat` s 95 % intervalom čez ponovitve
-(`9005c2f`), korak 1c — rekonstrukcija v zanki orkestratorja (`4466008`). S tem sta O2 in O3
-zaprta, O1 pa delno (rekonstrukcija da, `poi_inference` in `membership_inference` še ne).
-Naslednji korak je **1d**.
+(`9005c2f`), korak 1c — rekonstrukcija v zanki orkestratorja (`4466008`), korak 1d —
+`poi_inference` v zanki orkestratorja (`c24cb48`). S tem sta O2 in O3 zaprta, O1 pa delno
+(rekonstrukcija in `poi_inference` da, `membership_inference` še ne). Naslednji korak je **1e**,
+ki ima oblikovni predpogoj (glej opombo ob koncu razdelka 4).
 
 **To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
 Prvotno besedilo ni bilo recenzirano; spodnja različica vključuje izid recenzije.
@@ -217,9 +218,10 @@ združitev:
 - **1c — izvedeno (`4466008`)** — rekonstrukcija v zanki orkestratorja: teče nad vsako
   geo-ind vejo z `epsilon`/`unit_m` iz veje (napadalec pozna mehanizem, zasnova §6.3),
   poroča `hausdorff_m`, `dtw_m`, `mean_spatial_error_m` z bootstrap intervali;
-- **1d — naslednji korak** — `poi_inference` v zanko orkestratorja: potrebuje preusmeritev
-  čistih GPS bazenov (`clean_by_id` namesto `matched`) in prenos svojih metrik (razdalja
-  dom/delo v metrih, delež lokaliziranih uporabnikov) v `metrics.csv`; brez znanih blokad;
+- **1d — izvedeno (`c24cb48`)** — `poi_inference` v zanki orkestratorja: čisti GPS bazeni
+  (`clean_by_id` namesto `matched`; cilj je izdana veja, resnica surova, ujemanje po
+  `user_id`) in prenos njegovih metrik (razdalja dom/delo v metrih, delež lokaliziranih
+  uporabnikov) z bootstrap intervali v `metrics.csv`;
 - **1e** — `membership_inference` v zanko orkestratorja: največji od treh, ker konfiguracija
   danes sploh nima razdelka za generatorje (`RunConfig`, `orchestrator.py`); prinese svoji
   metriki AUC in TPR pri nizkem FPR iz `evaluation/roc.py`; zgled priprave je obstoječi
@@ -257,14 +259,11 @@ popravkom poročila (glej razdelek 1.1), ne z implementacijo.
 ### Naslednji konkreten korak
 
 **[recenzija — prvotni predlog M1 + O2 + O3 je umaknjen** iz razlogov, opisanih pri valu 1.]
-Val 0 ter koraki 1a, 1b in 1c so izvedeni (glej oznake zgoraj). Naslednji je korak **1d**:
-`poi_inference` v zanko orkestratorja, po zgledu razreza 1c — validacija konfiguracije v
-`_attack_specs` (napad ima svoje parametre `dwell_s`, `radius_m`, ure, `tz_offset_h` in prag
-`threshold_m` za delež lokaliziranih), ločena priprava vhodov (čisti GPS bazeni: cilj je
-izdana veja, resnica surovi `clean_by_id`), prenos metrik iz `attribute_report` v
-`MetricValue` vrstice — razrez: `experiments/orchestrator.py`, `tests/test_orchestrator.py`,
-konfiguracija pod `config/experiments/` in `docs/RUNNING.md` — znotraj pravila o petih
-datotekah.
+Val 0 ter koraki 1a, 1b, 1c in 1d so izvedeni (glej oznake zgoraj). Naslednji je korak **1e**:
+`membership_inference` v zanko orkestratorja. Ta korak ima oblikovni predpogoj — odločitev,
+kako konfiguracija sploh opiše generatorje (`synthetic_generators` v YAML; danes `RunConfig`
+nima razdelka zanje) — zato se ne začne kot mehanska priključitev, ampak v načrtovalnem
+načinu s predlogom oblike konfiguracije (glej tudi opombo ob koncu razdelka 4).
 
 ---
 
