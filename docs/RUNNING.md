@@ -305,7 +305,13 @@ unprotected baseline.
 `reidentification:protected:geo_indistinguishability:epsilon=…` rows, the results
 directory additionally gets `tradeoff.png` (attack accuracy versus utility damage),
 and utility metrics (`cell_js_divergence`, `length_dist_error`) quantify how much
-the noise distorted the data.
+the noise distorted the data. The config also runs the reconstruction attack: one
+`reconstruction:protected:geo_indistinguishability:epsilon=…` row per ε arm with
+`hausdorff_m`, `dtw_m`, and `mean_spatial_error_m` in metres — the attacker's MAP
+inversion of the noise (it knows ε and unit_m, design §6.3). Expect the mean
+spatial error to sit *below* the mechanism's mean displacement `2·unit_m/ε` on
+smooth paths: that gap is exactly the privacy the inversion claws back. The
+identity arm gets no reconstruction row (there is no noise to invert).
 
 **Expected surprise that is not a bug:** at ε = 0.1 the noise is ~2 km per point, so
 most or all protected trajectories fail re-matching and the arm reports zero or NaN

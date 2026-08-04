@@ -8,7 +8,7 @@ import math
 import os
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,8 +18,10 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
+from pyproj import Transformer
 
 from trajguard.attacks.base import Attack, BackgroundKnowledge
+from trajguard.attacks.reconstruction import reconstruction_report
 from trajguard.datamodel import CleanTrajectory, MatchedTrajectory, MetricValue
 from trajguard.datasets.base import DatasetLoader
 from trajguard.datasets.cleaning import CleaningConfig, clean, haversine_m
@@ -31,6 +33,7 @@ from trajguard.experiments import registry
 from trajguard.maps.base import RoadNetwork
 from trajguard.matching.base import MapMatcher, match_many
 from trajguard.privacy.base import PrivacyMechanism
+from trajguard.privacy.geoind import GeoIndistinguishability
 from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
 from trajguard.representation import Grid, TrajectoryView
 
@@ -38,13 +41,16 @@ _ = _builtins  # imported for its registration side effects
 
 _HEADLINE = "top1_acc"  # metric pivoted into matrix.csv and the tradeoff y-axis
 
-# Attacks the run loop can actually drive: it configures with no constructor args and
-# calls run(matched_pool, aux), the reidentification contract (the P4 vertical slice).
-# Other families (membership: synthetic + shadows; reconstruction: point sequences +
-# epsilon; poi: clean GPS + timestamps) have standalone harnesses and tests, but the
-# run loop would feed them the wrong inputs — so a config naming them is rejected up
-# front rather than crashing mid-pipeline. They join here as they are wired in.
-_ORCHESTRATOR_ATTACKS = frozenset({"reidentification"})
+# Attacks the run loop can actually drive. Reidentification is the reid-shaped
+# contract (no constructor args, run(matched_pool, aux)); reconstruction gets its
+# own preparation (noisy vs true point sequences in projected metres, mechanism
+# params handed to the attacker per design §6.3) and runs only against
+# geo_indistinguishability arms. The remaining families (membership: synthetic +
+# shadows; poi: clean GPS + timestamps) have standalone harnesses and tests, but
+# the run loop would feed them the wrong inputs — so a config naming them is
+# rejected up front rather than crashing mid-pipeline. They join here as they are
+# wired in.
+_ORCHESTRATOR_ATTACKS = frozenset({"reidentification", "reconstruction"})
 
 
 class ConsistencyError(ValueError):
@@ -59,9 +65,10 @@ class AttackSpec:
     """One configured attack: its registry name, attacker knowledge, and targets."""
 
     attack_type: str
-    known_points: tuple[int, ...]
+    known_points: tuple[int, ...]  # empty for families without a known-points knob
     distance: str
     target_scopes: tuple[str, ...]
+    motion_m: float | None = None  # reconstruction only: fixed curvature-prior scale (m)
 
 
 @dataclass(frozen=True)
@@ -128,10 +135,7 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
     specs: list[AttackSpec] = []
     for i, a in enumerate(attacks):
         ctx = f"attacks[{i}]"
-        attacker = _req(a, "attacker", ctx)
-        known = tuple(int(k) for k in _req(attacker, "known_points", f"{ctx}.attacker"))
-        if not known:
-            raise ValueError(f"config: {ctx}.attacker.known_points must not be empty")
+        attack_type = str(_req(a, "type", ctx))
         scopes = tuple(str(s) for s in a.get("target_scope", ["raw"]))
         unknown_scopes = set(scopes) - {"raw", "protected"}
         if unknown_scopes:
@@ -139,9 +143,40 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                 f"config: {ctx}.target_scope {sorted(unknown_scopes)} unsupported "
                 "(synthetic targets land in a later phase)"
             )
+        if attack_type == "reconstruction":
+            # The attacker's knowledge is the arm's mechanism parameters (design
+            # §6.3), supplied by the run loop — only the optional curvature prior
+            # is configurable here. Reid-style knobs are a config mistake.
+            attacker = a.get("attacker", {})
+            unknown_keys = set(attacker) - {"motion_m"}
+            if unknown_keys:
+                raise ValueError(
+                    f"config: {ctx}.attacker keys {sorted(unknown_keys)} unsupported for "
+                    "reconstruction (epsilon/unit_m come from the mechanism arm)"
+                )
+            if set(scopes) != {"protected"}:
+                raise ValueError(
+                    f"config: {ctx}.target_scope must be ['protected'] for reconstruction, "
+                    f"got {list(scopes)}"
+                )
+            motion = attacker.get("motion_m")
+            specs.append(
+                AttackSpec(
+                    attack_type=attack_type,
+                    known_points=(),
+                    distance="dtw",
+                    target_scopes=scopes,
+                    motion_m=float(motion) if motion is not None else None,
+                )
+            )
+            continue
+        attacker = _req(a, "attacker", ctx)
+        known = tuple(int(k) for k in _req(attacker, "known_points", f"{ctx}.attacker"))
+        if not known:
+            raise ValueError(f"config: {ctx}.attacker.known_points must not be empty")
         specs.append(
             AttackSpec(
-                attack_type=str(_req(a, "type", ctx)),
+                attack_type=attack_type,
                 known_points=known,
                 distance=str(attacker.get("distance", "dtw")),
                 target_scopes=scopes,
@@ -664,6 +699,62 @@ def _target_pools(
     return pools
 
 
+def _reconstruction_values(
+    cfg: RunConfig,
+    spec: AttackSpec,
+    attack_cls: Callable[..., Attack],
+    pools: dict[str, _Pool],
+    clean_by_id: dict[str, CleanTrajectory],
+    mech_by_ref: dict[str, PrivacyMechanism],
+) -> list[MetricValue]:
+    """Run the MAP reconstruction against every geo_indistinguishability arm.
+
+    Target and aux are the released (noisy) and true GPS points of the full
+    release, projected to the map CRS so the attack works in metres. Re-matching
+    survival does not matter here: the attacker inverts the release itself, not
+    the snapped pool. Arms of other mechanisms (e.g. the identity baseline) are
+    skipped — there is no planar-Laplace noise to invert.
+    """
+    transformer = Transformer.from_crs("EPSG:4326", cfg.map_crs, always_xy=True)
+
+    def project(points: Sequence[tuple[float, float, float]]) -> list[tuple[float, float]]:
+        xs, ys = transformer.transform([p[1] for p in points], [p[0] for p in points])
+        return list(zip(xs, ys, strict=True))
+
+    values: list[MetricValue] = []
+    for ref, pool in pools.items():
+        mech = mech_by_ref.get(ref)
+        if not isinstance(mech, GeoIndistinguishability):
+            continue
+        ids = sorted(set(clean_by_id) & set(pool.clean_by_id))
+        target = [project(pool.clean_by_id[i].points) for i in ids]
+        aux = [project(clean_by_id[i].points) for i in ids]
+        attack = attack_cls(epsilon=mech.epsilon, unit_m=mech.unit_m, motion_m=spec.motion_m)
+        result_id = f"reconstruction:{ref}"
+        result = replace(
+            attack.run(target, aux),
+            exp_id=cfg.exp_id,
+            target_data_ref=ref,
+            result_id=result_id,
+        )
+        report = reconstruction_report(
+            result, n_bootstrap=cfg.bootstrap_n, ci=cfg.bootstrap_ci, seed=cfg.seed
+        )
+        values.extend(
+            MetricValue(
+                metric_id=f"{result_id}:{name}",
+                result_id=result_id,
+                name=name,
+                value=mean,
+                ci_low=lo,
+                ci_high=hi,
+                n_bootstrap=cfg.bootstrap_n,
+            )
+            for name, (mean, lo, hi) in report.items()
+        )
+    return values
+
+
 def run(config_path: str | Path) -> list[MetricValue]:
     """Load a config file, run the experiment, and return all metric values."""
     return run_experiment(load_config(config_path))
@@ -705,24 +796,33 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 f"config: attack {spec.attack_type!r} does not support "
                 f"target_scope {sorted(unsupported)}"
             )
-        # The run loop builds attacks with no arguments; an attack whose constructor
-        # needs params the orchestrator cannot supply (e.g. reconstruction's epsilon)
-        # must die here, not after the expensive pipeline.
-        try:
-            attack_cls()
-        except TypeError as err:
-            raise ValueError(
-                f"config: attack {spec.attack_type!r} takes constructor params "
-                f"the orchestrator does not supply: {err}"
-            ) from err
-        # Constructs fine but consumes a different input contract than the run loop
-        # supplies (e.g. poi_inference wants clean GPS, not the matched pool): fail
-        # fast here instead of crashing after the expensive pipeline.
+        # Consumes a different input contract than the run loop supplies (e.g.
+        # poi_inference wants clean GPS, not the matched pool): fail fast here
+        # instead of crashing after the expensive pipeline.
         if spec.attack_type not in _ORCHESTRATOR_ATTACKS:
             raise ValueError(
                 f"config: attack {spec.attack_type!r} is not wired into the orchestrator's "
                 f"run loop yet; only {sorted(_ORCHESTRATOR_ATTACKS)} runs end-to-end"
             )
+        if spec.attack_type == "reconstruction":
+            # The MAP inversion targets planar-Laplace noise, so it needs at least
+            # one geo_indistinguishability arm to attack; other arms are skipped.
+            if not any(m.mech_id == "geo_indistinguishability" for m in cfg.mechanisms):
+                raise ValueError(
+                    "config: reconstruction requires a geo_indistinguishability mechanism "
+                    "arm (the MAP inversion attacks planar-Laplace noise)"
+                )
+        else:
+            # The reid-shaped loop builds attacks with no arguments; an attack whose
+            # constructor needs params the orchestrator cannot supply must die here,
+            # not after the expensive pipeline.
+            try:
+                attack_cls()
+            except TypeError as err:
+                raise ValueError(
+                    f"config: attack {spec.attack_type!r} takes constructor params "
+                    f"the orchestrator does not supply: {err}"
+                ) from err
         plans.append((spec, attack_cls))
     mech_plans: list[tuple[MechanismSpec, PrivacyMechanism]] = []
     for mspec in cfg.mechanisms:
@@ -740,10 +840,18 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     metrics = _build_metrics(cfg)
     pools = _target_pools(cfg, matched, clean_by_id, mech_plans, provide)
 
+    mech_by_ref: dict[str, PrivacyMechanism] = {
+        f"protected:{mspec.ref}": mech for mspec, mech in mech_plans
+    }
     all_values: list[MetricValue] = []
     attack_rows: list[tuple[str, int, list[MetricValue]]] = []  # (ref, known_points, values)
     probe_counts: dict[str, int] = {}
     for spec, attack_cls in plans:
+        if spec.attack_type == "reconstruction":
+            all_values.extend(
+                _reconstruction_values(cfg, spec, attack_cls, pools, clean_by_id, mech_by_ref)
+            )
+            continue
         for ref, pool in pools.items():
             if ref.split(":", 1)[0] not in spec.target_scopes:
                 continue

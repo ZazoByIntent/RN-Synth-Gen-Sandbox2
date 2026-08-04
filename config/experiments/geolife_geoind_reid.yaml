@@ -54,6 +54,9 @@ attacks:
       known_points: [3, 5, 10]   # points the attacker knows about each target
       distance: dtw
     target_scope: [raw, protected]
+  - type: reconstruction         # MAP inversion of the geo-ind noise (design §6.3);
+    target_scope: [protected]    # runs per geo-ind arm, epsilon/unit_m taken from it;
+                                 # identity arms are skipped (nothing to invert)
 
 metrics:
   privacy: [top1_acc, topk_acc, linkage_rate]

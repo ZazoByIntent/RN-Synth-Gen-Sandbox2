@@ -200,16 +200,32 @@ def test_unknown_attack_type_fails_loudly(tmp_path: Path) -> None:
         run(write_config(tmp_path, cfg))
 
 
-def test_unconstructible_attack_fails_before_pipeline(tmp_path: Path) -> None:
-    # reconstruction needs epsilon, which the orchestrator cannot supply; the config
-    # points at an empty maps dir, so passing requires failing before any pipeline work.
+def test_reconstruction_rejects_reid_attacker_keys(tmp_path: Path) -> None:
+    # epsilon/unit_m come from the mechanism arm, and known_points has no meaning
+    # here — a reid-style attacker section on reconstruction is a config mistake.
     cfg = base_config(tmp_path, tmp_path / "maps")
     cfg["attacks"][0] = {
         "type": "reconstruction",
         "attacker": {"known_points": [3]},
         "target_scope": ["protected"],
     }
-    with pytest.raises(ValueError, match="'reconstruction' takes constructor params"):
+    with pytest.raises(ValueError, match="unsupported for reconstruction"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_reconstruction_requires_geoind_arm(tmp_path: Path) -> None:
+    # base_config has only the identity mechanism: nothing to invert, fail before
+    # the pipeline (the empty maps dir would crash any pipeline work).
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {"type": "reconstruction", "target_scope": ["protected"]}
+    with pytest.raises(ValueError, match="geo_indistinguishability"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_reconstruction_target_scope_must_be_protected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {"type": "reconstruction", "target_scope": ["raw", "protected"]}
+    with pytest.raises(ValueError, match="must be \\['protected'\\]"):
         run(write_config(tmp_path, cfg))
 
 
@@ -349,6 +365,36 @@ def test_perturbing_mechanism_rematches_end_to_end(tmp_path: Path, beijing_maps_
     assert {p.name for p in entries[0].iterdir()} == expected_files
     meta = json.loads((entries[0] / "meta.json").read_text())
     assert meta["mechanism"] == GEOIND_REF and meta["spent_budget"] > 0
+
+
+def test_reconstruction_runs_against_geoind_arms_only(
+    tmp_path: Path, beijing_maps_dir: Path
+) -> None:
+    """End to end: reconstruction inverts the geo-ind release, skips the identity arm."""
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    cfg["attacks"].append({"type": "reconstruction", "target_scope": ["protected"]})
+    values = run(write_config(tmp_path, cfg))
+
+    recon = [v for v in values if v.result_id.startswith("reconstruction:")]
+    assert {v.result_id for v in recon} == {f"reconstruction:protected:{GEOIND_REF}"}
+    by_name = {v.name: v for v in recon}
+    assert set(by_name) == {"hausdorff_m", "dtw_m", "mean_spatial_error_m"}
+    for v in by_name.values():
+        assert v.value is not None and v.value > 0.0
+        assert v.ci_low is not None and v.ci_high is not None
+        assert v.ci_low <= v.value <= v.ci_high
+    # per-point metrics stay at the noise scale (mean radius 2*25/10 = 5 m);
+    # dtw_m is a path-summed distance, so it is only checked for finiteness above
+    assert by_name["hausdorff_m"].value < 100.0
+    # the MAP estimate must beat the raw noisy release on average: with the
+    # Gamma(2, b=2.5 m) radius the released points sit ~5 m off, the smoother less
+    assert by_name["mean_spatial_error_m"].value < 5.0
+    # reconstruction rows land in metrics.csv alongside the reid rows
+    rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
+    assert any(r["result_id"].startswith("reconstruction:") for r in rows)
+    # the reid matrix stays reid-only (no reconstruction rows pivoted in)
+    with (tmp_path / "out" / "matrix.csv").open() as fh:
+        assert all(not row.startswith("reconstruction") for row in fh)
 
 
 def test_matrix_and_tradeoff_artifacts_written(tmp_path: Path, beijing_maps_dir: Path) -> None:
