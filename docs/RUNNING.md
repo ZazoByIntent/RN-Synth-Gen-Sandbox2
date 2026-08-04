@@ -313,6 +313,20 @@ spatial error to sit *below* the mechanism's mean displacement `2·unit_m/ε` on
 smooth paths: that gap is exactly the privacy the inversion claws back. The
 identity arm gets no reconstruction row (there is no noise to invert).
 
+The config also runs the POI inference attack (POI — point of interest: here the
+inferred home and work location of each user, design §6.4). It produces one
+`poi_inference:protected:…` row set per arm — including the identity arm `none` —
+with four metrics: `home_error_m` / `work_error_m` (metres between the inferred
+and the true home/work location, averaged over the users the attack managed to
+place) and `home_localised` / `work_localised` (the fraction of all users whose
+location the attacker pins within `threshold_m`, default 200 m). Unlike
+reidentification, this attack reads the released GPS points directly, so its rows
+survive even for arms whose noise made every trajectory fail re-matching (the
+ε = 0.1 arm still gets a row — expect NaN/blank errors there, because the noise
+dissolves every stay-point). Read the `protected:none` row as a sanity value: the
+identity mechanism releases the raw points, so near-zero error and localised = 1.0
+there mean the harness is honest, not that the data is safe.
+
 **Expected surprise that is not a bug:** at ε = 0.1 the noise is ~2 km per point, so
 most or all protected trajectories fail re-matching and the arm reports zero or NaN
 attack accuracy — "protection by destroying the release". Verified on fixture data:

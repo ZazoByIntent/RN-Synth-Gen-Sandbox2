@@ -229,17 +229,46 @@ def test_reconstruction_target_scope_must_be_protected(tmp_path: Path) -> None:
         run(write_config(tmp_path, cfg))
 
 
-def test_poi_inference_attack_rejected_before_pipeline(tmp_path: Path) -> None:
-    # poi_inference constructs with all-default args, so it clears the constructor probe;
-    # it consumes clean GPS, not the matched pool, so the run loop would crash after the
-    # pipeline. An empty maps dir means passing requires failing before any pipeline work.
+def test_poi_inference_rejects_reid_attacker_keys(tmp_path: Path) -> None:
+    # known_points/distance have no meaning for stay-point clustering — a
+    # reid-style attacker section on poi_inference is a config mistake.
     cfg = base_config(tmp_path, tmp_path / "maps")
     cfg["attacks"][0] = {
         "type": "poi_inference",
         "attacker": {"known_points": [3]},
         "target_scope": ["protected"],
     }
-    with pytest.raises(ValueError, match="not wired into the orchestrator"):
+    with pytest.raises(ValueError, match="unsupported for poi_inference"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_poi_inference_target_scope_must_be_protected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {"type": "poi_inference", "target_scope": ["raw", "protected"]}
+    with pytest.raises(ValueError, match="must be \\['protected'\\] for poi_inference"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_poi_inference_rejects_bad_stay_point_knobs(tmp_path: Path) -> None:
+    # The attack constructor validates its knobs; the probe must fire before any
+    # pipeline work (the empty maps dir would crash any pipeline stage).
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {
+        "type": "poi_inference",
+        "attacker": {"dwell_s": -5},
+        "target_scope": ["protected"],
+    }
+    with pytest.raises(ValueError, match="dwell_s"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_poi_inference_requires_a_mechanism_arm(tmp_path: Path) -> None:
+    # With no mechanisms there are no protected arms and the attack would
+    # silently produce no rows — fail loudly before the pipeline instead.
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["privacy_mechanisms"] = []
+    cfg["attacks"][0] = {"type": "poi_inference", "target_scope": ["protected"]}
+    with pytest.raises(ValueError, match="privacy_mechanisms"):
         run(write_config(tmp_path, cfg))
 
 
@@ -395,6 +424,60 @@ def test_reconstruction_runs_against_geoind_arms_only(
     # the reid matrix stays reid-only (no reconstruction rows pivoted in)
     with (tmp_path / "out" / "matrix.csv").open() as fh:
         assert all(not row.startswith("reconstruction") for row in fh)
+
+
+def test_poi_inference_runs_against_protected_arms(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """End to end: POI rows per protected arm; the identity arm is the ~zero-error sanity check."""
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    # Fixture trajectories are short drives, not dwells: widen the stay-point radius
+    # past the fixture bbox (~2 km) and shrink the dwell time below the trajectory
+    # span so every trajectory yields one stay-point, and let both hour windows
+    # cover the whole day so home and work always resolve (cf. tests/test_attribute.py).
+    cfg["attacks"].append(
+        {
+            "type": "poi_inference",
+            "target_scope": ["protected"],
+            "attacker": {
+                "dwell_s": 10,
+                "radius_m": 5000,
+                "home_hours": [0, 24],
+                "work_hours": [0, 24],
+            },
+            "threshold_m": 200,
+        }
+    )
+    values = run(write_config(tmp_path, cfg))
+
+    poi = [v for v in values if v.result_id.startswith("poi_inference:")]
+    assert {v.result_id for v in poi} == {
+        "poi_inference:protected:none",
+        f"poi_inference:protected:{GEOIND_REF}",
+    }
+    by_arm: dict[str, dict[str, Any]] = {}
+    for v in poi:
+        by_arm.setdefault(v.result_id, {})[v.name] = v
+    names = {"home_error_m", "work_error_m", "home_localised", "work_localised"}
+    for arm in by_arm.values():
+        assert set(arm) == names
+    # Identity arm releases the raw points: exact recovery is a sanity value, not protection.
+    identity = by_arm["poi_inference:protected:none"]
+    assert identity["home_error_m"].value == 0.0
+    assert identity["work_error_m"].value == 0.0
+    assert identity["home_localised"].value == 1.0
+    assert identity["work_localised"].value == 1.0
+    # The geo-ind arm (mean displacement 5 m) leaves a small nonzero centroid error,
+    # still inside the 200 m localisation threshold, with a bootstrap CI around it.
+    noisy = by_arm[f"poi_inference:protected:{GEOIND_REF}"]
+    err = noisy["home_error_m"]
+    assert 0.0 < err.value < 200.0
+    assert err.ci_low is not None and err.ci_high is not None
+    assert err.ci_low <= err.value <= err.ci_high
+    assert noisy["home_localised"].value == 1.0
+    # POI rows land in metrics.csv; the reid matrix stays reid-only.
+    rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
+    assert any(r["result_id"].startswith("poi_inference:") for r in rows)
+    with (tmp_path / "out" / "matrix.csv").open() as fh:
+        assert all(not row.startswith("poi_inference") for row in fh)
 
 
 def test_matrix_and_tradeoff_artifacts_written(tmp_path: Path, beijing_maps_dir: Path) -> None:

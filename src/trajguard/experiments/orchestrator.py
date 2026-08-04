@@ -20,6 +20,7 @@ import pyarrow.parquet as pq
 import yaml
 from pyproj import Transformer
 
+from trajguard.attacks.attribute import attribute_report
 from trajguard.attacks.base import Attack, BackgroundKnowledge
 from trajguard.attacks.reconstruction import reconstruction_report
 from trajguard.datamodel import CleanTrajectory, MatchedTrajectory, MetricValue
@@ -45,12 +46,13 @@ _HEADLINE = "top1_acc"  # metric pivoted into matrix.csv and the tradeoff y-axis
 # contract (no constructor args, run(matched_pool, aux)); reconstruction gets its
 # own preparation (noisy vs true point sequences in projected metres, mechanism
 # params handed to the attacker per design §6.3) and runs only against
-# geo_indistinguishability arms. The remaining families (membership: synthetic +
-# shadows; poi: clean GPS + timestamps) have standalone harnesses and tests, but
-# the run loop would feed them the wrong inputs — so a config naming them is
-# rejected up front rather than crashing mid-pipeline. They join here as they are
-# wired in.
-_ORCHESTRATOR_ATTACKS = frozenset({"reidentification", "reconstruction"})
+# geo_indistinguishability arms; poi_inference reads each protected arm's released
+# clean GPS pool against the raw pool, matched per user. The remaining family
+# (membership: synthetic targets + shadow models) has a standalone harness and
+# tests, but the run loop would feed it the wrong inputs — so a config naming it
+# is rejected up front rather than crashing mid-pipeline. It joins here once the
+# config grows a generator section.
+_ORCHESTRATOR_ATTACKS = frozenset({"reidentification", "reconstruction", "poi_inference"})
 
 
 class ConsistencyError(ValueError):
@@ -69,6 +71,8 @@ class AttackSpec:
     distance: str
     target_scopes: tuple[str, ...]
     motion_m: float | None = None  # reconstruction only: fixed curvature-prior scale (m)
+    poi_params: tuple[tuple[str, Any], ...] = ()  # poi_inference only: stay-point knobs
+    threshold_m: float | None = None  # poi_inference only: localised-user cutoff (m)
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,49 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                     distance="dtw",
                     target_scopes=scopes,
                     motion_m=float(motion) if motion is not None else None,
+                )
+            )
+            continue
+        if attack_type == "poi_inference":
+            # The attack brings its own stay-point knobs (design §6.4); reid-style
+            # attacker keys (known_points/distance) have no meaning for stay-point
+            # clustering and are a config mistake. threshold_m parameterises the
+            # localised-user fraction in the report, not the attacker.
+            attacker = a.get("attacker", {})
+            allowed = {"dwell_s", "radius_m", "home_hours", "work_hours", "tz_offset_h"}
+            unknown_keys = set(attacker) - allowed
+            if unknown_keys:
+                raise ValueError(
+                    f"config: {ctx}.attacker keys {sorted(unknown_keys)} unsupported for "
+                    f"poi_inference (expected a subset of {sorted(allowed)})"
+                )
+            if set(scopes) != {"protected"}:
+                raise ValueError(
+                    f"config: {ctx}.target_scope must be ['protected'] for poi_inference, "
+                    f"got {list(scopes)}"
+                )
+            scalar_keys = ("dwell_s", "radius_m", "tz_offset_h")
+            params: dict[str, Any] = {k: float(attacker[k]) for k in scalar_keys if k in attacker}
+            for key in ("home_hours", "work_hours"):
+                if key in attacker:
+                    hours = tuple(int(h) for h in attacker[key])
+                    if len(hours) != 2:
+                        raise ValueError(
+                            f"config: {ctx}.attacker.{key} must be [start_hour, end_hour], "
+                            f"got {attacker[key]}"
+                        )
+                    params[key] = hours
+            threshold = float(a.get("threshold_m", 200.0))
+            if threshold <= 0:
+                raise ValueError(f"config: {ctx}.threshold_m must be > 0, got {threshold}")
+            specs.append(
+                AttackSpec(
+                    attack_type=attack_type,
+                    known_points=(),
+                    distance="dtw",
+                    target_scopes=scopes,
+                    poi_params=tuple(sorted(params.items())),
+                    threshold_m=threshold,
                 )
             )
             continue
@@ -755,6 +802,61 @@ def _reconstruction_values(
     return values
 
 
+def _poi_attack(attack_cls: Callable[..., Attack], spec: AttackSpec) -> Attack:
+    """Instantiate the POI attack from the spec's stay-point knobs (fail-fast probe)."""
+    return attack_cls(**dict(spec.poi_params))
+
+
+def _poi_inference_values(
+    cfg: RunConfig,
+    spec: AttackSpec,
+    attack_cls: Callable[..., Attack],
+    pools: dict[str, _Pool],
+    clean_by_id: dict[str, CleanTrajectory],
+) -> list[MetricValue]:
+    """Run home/work POI inference against every protected arm's released GPS pool.
+
+    Target is the arm's full release (``clean_by_id`` keeps every released
+    trajectory, so an arm whose noise empties the re-matched pool is still
+    attackable); truth is the raw clean pool, matched per ``user_id``. The
+    identity arm releases the raw points unchanged, so its rows are a
+    near-zero-error sanity baseline, not evidence of protection.
+    """
+    attack = _poi_attack(attack_cls, spec)
+    threshold = spec.threshold_m if spec.threshold_m is not None else 200.0
+    values: list[MetricValue] = []
+    for ref, pool in pools.items():
+        if not ref.startswith("protected:"):
+            continue
+        result_id = f"poi_inference:{ref}"
+        result = replace(
+            attack.run(list(pool.clean_by_id.values()), list(clean_by_id.values())),
+            exp_id=cfg.exp_id,
+            target_data_ref=ref,
+            result_id=result_id,
+        )
+        report = attribute_report(
+            result,
+            threshold_m=threshold,
+            n_bootstrap=cfg.bootstrap_n,
+            ci=cfg.bootstrap_ci,
+            seed=cfg.seed,
+        )
+        values.extend(
+            MetricValue(
+                metric_id=f"{result_id}:{name}",
+                result_id=result_id,
+                name=name,
+                value=mean,
+                ci_low=lo,
+                ci_high=hi,
+                n_bootstrap=cfg.bootstrap_n,
+            )
+            for name, (mean, lo, hi) in report.items()
+        )
+    return values
+
+
 def run(config_path: str | Path) -> list[MetricValue]:
     """Load a config file, run the experiment, and return all metric values."""
     return run_experiment(load_config(config_path))
@@ -812,6 +914,17 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                     "config: reconstruction requires a geo_indistinguishability mechanism "
                     "arm (the MAP inversion attacks planar-Laplace noise)"
                 )
+        elif spec.attack_type == "poi_inference":
+            # It attacks protected releases, so an empty mechanism section would
+            # silently produce no rows; and the constructor validates its knobs
+            # (e.g. dwell_s > 0), so probe it before the expensive pipeline.
+            if not cfg.mechanisms:
+                raise ValueError(
+                    "config: poi_inference targets protected releases, but no "
+                    "privacy_mechanisms are configured (the 'none' arm gives the "
+                    "sanity baseline)"
+                )
+            _poi_attack(attack_cls, spec)
         else:
             # The reid-shaped loop builds attacks with no arguments; an attack whose
             # constructor needs params the orchestrator cannot supply must die here,
@@ -851,6 +964,9 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             all_values.extend(
                 _reconstruction_values(cfg, spec, attack_cls, pools, clean_by_id, mech_by_ref)
             )
+            continue
+        if spec.attack_type == "poi_inference":
+            all_values.extend(_poi_inference_values(cfg, spec, attack_cls, pools, clean_by_id))
             continue
         for ref, pool in pools.items():
             if ref.split(":", 1)[0] not in spec.target_scopes:
