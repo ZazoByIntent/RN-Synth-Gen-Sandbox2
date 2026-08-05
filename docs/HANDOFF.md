@@ -22,9 +22,10 @@ odvisnost — prepleteno seme, opisano pri O3 — ki spremeni sestavo vala 1 v r
 (`9005c2f`), korak 1c — rekonstrukcija v zanki orkestratorja (`4466008`), korak 1d —
 `poi_inference` v zanki orkestratorja (`c24cb48`), korak 1e — `membership_inference` in
 razdelek `synthetic_generators` v orkestratorju (`0608755`, `9388cc8`). S tem so O1, O2 in O3
-zaprti in **val 1 je zaključen**: vsi štirje scenariji tečejo iz ene konfiguracije. Naslednje
-delo je val 2 (blokiran, dokler ni sheme `Rezultati_predloga`) ali val 3 (A3 nima blokad) —
-izbira je avtorjeva. Kjer se je med izvedbo izkazalo drugače, kot napoveduje besedilo spodaj,
+zaprti in **val 1 je zaključen**: vsi štirje scenariji tečejo iz ene konfiguracije. Shema
+`Rezultati_predloga` je dogovorjena in zapisana v `docs/REZULTATI_SHEMA.md` (5. avgust 2026),
+zato **val 2 ni več blokiran**; alternativa ostaja val 3 (A3 nima blokad) — izbira je
+avtorjeva. Kjer se je med izvedbo izkazalo drugače, kot napoveduje besedilo spodaj,
 je popravek vpisan na mestu in označen z **[izvedba]** (po istem vzorcu kot **[recenzija]**).
 
 **To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
@@ -161,7 +162,10 @@ skripte, preden se lotiš posega v jedro.
   podpis konfiguracije (`config_hash`) (`orchestrator.py:864-887`); manjka le pripenjanje teh
   stolpcev vrsticam rezultatov. Ciljne sheme ni mogoče preveriti, ker `IZV_nacrt_eksperimentov.xlsx`
   in `IZV_porocilo.docx` **nista v repozitoriju** — val 2 je blokiran, dokler avtor sheme ne
-  priskrbi (ali se zapiše v `docs/`).
+  priskrbi (ali se zapiše v `docs/`). **[izvedba, 5. avgust 2026]** Pogoj je izpolnjen: shema
+  je dogovorjena z avtorjem in zapisana v `docs/REZULTATI_SHEMA.md` (ena ploska tabela, osi
+  vrtenja kot namenski stolpci, statistika veje in časi kot stolpci, vrstice po semenih) —
+  val 2 ni več blokiran.
 - **O5 — spregledan je `reporting/report.py`.** Ukaz `trajguard report` že združuje vse zagone
   v tabele, matriko tveganj in Markdown poročilo (`report.py:224`, `:304`, `:512`). Manjkajo
   štirje načrtovani grafi, izhodišče pa je bistveno boljše od »obstaja samo `plot_tradeoff()`«.
@@ -280,7 +284,12 @@ merjenje časa in pomnilnika, štirje načrtovani grafi. Brez tega se rezultati 
 kar je pri petih ponovitvah krat šest vrednosti ε krat pet stopenj predznanja vir napak.
 **[recenzija]** Blokiran, dokler shema `Rezultati_predloga` ni na voljo (datoteki
 `IZV_nacrt_eksperimentov.xlsx` in `IZV_porocilo.docx` nista v repozitoriju); gradi na
-obstoječem `reporting/report.py`, ne od začetka.
+obstoječem `reporting/report.py`, ne od začetka. **[izvedba, 5. avgust 2026]** Shema je
+zdaj v `docs/REZULTATI_SHEMA.md` — blokada je odpravljena; tam je tudi popisano, kaj od
+sestavin že obstaja in kaj mora val 2 dograditi (strukturirani stolpci iz specifikacij,
+`attack_runtime_s` ob vrstice, MIA števca `n_members`/`n_nonmembers`, zlepljenje v
+`reports/results_master.csv` prek `trajguard report`). Sem sodi tudi vodilna metrika po
+družini iz opombe pri 1.6.
 
 **Val 3 — dopolnitve znotraj obstoječih štirih scenarijev (M2, A3, A4).** Top-k POI skupaj z
 `as_poi_visits()` odklene razdelek 7.5; rekonstrukcija z omejitvijo omrežja je vsebinsko najbolj
@@ -306,10 +315,12 @@ popravkom poročila (glej razdelek 1.1), ne z implementacijo.
 
 **[recenzija — prvotni predlog M1 + O2 + O3 je umaknjen** iz razlogov, opisanih pri valu 1.]
 Val 0 in celoten val 1 (koraki 1a–1e) so izvedeni (glej oznake zgoraj); razdelek 7.1 poročila
-je s tem izvedljiv iz ene konfiguracije. Naslednje delo ni določeno enolično: val 2 ostaja
-blokiran na shemi `Rezultati_predloga` (datoteki `IZV_nacrt_eksperimentov.xlsx` in
-`IZV_porocilo.docx` nista v repozitoriju), znotraj vala 3 pa A3 (rekonstrukcija z omejitvijo
-cestnega omrežja) nima blokad. Izbira med njima je avtorjeva.
+je s tem izvedljiv iz ene konfiguracije. Shema `Rezultati_predloga` je dogovorjena in zapisana
+v `docs/REZULTATI_SHEMA.md`, zato je val 2 odblokiran in naravni naslednji korak: izvedba
+sheme (pripenjanje porekla zagona vrsticam, strukturirani stolpci, `results.csv` na zagon in
+zlepljenje v glavno tabelo prek `trajguard report`), šele nato štirje načrtovani grafi (O5)
+in merjenje pomnilnika (O6). Alternativa brez blokad ostaja A3 iz vala 3 (rekonstrukcija z
+omejitvijo cestnega omrežja). Izbira med njima je avtorjeva.
 
 ---
 
