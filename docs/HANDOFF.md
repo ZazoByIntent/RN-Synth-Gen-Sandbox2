@@ -29,9 +29,10 @@ zaprti in **val 1 je zaključen**: vsi štirje scenariji tečejo iz ene konfigur
 2026** (O5: `3c59167`, `b5fdf27`; O6: `34d5416`): vodilna metrika po družini vrti
 `matrix.csv` in grafe kompromisa, štirje načrtovani grafi se rišejo iz enotne tabele,
 pomnilniška špica se meri v stolpec `peak_memory_mb` — podrobnosti v bloku **[izvedba]**
-pri valu 2. Od vala 2 ostajajo samo še pravila za krčenje obsega, blokirana na odprti
-odločitvi o pragu X (razdelek 1.9); naslednje delo je A3 iz vala 3 ali sistematični
-parametrski preizkusi (mejnik S4). Kjer se je med izvedbo izkazalo drugače, kot napoveduje
+pri valu 2. Avtor je še isti dan določil prag X = **300 sekund na en zagon napada** in
+pravila za krčenje obsega so napisana (`834321f`): protokol v `docs/RUNNING.md` §7.3,
+prekoračitve orkestrator označi v `run.json` — **val 2 je s tem v celoti zaključen**.
+Naslednje delo je A3 iz vala 3 ali sistematični parametrski preizkusi (mejnik S4). Kjer se je med izvedbo izkazalo drugače, kot napoveduje
 besedilo spodaj, je popravek vpisan na mestu in označen z **[izvedba]** (po istem vzorcu
 kot **[recenzija]**).
 
@@ -212,6 +213,12 @@ Poročilo ima tri mesta »MESTO ZA ODLOČITEV«: prag računskega časa X (§6.6
 zadostnosti zaščite (§8.2). To so odločitve avtorja oziroma mentorice. Prav tako je odprto, kaj
 pomeni »odstopanje statistik gibanja« iz M3.
 
+**[izvedba, 5. avgust 2026]** Prag X je določen: **300 sekund na en zagon napada**. Pravila
+za krčenje obsega so napisana (`834321f`) — protokol z lestvijo krčenja v `docs/RUNNING.md`
+§7.3, samodejna oznaka prekoračitev v `run.json` (blok `over_budget`, ključ
+`metrics.attack_time_budget_s`). Odprti ostajata odločitvi o pragovih zadostnosti zaščite
+(§8.2) in o pomenu M3.
+
 ---
 
 ## 2. Predlagano zaporedje — recenziraj, preden ga sprejmeš
@@ -359,8 +366,12 @@ Kaj in zakaj:**
   `attack_runtime_s` ob vklopljenem merjenju nosi pribitek — ključ `metrics.memory: false`
   merjenje izklopi (privzeto je vklopljeno). Testna zbirka ga v skupni fixture konfiguraciji
   izklaplja, da ostane hitra; privzeto (vklopljeno) pot pokriva namenski test.
-- **Namenoma ni narejeno:** pravila za krčenje obsega (drugi del O6) — blokirana na
-  odločitvi avtorja o pragu računskega časa X (razdelek 1.9); risanje istih grafov v
+- **Namenoma ni narejeno:** pravila za krčenje obsega (drugi del O6) — takrat blokirana
+  na odločitvi o pragu X; **[izvedba, isti dan]** avtor je prag določil (300 s na zagon
+  napada) in pravila so napisana (`834321f`): deterministična lestev v `docs/RUNNING.md`
+  §7.3 (`max_users` po lestvi §6.4 → družinski gumb → zabeležena izločitev), orkestrator
+  prekoračitve označi v `run.json` in z opozorilom na konzoli; samodejnega krčenja
+  namenoma ni, ker bi tiho spreminjalo poskus. Dalje ni narejeno: risanje istih grafov v
   `trajguard report` čez več zagonov ali čez ponovitve (`results_master.csv`,
   `repetitions.csv`) — funkcije so pisane nad vrsticami enotne tabele, zato je priključitev
   poceni, ko jo bo kdo potreboval; posplošitev report-level grafov kompromisa (`report.py`
@@ -390,15 +401,15 @@ popravkom poročila (glej razdelek 1.1), ne z implementacijo.
 ### Naslednji konkreten korak
 
 **[recenzija — prvotni predlog M1 + O2 + O3 je umaknjen** iz razlogov, opisanih pri valu 1.]
-Val 0, celoten val 1 (koraki 1a–1e) in val 2 (O4, O5, O6 — merjenje) so izvedeni (glej
-oznake zgoraj): razdelek 7.1 poročila je izvedljiv iz ene konfiguracije, rezultati se
-samodejno zapisujejo v enotno tabelo po `docs/REZULTATI_SHEMA.md` (s časom in pomnilniško
-špico na napad), en zagon pa nariše vseh pet grafov (kompromis po družinah ter glede na ε,
-predznanje, mehanizme in računski čas). Od vala 2 ostajajo samo pravila za krčenje obsega:
-niso koda, dokler avtor ne določi praga računskega časa X (razdelek 1.9) — to je prva
-odprta odločitev za naslednjo sejo. Naslednje delo brez blokad je A3 iz vala 3
-(rekonstrukcija z omejitvijo cestnega omrežja) ali sistematični parametrski preizkusi
-(mejnik S4), za katere je zajem rezultatov zdaj pripravljen. Izbira je avtorjeva.
+Val 0, celoten val 1 (koraki 1a–1e) in **celoten val 2** (O4, O5, O6 vključno s pravili
+krčenja pri pragu X = 300 s) so izvedeni (glej oznake zgoraj): razdelek 7.1 poročila je
+izvedljiv iz ene konfiguracije, rezultati se samodejno zapisujejo v enotno tabelo po
+`docs/REZULTATI_SHEMA.md` (s časom in pomnilniško špico na napad), en zagon nariše vseh
+pet grafov (kompromis po družinah ter glede na ε, predznanje, mehanizme in računski čas),
+prekoračitve časovnega proračuna pa so označene v `run.json` s protokolom krčenja v
+`docs/RUNNING.md` §7.3. Naslednje delo brez blokad je A3 iz vala 3 (rekonstrukcija z
+omejitvijo cestnega omrežja) ali sistematični parametrski preizkusi (mejnik S4), za
+katere je zajem rezultatov zdaj pripravljen. Izbira je avtorjeva.
 
 ---
 
