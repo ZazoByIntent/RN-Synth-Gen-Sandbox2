@@ -6,9 +6,16 @@ from pathlib import Path
 TradeoffPoint = tuple[float, float, str]  # (utility loss, attack success, label)
 
 
-def plot_tradeoff(points: list[TradeoffPoint], out_path: Path) -> None:
+def plot_tradeoff(
+    points: list[TradeoffPoint],
+    out_path: Path,
+    y_label: str = "reidentification top-1 accuracy",
+    unit_interval: bool = True,
+) -> None:
     """Plot attack success against utility loss, one labelled point per arm.
 
+    ``y_label`` names the family's headline metric; ``unit_interval`` pins the
+    y-axis to 0–1 for share metrics and lets error metrics (metres) autoscale.
     Non-finite points (e.g. an arm whose release produced no attackable pool)
     are skipped and listed in a footnote so they cannot be mistaken for a
     plotting bug. matplotlib is imported lazily to keep ``import trajguard``
@@ -34,8 +41,9 @@ def plot_tradeoff(points: list[TradeoffPoint], out_path: Path) -> None:
             offset = (6, 6) if i % 2 == 0 else (6, -12)  # alternate to reduce overlap
             ax.annotate(short, (x, y), textcoords="offset points", xytext=offset, fontsize=8)
     ax.set_xlabel("utility loss (cell JS divergence, bits)")
-    ax.set_ylabel("reidentification top-1 accuracy")
-    ax.set_ylim(-0.05, 1.05)
+    ax.set_ylabel(y_label)
+    if unit_interval:
+        ax.set_ylim(-0.05, 1.05)
     ax.set_title("Privacy vs utility")
     if skipped:
         fig.text(0.01, 0.01, "not plotted (no result): " + ", ".join(skipped), fontsize=7)

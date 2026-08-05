@@ -37,14 +37,13 @@ from trajguard.maps.base import RoadNetwork
 from trajguard.matching.base import MapMatcher, match_many
 from trajguard.privacy.base import PrivacyMechanism
 from trajguard.privacy.geoind import GeoIndistinguishability
+from trajguard.reporting.plots import headline_metric, is_share_metric
 from trajguard.reporting.results_schema import ResultRow, write_results_csv
 from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
 from trajguard.representation import Grid, TrajectoryView
 from trajguard.synthesis.base import SyntheticGenerator
 
 _ = _builtins  # imported for its registration side effects
-
-_HEADLINE = "top1_acc"  # metric pivoted into matrix.csv and the tradeoff y-axis
 
 # Attacks the run loop can actually drive. Reidentification is the reid-shaped
 # contract (no constructor args, run(matched_pool, aux)); reconstruction gets its
@@ -359,8 +358,6 @@ def load_config(path: str | Path) -> RunConfig:
         )
     if "tradeoff" in plots and "cell_js_divergence" not in utility_names:
         raise ValueError("config: the tradeoff plot needs 'cell_js_divergence' in metrics.utility")
-    if "tradeoff" in plots and "top1_acc" not in metric_names:
-        raise ValueError("config: the tradeoff plot needs 'top1_acc' in metrics.privacy")
     grid_cfg = metrics.get("utility_grid", {})
 
     attacks = _req(raw, "attacks", "")
@@ -1219,7 +1216,6 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     }
     arm_info = _arm_infos(mech_plans)
     all_rows: list[ResultRow] = []
-    attack_rows: list[tuple[str, int, list[MetricValue]]] = []  # (ref, known_points, values)
     probe_counts: dict[str, int] = {}
     for spec, attack_cls in plans:
         if spec.attack_type == "reconstruction":
@@ -1279,7 +1275,6 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                     )
                     for v in values
                 )
-                attack_rows.append((ref, k, values))
 
     grid = Grid(bbox=cfg.map_bbox, n_rows=cfg.utility_grid[0], n_cols=cfg.utility_grid[1])
     utility_by_ref: dict[str, dict[str, float]] = {}
@@ -1335,7 +1330,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         }
         for ref, pool in pools.items()
     }
-    matrix = _matrix_rows(list(pools), attack_rows)
+    matrix = _matrix_table(all_rows)
     _write_results(
         cfg,
         all_rows,
@@ -1347,39 +1342,92 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         matrix,
     )
     if "tradeoff" in cfg.plots:
-        plot_tradeoff(_tradeoff_points(matrix, utility_by_ref), cfg.output_dir / "tradeoff.png")
+        for family, headline in matrix[0]:
+            points = _family_tradeoff_points(all_rows, family, utility_by_ref)
+            if not any(math.isfinite(x) and math.isfinite(y) for x, y, _ in points):
+                # e.g. membership inference: utility (the x-axis) is only measured
+                # over protected releases, so synthetic arms have no tradeoff point.
+                continue
+            name = "tradeoff.png" if family == "reidentification" else f"tradeoff_{family}.png"
+            plot_tradeoff(
+                points,
+                cfg.output_dir / name,
+                y_label=f"{family}: {headline}",
+                unit_interval=is_share_metric(headline),
+            )
     return [r.value for r in all_rows]
 
 
-_Matrix = tuple[list[int], list[tuple[str, dict[int, float]]]]
+_SCOPE_ORDER = {"raw": 0, "protected": 1, "synthetic": 2}
+
+_Matrix = tuple[list[tuple[str, str]], list[tuple[str, dict[str, float]]]]
 
 
-def _matrix_rows(refs: list[str], attack_rows: list[tuple[str, int, list[MetricValue]]]) -> _Matrix:
-    """Pivot the headline metric into (known_points columns, target-ref rows)."""
-    cells: dict[tuple[str, int], float] = {}
-    for ref, k, values in attack_rows:
-        for v in values:
-            if v.name == _HEADLINE:
-                cells[(ref, k)] = v.value
-    ks = sorted({k for _, k in cells})
-    rows = [(ref, {k: cells[(ref, k)] for k in ks if (ref, k) in cells}) for ref in refs]
-    return ks, [(ref, kv) for ref, kv in rows if kv]
+def _target_key(row: ResultRow) -> tuple[Any, ...]:
+    """Display order for target arms from structured columns: raw, identity, then params."""
+    return (
+        _SCOPE_ORDER.get(row.scope, len(_SCOPE_ORDER)),
+        0 if row.arm_id in ("", "none") else 1,
+        row.arm_id,
+        math.inf if row.epsilon is None else row.epsilon,
+        math.inf if row.unit_m is None else row.unit_m,
+        row.target_ref,
+    )
 
 
-def _tradeoff_points(
-    matrix: _Matrix, utility_by_ref: dict[str, dict[str, float]]
+def _headline_rows(rows: Sequence[ResultRow], family: str) -> tuple[str, list[ResultRow]]:
+    """The family's headline metric and its row per target arm, ordered for display.
+
+    Families with a knowledge knob (reidentification) emit one row per
+    known_points level; the arm is represented by its largest level, matching
+    the risk matrix in ``trajguard report``.
+    """
+    fam = [r for r in rows if r.family == family]
+    headline = headline_metric(family, [r.value.name for r in fam])
+    by_target: dict[str, list[ResultRow]] = {}
+    for r in fam:
+        if r.value.name == headline:
+            by_target.setdefault(r.target_ref, []).append(r)
+    picked = [
+        max(target_rows, key=lambda r: -1 if r.known_points is None else r.known_points)
+        for target_rows in by_target.values()
+    ]
+    picked.sort(key=_target_key)
+    return headline, picked
+
+
+def _matrix_table(rows: Sequence[ResultRow]) -> _Matrix:
+    """Pivot every family's headline metric into (family columns, target-arm rows)."""
+    families = sorted({r.family for r in rows if r.family != "utility"})
+    columns: list[tuple[str, str]] = []
+    cells: dict[str, dict[str, float]] = {}
+    order: dict[str, tuple[Any, ...]] = {}
+    for family in families:
+        headline, picked = _headline_rows(rows, family)
+        columns.append((family, headline))
+        for r in picked:
+            value = _finite_or_none(r.value.value)
+            if value is None:
+                continue
+            cells.setdefault(r.target_ref, {})[family] = value
+            order.setdefault(r.target_ref, _target_key(r))
+    targets = sorted(cells, key=lambda t: order[t])
+    return columns, [(t, cells[t]) for t in targets]
+
+
+def _family_tradeoff_points(
+    rows: Sequence[ResultRow], family: str, utility_by_ref: dict[str, dict[str, float]]
 ) -> list[TradeoffPoint]:
-    """(cell JSD, headline accuracy at the largest known_points, arm label) per arm."""
-    ks, rows = matrix
-    if not ks:
-        return []
-    k_max = ks[-1]
+    """(cell JSD, family headline value, arm label) per target arm of one family."""
+    _, picked = _headline_rows(rows, family)
     points: list[TradeoffPoint] = []
-    for ref, kv in rows:
-        if k_max not in kv:
-            continue
-        x = 0.0 if ref == "raw" else utility_by_ref.get(ref, {}).get("cell_js_divergence", math.nan)
-        points.append((x, kv[k_max], ref))
+    for r in picked:
+        x = (
+            0.0
+            if r.scope == "raw"
+            else utility_by_ref.get(r.target_ref, {}).get("cell_js_divergence", math.nan)
+        )
+        points.append((x, r.value.value, r.target_ref))
     return points
 
 
@@ -1430,13 +1478,15 @@ def _write_results(
                         v.n_bootstrap,
                     ]
                 )
-        ks, matrix_rows = matrix
+        columns, matrix_rows = matrix
         if matrix_rows:
+            # Per-run risk-matrix slice: one column per family's headline metric
+            # (reidentification at its largest known_points), one row per target arm.
             with (cfg.output_dir / "matrix.csv").open("w", newline="") as fh:
                 writer = csv.writer(fh)
-                writer.writerow(["target", *[f"k={k}" for k in ks]])
+                writer.writerow(["target", *[f"{family}:{metric}" for family, metric in columns]])
                 for ref, kv in matrix_rows:
-                    writer.writerow([ref, *[kv.get(k, "") for k in ks]])
+                    writer.writerow([ref, *[kv.get(family, "") for family, _ in columns]])
 
     run_record = {
         **provenance,

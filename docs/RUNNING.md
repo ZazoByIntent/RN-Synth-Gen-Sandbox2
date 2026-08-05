@@ -285,8 +285,11 @@ trajectory.
   `results.csv` (the same rows in the unified results-table schema from
   `docs/REZULTATI_SHEMA.md`: run provenance, pivot-axis columns like ε and
   known_points, arm statistics, and runtimes — the file you pivot in Excel),
-  `matrix.csv` (the risk-matrix slice), and `run.json` (run metadata: how many
-  trajectories survived each stage — your first stop when numbers look odd).
+  `matrix.csv` (the per-run risk-matrix slice: one row per target arm, one column
+  per attack family's headline metric — reidentification at its largest
+  known-points level; the per-k view stays in `results.csv`), and `run.json`
+  (run metadata: how many trajectories survived each stage — your first stop
+  when numbers look odd).
 - Console lines `Searching closeby nodes with linear search...` during matching are
   harmless progress noise from the matching library.
 
@@ -306,9 +309,12 @@ unprotected baseline.
 
 **Expected outcome:** the console table now includes
 `reidentification:protected:geo_indistinguishability:epsilon=…` rows, the results
-directory additionally gets `tradeoff.png` (attack accuracy versus utility damage),
-and utility metrics (`cell_js_divergence`, `length_dist_error`) quantify how much
-the noise distorted the data. The config also runs the reconstruction attack: one
+directory additionally gets `tradeoff.png` (reidentification accuracy versus
+utility damage) plus one `tradeoff_<family>.png` per further attack family whose
+arms carry utility values (e.g. `tradeoff_reconstruction.png`; membership
+inference gets none — utility is only measured over protected releases, and its
+arms are synthetic), and utility metrics (`cell_js_divergence`,
+`length_dist_error`) quantify how much the noise distorted the data. The config also runs the reconstruction attack: one
 `reconstruction:protected:geo_indistinguishability:epsilon=…` row per ε arm with
 `hausdorff_m`, `dtw_m`, and `mean_spatial_error_m` in metres — the attacker's MAP
 inversion of the noise (it knows ε and unit_m, design §6.3). Expect the mean

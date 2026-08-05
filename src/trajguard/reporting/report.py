@@ -14,18 +14,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from jinja2 import Environment, PackageLoader
 
+from trajguard.reporting.plots import headline_metric
 from trajguard.reporting.results_schema import RESULTS_COLUMNS
 from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
 
-# Headline metric per attack family for the risk matrix; a family whose preferred
-# metric is absent (or that is not listed) falls back to its first metric, sorted —
-# nothing is silently dropped. Names match what the attack modules emit.
-_HEADLINE_PREFERENCE = {
-    "reidentification": "top1_acc",
-    "membership_inference": "auc",
-    "reconstruction": "mean_spatial_error_m",
-    "poi_inference": "home_error_m",
-}
 _TRADEOFF_PRIVACY = "top1_acc"
 _TRADEOFF_UTILITY = "cell_js_divergence"
 _SPLIT_ORDER = ("train", "test", "shadow", "attack")
@@ -356,9 +348,7 @@ def _group_matrix(config_hash: str, runs: list[RunInfo]) -> RiskMatrix:
     cells: dict[tuple[str, str], RiskCell] = {}
     for attack in sorted({r.attack for r in rows}):
         attack_rows = [r for r in rows if r.attack == attack]
-        present = sorted({r.metric for r in attack_rows})
-        preferred = _HEADLINE_PREFERENCE.get(attack)
-        headline = preferred if preferred in present else present[0]
+        headline = headline_metric(attack, [r.metric for r in attack_rows])
         columns.append((attack, headline))
         headline_rows = [r for r in attack_rows if r.metric == headline]
         for target in {r.target for r in headline_rows}:
@@ -437,11 +427,8 @@ def summarize_by_attack(runs: Sequence[RunInfo]) -> tuple[AttackSection, ...]:
         for attack in sorted({r.attack for r in run.rows}):
             attack_rows = [r for r in run.rows if r.attack == attack]
             present = sorted({r.metric for r in attack_rows})
-            preferred = _HEADLINE_PREFERENCE.get(attack)
-            if preferred in present:
-                metrics = (preferred, *[m for m in present if m != preferred])
-            else:
-                metrics = tuple(present)
+            headline = headline_metric(attack, present)
+            metrics = (headline, *[m for m in present if m != headline])
             keys = sorted(
                 {(r.target, r.known_points) for r in attack_rows},
                 key=lambda tk: (_target_order(tk[0]), -1 if tk[1] is None else tk[1]),

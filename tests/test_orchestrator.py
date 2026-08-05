@@ -592,9 +592,15 @@ def test_reconstruction_runs_against_geoind_arms_only(
     # reconstruction rows land in metrics.csv alongside the reid rows
     rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
     assert any(r["result_id"].startswith("reconstruction:") for r in rows)
-    # the reid matrix stays reid-only (no reconstruction rows pivoted in)
-    with (tmp_path / "out" / "matrix.csv").open() as fh:
-        assert all(not row.startswith("reconstruction") for row in fh)
+    # the matrix pivots the family's headline metric next to the reid column;
+    # only the geo-ind arm has a reconstruction value (the identity arm is skipped)
+    matrix = list(csv.DictReader((tmp_path / "out" / "matrix.csv").open()))
+    by_target = {r["target"]: r for r in matrix}
+    assert float(by_target[f"protected:{GEOIND_REF}"]["reconstruction:mean_spatial_error_m"]) > 0.0
+    assert by_target["raw"]["reconstruction:mean_spatial_error_m"] == ""
+    # each family with utility on its arms gets its own tradeoff plot
+    assert (tmp_path / "out" / "tradeoff.png").stat().st_size > 0
+    assert (tmp_path / "out" / "tradeoff_reconstruction.png").stat().st_size > 0
 
 
 def test_poi_inference_runs_against_protected_arms(tmp_path: Path, beijing_maps_dir: Path) -> None:
@@ -644,11 +650,15 @@ def test_poi_inference_runs_against_protected_arms(tmp_path: Path, beijing_maps_
     assert err.ci_low is not None and err.ci_high is not None
     assert err.ci_low <= err.value <= err.ci_high
     assert noisy["home_localised"].value == 1.0
-    # POI rows land in metrics.csv; the reid matrix stays reid-only.
+    # POI rows land in metrics.csv and pivot into the matrix's poi_inference column.
     rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
     assert any(r["result_id"].startswith("poi_inference:") for r in rows)
-    with (tmp_path / "out" / "matrix.csv").open() as fh:
-        assert all(not row.startswith("poi_inference") for row in fh)
+    matrix = list(csv.DictReader((tmp_path / "out" / "matrix.csv").open()))
+    by_target = {r["target"]: r for r in matrix}
+    assert by_target["protected:none"]["poi_inference:home_error_m"] == "0.0"
+    assert float(by_target[f"protected:{GEOIND_REF}"]["poi_inference:home_error_m"]) > 0.0
+    assert by_target["raw"]["poi_inference:home_error_m"] == ""
+    assert (tmp_path / "out" / "tradeoff_poi_inference.png").stat().st_size > 0
 
 
 # --- wave 2 (O4): the unified results table, docs/REZULTATI_SHEMA.md ---------------
@@ -716,15 +726,23 @@ def test_results_csv_membership_columns(tmp_path: Path, beijing_maps_dir: Path) 
 
 
 def test_matrix_and_tradeoff_artifacts_written(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """matrix.csv pivots each family's headline metric (reid at max known_points)."""
     run(write_config(tmp_path, geoind_config(tmp_path, beijing_maps_dir)))
 
     with (tmp_path / "out" / "matrix.csv").open() as fh:
         rows = list(csv.reader(fh))
-    assert rows[0] == ["target", "k=3", "k=5"]
+    assert rows[0] == ["target", "reidentification:top1_acc"]
     assert [r[0] for r in rows[1:]] == ["raw", "protected:none", f"protected:{GEOIND_REF}"]
     for row in rows[1:]:
-        for cell in row[1:]:
-            assert 0.0 <= float(cell) <= 1.0
+        assert 0.0 <= float(row[1]) <= 1.0
+    # the pivoted cell is the value at the largest known_points level (k=5)
+    results = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    (raw_k5,) = [
+        r
+        for r in results
+        if r["target_ref"] == "raw" and r["metric"] == "top1_acc" and r["known_points"] == "5"
+    ]
+    assert rows[1][1] == raw_k5["value"]
     assert (tmp_path / "out" / "tradeoff.png").stat().st_size > 0
 
 
