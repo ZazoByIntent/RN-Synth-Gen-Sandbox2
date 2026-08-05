@@ -60,9 +60,7 @@ def _geoind_grid(family: str = "reidentification", metric: str = "top1_acc") -> 
         ref = f"protected:geo_indistinguishability:epsilon={eps}"
         ks: tuple[int | None, ...] = (3, 5) if family == "reidentification" else (None,)
         for k in ks:
-            rows.append(
-                _row(family, ref, metric, 0.2 + eps / 20, epsilon=eps, known_points=k)
-            )
+            rows.append(_row(family, ref, metric, 0.2 + eps / 20, epsilon=eps, known_points=k))
     return rows
 
 

@@ -386,9 +386,7 @@ def load_config(path: str | Path) -> RunConfig:
     # Plot prerequisites that are knowable before the expensive pipeline: a plot
     # whose axis cannot exist for this config is a config mistake, not an empty file.
     if "by_knowledge" in plots and not any(s.known_points for s in attack_specs):
-        raise ValueError(
-            "config: the by_knowledge plot needs an attack with attacker.known_points"
-        )
+        raise ValueError("config: the by_knowledge plot needs an attack with attacker.known_points")
     for plot in ("by_epsilon", "mechanisms"):
         if plot in plots and not mech_specs and not gen_specs:
             raise ValueError(
@@ -1512,9 +1510,7 @@ def _over_budget_attacks(rows: Sequence[ResultRow], budget_s: float) -> list[dic
     for r in rows:
         if r.family != "utility" and r.attack_runtime_s is not None:
             seen.setdefault(r.value.result_id, r.attack_runtime_s)
-    over = sorted(
-        ((rid, t) for rid, t in seen.items() if t > budget_s), key=lambda item: -item[1]
-    )
+    over = sorted(((rid, t) for rid, t in seen.items() if t > budget_s), key=lambda item: -item[1])
     return [{"result_id": rid, "runtime_s": round(t, 3)} for rid, t in over]
 
 

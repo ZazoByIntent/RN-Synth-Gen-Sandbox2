@@ -98,9 +98,7 @@ def _headline_points(rows: Sequence[ResultRow], family: str) -> tuple[str, list[
     """The family's headline-metric rows with finite values (every knowledge level)."""
     fam = [r for r in rows if r.family == family]
     headline = headline_metric(family, [r.value.name for r in fam])
-    return headline, [
-        r for r in fam if r.value.name == headline and math.isfinite(r.value.value)
-    ]
+    return headline, [r for r in fam if r.value.name == headline and math.isfinite(r.value.value)]
 
 
 def _ci_segments(ax: Any, xs: Sequence[Any], grp: Sequence[ResultRow], color: Any) -> None:
