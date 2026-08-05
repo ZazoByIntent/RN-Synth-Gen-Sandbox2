@@ -52,8 +52,8 @@ class PoiInferenceAttack(Attack):
     per design §6.4, but the Markov generator emits edge sequences with no coordinates or
     timestamps, so only ``protected`` releases are meaningful today (``tests/test_attribute.py``
     also exercises the raw sanity baseline directly). This attack consumes clean GPS points, not
-    the matched pool the orchestrator's reidentification-shaped run loop supplies, so it is not
-    wired in there yet — a config naming it is rejected up front. Local time is
+    the matched pool: the orchestrator runs it per protected arm on the arm's released
+    ``clean_by_id`` pool against the raw pool (``_poi_inference_values``). Local time is
     ``UTC + tz_offset_h``; Geolife timestamps are GMT and Beijing is +8.
     """
 

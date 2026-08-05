@@ -125,6 +125,30 @@ def test_load_results_rejects_junk_result_id(tmp_path: Path) -> None:
         load_results(write_results(tmp_path, [record]))
 
 
+def test_load_results_parses_families_without_known_points(tmp_path: Path) -> None:
+    """Reconstruction, POI, and membership ids carry no :k<N> suffix — the loader
+    must parse them instead of rejecting the whole run.json (1c–1e regression)."""
+    record = run_record(
+        "families",
+        [
+            metric(
+                "reconstruction:protected:geo_indistinguishability:epsilon=10.0",
+                "mean_spatial_error_m",
+                4.1,
+            ),
+            metric("poi_inference:protected:none", "home_error_m", 0.0),
+            metric("membership_inference:synthetic:markov:order=1", "auc", 0.9),
+        ],
+    )
+    runs = load_results(write_results(tmp_path, [record]))
+    rows = {(r.attack, r.target): r for r in runs[0].rows}
+    recon = rows[("reconstruction", "protected:geo_indistinguishability:epsilon=10.0")]
+    assert recon.known_points is None and recon.mechanism == "geo_indistinguishability"
+    assert rows[("poi_inference", "protected:none")].scope == "protected"
+    mia = rows[("membership_inference", "synthetic:markov:order=1")]
+    assert mia.scope == "synthetic" and mia.mechanism == "markov" and mia.value == 0.9
+
+
 def test_missing_results_dir_is_loud(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="run.json"):
         load_results(tmp_path / "nowhere")
@@ -257,8 +281,10 @@ def beijing_maps_dir(tmp_path: Path) -> Path:
 
 
 def test_report_from_real_orchestrator_run(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """All four wired families flow through generate_report, including the master table."""
     cfg = geoind_config(tmp_path, beijing_maps_dir)
     cfg["experiment"]["output_dir"] = str(tmp_path / "results" / cfg["experiment"]["id"])
+    cfg["attacks"].append({"type": "reconstruction", "target_scope": ["protected"]})
     run(write_config(tmp_path, cfg))
 
     report_path = generate_report(tmp_path / "results", tmp_path / "reports")
@@ -271,3 +297,54 @@ def test_report_from_real_orchestrator_run(tmp_path: Path, beijing_maps_dir: Pat
     assert (tmp_path / "reports" / "risk_matrix.csv").exists()
     assert (tmp_path / "reports" / "metrics_long.parquet").exists()
     assert (tmp_path / "reports" / "tradeoff_test_reid.png").stat().st_size > 0
+    # the master table is the per-run results.csv, re-emitted verbatim
+    run_rows = list(csv.DictReader((Path(cfg["experiment"]["output_dir"]) / "results.csv").open()))
+    master_rows = list(csv.DictReader((tmp_path / "reports" / "results_master.csv").open()))
+    assert master_rows == run_rows
+
+
+def test_master_table_merges_runs_and_rejects_mixed_schemas(tmp_path: Path) -> None:
+    from trajguard.datamodel import MetricValue
+    from trajguard.reporting.report import merge_results_tables
+    from trajguard.reporting.results_schema import RESULTS_COLUMNS, ResultRow, write_results_csv
+
+    def one_run(out: Path, exp_id: str) -> None:
+        out.mkdir(parents=True)
+        value = MetricValue("m:top1_acc", "reidentification:raw:k3", "top1_acc", 0.5, 0.4, 0.6, 10)
+        row = ResultRow(
+            value=value,
+            family="reidentification",
+            scope="raw",
+            arm_id="",
+            target_ref="raw",
+            known_points=3,
+        )
+        provenance = {
+            "exp_id": exp_id,
+            "config_hash": "h" * 16,
+            "git_commit": "c" * 40,
+            "seed": 1,
+            "split_seed": 1,
+            "max_users": None,
+            "created_at": "2026-08-05",
+        }
+        write_results_csv(out / "results.csv", provenance, [row], run_runtime_s=1.0)
+
+    one_run(tmp_path / "results" / "exp_a", "exp_a")
+    one_run(tmp_path / "results" / "exp_b" / "seed2", "exp_b")  # repeat-run layout
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir()
+    master = merge_results_tables(tmp_path / "results", out_dir)
+    assert master is not None
+    rows = list(csv.DictReader(master.open()))
+    assert len(rows) == 2 and {r["exp_id"] for r in rows} == {"exp_a", "exp_b"}
+    assert tuple(rows[0]) == RESULTS_COLUMNS
+
+    # nothing to merge -> None, no file
+    assert merge_results_tables(tmp_path / "empty", out_dir) is None
+    # a table with a foreign header must fail loudly, not misalign columns
+    bad = tmp_path / "results" / "exp_c"
+    bad.mkdir()
+    (bad / "results.csv").write_text("foo,bar\n1,2\n")
+    with pytest.raises(ValueError, match="schema"):
+        merge_results_tables(tmp_path / "results", out_dir)

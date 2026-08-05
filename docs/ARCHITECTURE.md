@@ -142,6 +142,11 @@ Ljubljana is never a target for Geolife attacks (design risk T1).
 | Reconstruction / inversion (Buchholz 2022) | protected | MAP inversion of the known mechanism | Hausdorff, DTW, mean spatial error (m) | P6 |
 | POI / home-work inference (Primault 2019) | protected, synthetic | stay-point clustering; night hours → home, day hours → work | est↔true home/work distance (m), fraction of users within threshold | P6.5 |
 
+Note on the `poi_inference` synthetic scope: the Markov generator emits road-segment
+sequences with no coordinates or timestamps, so the synthetic branch is not usable in
+practice today — only `protected` releases are meaningful
+(see the class docstring in `src/trajguard/attacks/attribute.py`).
+
 Utility metrics for trade-off curves: cell-visit JS divergence, OD-matrix error,
 length/duration/speed distribution error, range-count query error.
 
@@ -154,6 +159,14 @@ Top-level YAML keys: `experiment`, `map`, `dataset`, `cleaning`, `map_matching`,
 key and seed. Parsed with plain PyYAML + manual validation — no Hydra/OmegaConf.
 Full annotated example: design §8. Entry point: `trajguard run <config>` (argparse,
 registered under `[project.scripts]`).
+
+Seeds come in two kinds: `experiment.split_seed` (defaults to `experiment.seed`)
+pins the population — the optional `dataset.max_users` user subsample and the
+train/test/shadow/attack split — while `experiment.seed` drives everything
+stochastic downstream (mechanism noise, attacker knowledge, bootstrap). Repetition
+runs therefore pin `split_seed` in the YAML and vary only the run seed via
+`trajguard run <config> --seed N`, which shares the processed pool cache and
+writes results to `<output_dir>/seedN`.
 
 ## Repo layout (design §9)
 
@@ -191,6 +204,9 @@ trajguard/
 
 Out of scope until explicitly requested: T-Drive/Porto loaders, PostGIS, MLflow,
 k-anonymity, diffusion generators (Diff-RNTraj/ControlTraj), full attribute
-inference with a classifier, federated approaches. `RNLDPSynth` stays a registered
-`NotImplementedError` hook. These attach later through the existing ABCs without
-touching the core — that is the point of the interfaces.
+inference with a classifier, federated approaches. `RNLDPSynth` has a working v1
+prototype (registered as `rn_ldp_synth`; design in `docs/RN_LDP_SYNTH_DESIGN.md`);
+further RN-LDP-Synth development happens only on explicit request, and the benchmark
+must keep running on baseline mechanisms without it. Everything else attaches later
+through the existing ABCs without touching the core — that is the point of the
+interfaces.

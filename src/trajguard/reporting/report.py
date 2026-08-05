@@ -14,17 +14,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from jinja2 import Environment, PackageLoader
 
+from trajguard.reporting.plots import headline_metric
+from trajguard.reporting.results_schema import RESULTS_COLUMNS
 from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
 
-# Headline metric per attack family for the risk matrix; a family whose preferred
-# metric is absent (or that is not listed) falls back to its first metric, sorted —
-# nothing is silently dropped. Names match what the attack modules emit.
-_HEADLINE_PREFERENCE = {
-    "reidentification": "top1_acc",
-    "membership_inference": "auc",
-    "reconstruction": "mean_spatial_error_m",
-    "poi_inference": "home_error_m",
-}
 _TRADEOFF_PRIVACY = "top1_acc"
 _TRADEOFF_UTILITY = "cell_js_divergence"
 _SPLIT_ORDER = ("train", "test", "shadow", "attack")
@@ -99,18 +92,23 @@ def _parse_target_ref(ref: str) -> tuple[str, str, str]:
 
 
 def _parse_result_id(result_id: str) -> tuple[str, str, int | None]:
-    """result_id → (attack family, target ref, known_points); loud on junk."""
+    """result_id → (attack family, target ref, known_points); loud on junk.
+
+    Only reidentification ids carry a ``:k<N>`` suffix; every other family
+    (reconstruction, poi_inference, membership_inference, utility) is
+    ``<family>:<target ref>`` with no knowledge knob.
+    """
     parts = result_id.split(":")
-    if parts[0] == "utility" and len(parts) >= 2:
-        target = ":".join(parts[1:])
-        _parse_target_ref(target)
-        return "utility", target, None
-    tail = re.fullmatch(r"k(\d+)", parts[-1]) if len(parts) >= 3 else None
-    if tail is None:
+    if len(parts) < 2:
         raise ValueError(f"unrecognised result_id {result_id!r}")
-    target = ":".join(parts[1:-1])
+    tail = re.fullmatch(r"k(\d+)", parts[-1]) if len(parts) >= 3 else None
+    if tail is not None:
+        target = ":".join(parts[1:-1])
+        _parse_target_ref(target)
+        return parts[0], target, int(tail.group(1))
+    target = ":".join(parts[1:])
     _parse_target_ref(target)
-    return parts[0], target, int(tail.group(1))
+    return parts[0], target, None
 
 
 def _params_key(params: str) -> tuple[tuple[str, float], ...]:
@@ -276,6 +274,35 @@ def export_tables(
     return tuple(written)
 
 
+def merge_results_tables(results_dir: str | Path, out_dir: Path) -> Path | None:
+    """Concatenate every per-run results.csv under ``results_dir`` into one master table.
+
+    Pure concatenation — the per-run tables already carry provenance and structured
+    columns (docs/REZULTATI_SHEMA.md), so nothing is parsed or recomputed here. A
+    results.csv whose header differs from ``RESULTS_COLUMNS`` fails loudly: a
+    results/ tree mixing schema versions would otherwise misalign columns silently.
+    Returns None when no per-run table exists yet (runs predating the schema).
+    """
+    files = sorted(Path(results_dir).rglob("results.csv"))
+    if not files:
+        return None
+    out = out_dir / "results_master.csv"
+    with out.open("w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(RESULTS_COLUMNS)
+        for f in files:
+            with f.open(newline="") as src:
+                reader = csv.reader(src)
+                header = tuple(next(reader, ()))
+                if header != RESULTS_COLUMNS:
+                    raise ValueError(
+                        f"{f}: header does not match the results schema "
+                        "(docs/REZULTATI_SHEMA.md) — results/ mixes schema versions"
+                    )
+                writer.writerows(reader)
+    return out
+
+
 # --- risk matrix ------------------------------------------------------------------
 
 
@@ -321,9 +348,7 @@ def _group_matrix(config_hash: str, runs: list[RunInfo]) -> RiskMatrix:
     cells: dict[tuple[str, str], RiskCell] = {}
     for attack in sorted({r.attack for r in rows}):
         attack_rows = [r for r in rows if r.attack == attack]
-        present = sorted({r.metric for r in attack_rows})
-        preferred = _HEADLINE_PREFERENCE.get(attack)
-        headline = preferred if preferred in present else present[0]
+        headline = headline_metric(attack, [r.metric for r in attack_rows])
         columns.append((attack, headline))
         headline_rows = [r for r in attack_rows if r.metric == headline]
         for target in {r.target for r in headline_rows}:
@@ -402,11 +427,8 @@ def summarize_by_attack(runs: Sequence[RunInfo]) -> tuple[AttackSection, ...]:
         for attack in sorted({r.attack for r in run.rows}):
             attack_rows = [r for r in run.rows if r.attack == attack]
             present = sorted({r.metric for r in attack_rows})
-            preferred = _HEADLINE_PREFERENCE.get(attack)
-            if preferred in present:
-                metrics = (preferred, *[m for m in present if m != preferred])
-            else:
-                metrics = tuple(present)
+            headline = headline_metric(attack, present)
+            metrics = (headline, *[m for m in present if m != headline])
             keys = sorted(
                 {(r.target, r.known_points) for r in attack_rows},
                 key=lambda tk: (_target_order(tk[0]), -1 if tk[1] is None else tk[1]),
@@ -517,6 +539,9 @@ def generate_report(results_dir: str | Path = "results", out_dir: str | Path = "
     out.mkdir(parents=True, exist_ok=True)
 
     table_files = export_tables(runs, out)
+    master = merge_results_tables(results_dir, out)
+    if master is not None:
+        table_files = (*table_files, master)
     matrices = risk_matrix(runs)
     matrix_file = _write_risk_matrix_csv(matrices, out / "risk_matrix.csv")
     sections = summarize_by_attack(runs)

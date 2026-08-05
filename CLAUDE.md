@@ -51,8 +51,9 @@ enough context.
 - **Map/dataset consistency**: the orchestrator must reject any run where
   `map.region != dataset.native_region`. Geolife/T-Drive → Beijing; Porto → Porto.
   Ljubljana is reserved for synthetic data / RN-LDP-Synth, never for Geolife attacks.
-- **RN-LDP-Synth stays a `NotImplementedError` hook** until explicitly told otherwise.
-  The benchmark must run on baseline mechanisms without it.
+- **RN-LDP-Synth has a working v1 prototype** (`rn_ldp_synth` in the registry; design in
+  `docs/RN_LDP_SYNTH_DESIGN.md`). Develop it further only when explicitly told to, and
+  the benchmark must keep running on baseline mechanisms without it.
 
 ## Conventions
 

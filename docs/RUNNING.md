@@ -121,6 +121,30 @@ Expect the same matches but a noticeably slower run, and skip the overview plot 
 (it would draw every street in Beijing). The per-trajectory panels stay fast because
 they crop to each path's surroundings.
 
+## 3.1 End-to-end pipeline walkthrough notebook (works offline)
+
+`notebooks/02_pipeline_walkthrough.ipynb` is a presentation-ready tour of every
+stage and every runnable combination in the benchmark: bare maps → raw trajectories
+→ cleaning → map matching → representation views → splits → anonymization (with and
+without re-matching) → synthetic generation → all four attack families → utility
+metrics → a full orchestrated experiment → the risk report → the RN-LDP-Synth
+evidence sweep. Like the sanity notebook it runs entirely from `tests/fixtures/`
+by default (set `USE_REAL_DATA = True` in the setup cell to point it at your full
+`maps/beijing` build and Geolife download instead).
+
+Run it headlessly, or interactively, exactly like the sanity notebook:
+
+```sh
+uv run jupyter nbconvert --to notebook --execute --inplace notebooks/02_pipeline_walkthrough.ipynb
+```
+
+**Expected outcome:** every cell executes without errors; along the way you get the
+registry tables (implemented vs planned components), per-stage data-frame previews,
+match-quality numbers on the fixture slice, attack results for all four families,
+and at the end a small orchestrated run whose `tradeoff.png` is displayed inline.
+Note that no automation executes the notebooks (CI runs only `ruff`, `mypy`,
+`pytest`), so re-run them manually after changes that alter their outputs.
+
 ## 4. Quick visual recipes
 
 Two small standalone scripts for common "let me just look at it" needs. Both write a
@@ -258,8 +282,17 @@ trajectory.
   true person is the attacker's first / among the top-five guesses) and
   `linkage_rate`.
 - `results/geolife_reid_baseline/` containing `metrics.csv` (long-form metrics),
-  `matrix.csv` (the risk-matrix slice), and `run.json` (run metadata: how many
-  trajectories survived each stage — your first stop when numbers look odd).
+  `results.csv` (the same rows in the unified results-table schema from
+  `docs/REZULTATI_SHEMA.md`: run provenance, pivot-axis columns like ε and
+  known_points, arm statistics, runtimes, and each attack's peak memory in MB —
+  the file you pivot in Excel; `peak_memory_mb` is traced with `tracemalloc`,
+  which slows the attacks and thereby inflates `attack_runtime_s` a little, so
+  set `metrics: {memory: false}` for timing-critical sweeps),
+  `matrix.csv` (the per-run risk-matrix slice: one row per target arm, one column
+  per attack family's headline metric — reidentification at its largest
+  known-points level; the per-k view stays in `results.csv`), and `run.json`
+  (run metadata: how many trajectories survived each stage — your first stop
+  when numbers look odd).
 - Console lines `Searching closeby nodes with linear search...` during matching are
   harmless progress noise from the matching library.
 
@@ -279,9 +312,52 @@ unprotected baseline.
 
 **Expected outcome:** the console table now includes
 `reidentification:protected:geo_indistinguishability:epsilon=…` rows, the results
-directory additionally gets `tradeoff.png` (attack accuracy versus utility damage),
-and utility metrics (`cell_js_divergence`, `length_dist_error`) quantify how much
-the noise distorted the data.
+directory additionally gets `tradeoff.png` (reidentification accuracy versus
+utility damage) plus one `tradeoff_<family>.png` per further attack family whose
+arms carry utility values (e.g. `tradeoff_reconstruction.png`; membership
+inference gets none — utility is only measured over protected releases, and its
+arms are synthetic), and utility metrics (`cell_js_divergence`,
+`length_dist_error`) quantify how much the noise distorted the data.
+
+Beyond `tradeoff`, `reporting.plots` accepts the four planned report figures
+(report §6.8, §7.2–7.6), all drawn from the same rows that go into `results.csv`:
+
+- `by_epsilon` — one `by_epsilon_<family>.png` per attack family: the family's
+  headline metric versus the arm's ε (log axis), a line per arm and — for
+  reidentification — per known-points level. Arms without an ε (raw, identity,
+  non-private generators) do not appear.
+- `by_knowledge` — `by_knowledge_<family>.png` for families with the
+  known-points knob (today reidentification): headline metric versus the number
+  of points the attacker knows, a line per target arm.
+- `mechanisms` — `mechanisms_<family>.png`: horizontal bars comparing all arms
+  on the family's headline metric (reidentification at its largest
+  known-points), with the within-run bootstrap interval as whiskers.
+- `runtime` — a single `runtime.png`: one bar per attack invocation with its
+  runtime in seconds (log axis), coloured by family.
+
+A requested plot for which the run produced no matching rows is simply not
+written (no empty file); a plot whose axis cannot exist for the config at all
+(e.g. `by_knowledge` without a known-points attack) is rejected up front. The config also runs the reconstruction attack: one
+`reconstruction:protected:geo_indistinguishability:epsilon=…` row per ε arm with
+`hausdorff_m`, `dtw_m`, and `mean_spatial_error_m` in metres — the attacker's MAP
+inversion of the noise (it knows ε and unit_m, design §6.3). Expect the mean
+spatial error to sit *below* the mechanism's mean displacement `2·unit_m/ε` on
+smooth paths: that gap is exactly the privacy the inversion claws back. The
+identity arm gets no reconstruction row (there is no noise to invert).
+
+The config also runs the POI inference attack (POI — point of interest: here the
+inferred home and work location of each user, design §6.4). It produces one
+`poi_inference:protected:…` row set per arm — including the identity arm `none` —
+with four metrics: `home_error_m` / `work_error_m` (metres between the inferred
+and the true home/work location, averaged over the users the attack managed to
+place) and `home_localised` / `work_localised` (the fraction of all users whose
+location the attacker pins within `threshold_m`, default 200 m). Unlike
+reidentification, this attack reads the released GPS points directly, so its rows
+survive even for arms whose noise made every trajectory fail re-matching (the
+ε = 0.1 arm still gets a row — expect NaN/blank errors there, because the noise
+dissolves every stay-point). Read the `protected:none` row as a sanity value: the
+identity mechanism releases the raw points, so near-zero error and localised = 1.0
+there mean the harness is honest, not that the data is safe.
 
 **Expected surprise that is not a bug:** at ε = 0.1 the noise is ~2 km per point, so
 most or all protected trajectories fail re-matching and the arm reports zero or NaN
@@ -290,6 +366,90 @@ the ε = 0.1 and ε = 1.0 arms dropped all 8 trajectories (`n_rematch_dropped = 
 `run.json`), ε = 10.0 kept 4. On real, denser Geolife data more will survive, but
 the pattern (stronger noise → fewer survivors) is by design; the survivor counts per
 arm are always recorded in `run.json`.
+
+## 7.1 Repetitions: mean and 95% CI across seeds
+
+```sh
+uv run trajguard repeat config/experiments/geolife_geoind_reid.yaml --seeds 1 2 3 4 5
+```
+
+Runs the same experiment once per seed and aggregates every metric across the
+repetitions. The population and the train/test/shadow/attack split stay pinned by
+`experiment.split_seed` in the YAML, so the expensive cleaning/matching pool is
+computed once and shared; each seed only redraws the mechanism noise and the
+attacker's knowledge. (A single extra repetition without aggregation:
+`trajguard run <config> --seed N`.)
+
+**Expected outcome:** one `results/<exp_id>/seed<N>/` directory per seed with the
+usual artifacts, plus `results/<exp_id>/repetitions.csv` and a console table with
+the across-seed mean and a Student-t 95% confidence interval per metric. This
+interval reflects variance *between* repetitions; the bootstrap interval inside
+each seed's `metrics.csv` reflects resampling uncertainty *within* one run — do
+not mix the two in report tables.
+
+## 7.2 Experiment: membership inference against synthetic generators
+
+```sh
+uv run trajguard run config/experiments/geolife_synth_mia.yaml
+```
+
+Answers a different question than sections 6–7: not "can the attacker link or
+undo a noisy release" but "did the generator memorize its training data". The
+attack (LiRA — likelihood-ratio membership inference) asks, per trajectory:
+was this exact path in the generator's training set? The target generator is
+fitted on the train split; members are train paths, non-members test paths, and
+the attacker's shadow generators — same-class models used to calibrate the
+score — train on the shadow split plus the queried candidate paths, never on
+the rest of the training data (fair-MIA rule from `CLAUDE.md`).
+
+**Expected outcome:** one `membership_inference:synthetic:<generator>` row set
+per generator arm in `metrics.csv` with `auc` (how well the attacker separates
+members from non-members; 0.5 is chance, 1.0 is certain) and one `tpr@fpr=…`
+row per configured operating point (the fraction of true members caught while
+keeping false accusations below that rate — the honest headline number per
+Carlini 2022). These are score-based metrics, so the `ci_low`/`ci_high` columns
+stay empty by design: the confidence interval comes from repetitions
+(`trajguard repeat`, §7.1), not from within-run bootstrap. The shipped config
+runs the non-private `markov` baseline, where the attack *should* score high —
+that arm is the memorization ceiling to compare private generators against —
+plus the `rn_ldp_synth` prototype at ε ∈ {0.5, 2.0, 8.0}, one arm per ε with
+same-class shadows sharing that ε. Read those rows against the markov ceiling:
+a working privacy mechanism pulls `auc` toward 0.5 and the low-FPR TPR toward
+zero as ε shrinks.
+
+## 7.3 Computational budget and scope reduction (report §6.6)
+
+Every attack invocation has a runtime budget of **X = 300 seconds** (the author's
+decision, 5 Aug 2026), configurable as `metrics.attack_time_budget_s`. The
+orchestrator compares each invocation's `attack_runtime_s` against it and, when
+exceeded, prints a console warning and records the offenders in `run.json` under
+`over_budget` (`budget_s`, `memory_traced`, and the worst-first `attacks` list).
+Exceeding the budget **never fails or trims a run** — results stay complete, and
+automatic scope reduction is deliberately absent because it would silently change
+the experiment. The flag exists so you apply the rules below when planning the
+*next* runs of a sweep.
+
+The rules, applied one step at a time (re-measure after each step):
+
+- **R0 — how to measure.** The budget applies to one attack invocation
+  (`attack_runtime_s` in `results.csv`). Decide on times measured with
+  `metrics: {memory: false}`: peak-memory tracing roughly doubles attack time,
+  and `run.json` marks such runs with `memory_traced: true`.
+- **R1 — the run stands.** An over-budget run stays in `results/` and in the
+  master table; reduction applies to future runs only.
+- **R2 — the reduction ladder.**
+  1. Reduce `dataset.max_users` one step down the design §6.4 sample ladder:
+     182 → 100 → 50 → 20.
+  2. If still over budget at 20 users, turn the family's own knob:
+     membership inference — halve `n_shadow` (not below 8); reidentification —
+     drop the largest `known_points` level. Reconstruction and POI inference
+     have no knob of their own (their cost scales with the pool), so go to 3.
+  3. Whatever remains over budget is **excluded from the sweep** (the arm or
+     the attack), and the exclusion — with its measured runtime — is recorded
+     in the report and in `docs/HANDOFF.md`.
+- **R3 — traceability.** Record every reduction as a comment in the experiment
+  YAML (which ladder step, why); the `max_users` and `config_hash` columns in
+  `results.csv` keep reduced runs distinguishable on their own.
 
 ## 8. Aggregate risk report
 
@@ -300,8 +460,11 @@ uv run trajguard report
 Aggregates everything under `results/` into `reports/`.
 
 **Expected outcome:** the line `report: reports/report.md`, plus `metrics_long.csv`,
-`metrics_long.parquet`, `risk_matrix.csv`, and one `tradeoff_<experiment>.png` per
-experiment that produced trade-off data. Open `reports/report.md` for the summary.
+`metrics_long.parquet`, `risk_matrix.csv`, `results_master.csv` (every run's
+`results.csv` concatenated into one table following `docs/REZULTATI_SHEMA.md` —
+repetition runs under `seed<N>/` included; the single file to hand to Excel or
+pandas), and one `tradeoff_<experiment>.png` per experiment that produced
+trade-off data. Open `reports/report.md` for the summary.
 Options: `--results <dir>` and `--out <dir>` if you keep results elsewhere.
 
 ## 9. RN-LDP-Synth evidence sweep (offline, fixture scale)

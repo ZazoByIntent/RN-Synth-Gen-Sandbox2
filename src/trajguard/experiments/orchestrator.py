@@ -2,15 +2,18 @@
 
 import csv
 import hashlib
+import inspect
 import itertools
 import json
 import math
 import os
 import subprocess
 import time
-from collections.abc import Callable
+import tracemalloc
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +21,13 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
+from pyproj import Transformer
 
+from trajguard.attacks.attribute import attribute_report
 from trajguard.attacks.base import Attack, BackgroundKnowledge
-from trajguard.datamodel import CleanTrajectory, MatchedTrajectory, MetricValue
+from trajguard.attacks.membership import membership_report
+from trajguard.attacks.reconstruction import reconstruction_report
+from trajguard.datamodel import AttackResult, CleanTrajectory, MatchedTrajectory, MetricValue
 from trajguard.datasets.base import DatasetLoader
 from trajguard.datasets.cleaning import CleaningConfig, clean, haversine_m
 from trajguard.datasets.split import split_by_user
@@ -31,20 +38,33 @@ from trajguard.experiments import registry
 from trajguard.maps.base import RoadNetwork
 from trajguard.matching.base import MapMatcher, match_many
 from trajguard.privacy.base import PrivacyMechanism
+from trajguard.privacy.geoind import GeoIndistinguishability
+from trajguard.reporting.plots import (
+    headline_rows,
+    is_share_metric,
+    plot_by_epsilon,
+    plot_by_knowledge,
+    plot_mechanisms,
+    plot_runtime,
+    target_sort_key,
+)
+from trajguard.reporting.results_schema import ResultRow, write_results_csv
 from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
 from trajguard.representation import Grid, TrajectoryView
+from trajguard.synthesis.base import SyntheticGenerator
 
 _ = _builtins  # imported for its registration side effects
 
-_HEADLINE = "top1_acc"  # metric pivoted into matrix.csv and the tradeoff y-axis
-
-# Attacks the run loop can actually drive: it configures with no constructor args and
-# calls run(matched_pool, aux), the reidentification contract (the P4 vertical slice).
-# Other families (membership: synthetic + shadows; reconstruction: point sequences +
-# epsilon; poi: clean GPS + timestamps) have standalone harnesses and tests, but the
-# run loop would feed them the wrong inputs — so a config naming them is rejected up
-# front rather than crashing mid-pipeline. They join here as they are wired in.
-_ORCHESTRATOR_ATTACKS = frozenset({"reidentification"})
+# Attacks the run loop can actually drive. Reidentification is the reid-shaped
+# contract (no constructor args, run(matched_pool, aux)); reconstruction gets its
+# own preparation (noisy vs true point sequences in projected metres, mechanism
+# params handed to the attacker per design §6.3) and runs only against
+# geo_indistinguishability arms; poi_inference reads each protected arm's released
+# clean GPS pool against the raw pool, matched per user; membership_inference runs
+# LiRA against each fitted synthetic_generators arm with same-class shadows.
+_ORCHESTRATOR_ATTACKS = frozenset(
+    {"reidentification", "reconstruction", "poi_inference", "membership_inference"}
+)
 
 
 class ConsistencyError(ValueError):
@@ -59,9 +79,14 @@ class AttackSpec:
     """One configured attack: its registry name, attacker knowledge, and targets."""
 
     attack_type: str
-    known_points: tuple[int, ...]
+    known_points: tuple[int, ...]  # empty for families without a known-points knob
     distance: str
     target_scopes: tuple[str, ...]
+    motion_m: float | None = None  # reconstruction only: fixed curvature-prior scale (m)
+    poi_params: tuple[tuple[str, Any], ...] = ()  # poi_inference only: stay-point knobs
+    threshold_m: float | None = None  # poi_inference only: localised-user cutoff (m)
+    mia_params: tuple[tuple[str, Any], ...] = ()  # membership only: LiRA knobs
+    fprs: tuple[float, ...] = ()  # membership only: TPR@FPR operating points
 
 
 @dataclass(frozen=True)
@@ -84,7 +109,8 @@ class RunConfig:
     """A fully validated experiment configuration."""
 
     exp_id: str
-    seed: int
+    seed: int  # run seed: mechanism noise, attacker knowledge, bootstrap resampling
+    split_seed: int  # population seed: user subsample + train/test/shadow/attack split
     output_dir: Path
     cache_dir: Path
     protected_dir: Path
@@ -96,6 +122,7 @@ class RunConfig:
     dataset_id: str
     dataset_path: Path
     dataset_native_region: str
+    max_users: int | None  # keep all trajectories of at most this many users; None = all
     cleaning: CleaningConfig
     matcher_id: str
     radius_m: float
@@ -104,6 +131,7 @@ class RunConfig:
     min_match_score: float
     fractions: dict[str, float]
     mechanisms: tuple[MechanismSpec, ...]
+    generators: tuple[MechanismSpec, ...]  # synthetic_generators arms (same shape)
     attacks: tuple[AttackSpec, ...]
     metric_names: tuple[str, ...]
     top_k: int
@@ -111,6 +139,8 @@ class RunConfig:
     utility_grid: tuple[int, int]  # (n_rows, n_cols)
     bootstrap_n: int
     bootstrap_ci: float
+    measure_memory: bool  # trace each attack's peak memory (metrics.memory, default on)
+    attack_time_budget_s: float  # per-invocation runtime budget, report §6.6 (X = 300 s)
     export: tuple[str, ...]
     plots: tuple[str, ...]
 
@@ -126,20 +156,130 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
     specs: list[AttackSpec] = []
     for i, a in enumerate(attacks):
         ctx = f"attacks[{i}]"
+        attack_type = str(_req(a, "type", ctx))
+        scopes = tuple(str(s) for s in a.get("target_scope", ["raw"]))
+        unknown_scopes = set(scopes) - {"raw", "protected", "synthetic"}
+        if unknown_scopes:
+            raise ValueError(
+                f"config: {ctx}.target_scope {sorted(unknown_scopes)} unsupported; "
+                "expected a subset of ['raw', 'protected', 'synthetic']"
+            )
+        if attack_type == "reconstruction":
+            # The attacker's knowledge is the arm's mechanism parameters (design
+            # §6.3), supplied by the run loop — only the optional curvature prior
+            # is configurable here. Reid-style knobs are a config mistake.
+            attacker = a.get("attacker", {})
+            unknown_keys = set(attacker) - {"motion_m"}
+            if unknown_keys:
+                raise ValueError(
+                    f"config: {ctx}.attacker keys {sorted(unknown_keys)} unsupported for "
+                    "reconstruction (epsilon/unit_m come from the mechanism arm)"
+                )
+            if set(scopes) != {"protected"}:
+                raise ValueError(
+                    f"config: {ctx}.target_scope must be ['protected'] for reconstruction, "
+                    f"got {list(scopes)}"
+                )
+            motion = attacker.get("motion_m")
+            specs.append(
+                AttackSpec(
+                    attack_type=attack_type,
+                    known_points=(),
+                    distance="dtw",
+                    target_scopes=scopes,
+                    motion_m=float(motion) if motion is not None else None,
+                )
+            )
+            continue
+        if attack_type == "poi_inference":
+            # The attack brings its own stay-point knobs (design §6.4); reid-style
+            # attacker keys (known_points/distance) have no meaning for stay-point
+            # clustering and are a config mistake. threshold_m parameterises the
+            # localised-user fraction in the report, not the attacker.
+            attacker = a.get("attacker", {})
+            allowed = {"dwell_s", "radius_m", "home_hours", "work_hours", "tz_offset_h"}
+            unknown_keys = set(attacker) - allowed
+            if unknown_keys:
+                raise ValueError(
+                    f"config: {ctx}.attacker keys {sorted(unknown_keys)} unsupported for "
+                    f"poi_inference (expected a subset of {sorted(allowed)})"
+                )
+            if set(scopes) != {"protected"}:
+                raise ValueError(
+                    f"config: {ctx}.target_scope must be ['protected'] for poi_inference, "
+                    f"got {list(scopes)}"
+                )
+            scalar_keys = ("dwell_s", "radius_m", "tz_offset_h")
+            params: dict[str, Any] = {k: float(attacker[k]) for k in scalar_keys if k in attacker}
+            for key in ("home_hours", "work_hours"):
+                if key in attacker:
+                    hours = tuple(int(h) for h in attacker[key])
+                    if len(hours) != 2:
+                        raise ValueError(
+                            f"config: {ctx}.attacker.{key} must be [start_hour, end_hour], "
+                            f"got {attacker[key]}"
+                        )
+                    params[key] = hours
+            threshold = float(a.get("threshold_m", 200.0))
+            if threshold <= 0:
+                raise ValueError(f"config: {ctx}.threshold_m must be > 0, got {threshold}")
+            specs.append(
+                AttackSpec(
+                    attack_type=attack_type,
+                    known_points=(),
+                    distance="dtw",
+                    target_scopes=scopes,
+                    poi_params=tuple(sorted(params.items())),
+                    threshold_m=threshold,
+                )
+            )
+            continue
+        if attack_type == "membership_inference":
+            # LiRA's knobs are the shadow count and the subsample rate; the shadow
+            # models themselves are same-class generators built per arm by the run
+            # loop, so reid-style keys (and shadow hyperparameters) are a config
+            # mistake. fprs sets the TPR@FPR operating points of the report.
+            attacker = a.get("attacker", {})
+            allowed = {"n_shadow", "subsample"}
+            unknown_keys = set(attacker) - allowed
+            if unknown_keys:
+                raise ValueError(
+                    f"config: {ctx}.attacker keys {sorted(unknown_keys)} unsupported for "
+                    f"membership_inference (expected a subset of {sorted(allowed)})"
+                )
+            if set(scopes) != {"synthetic"}:
+                raise ValueError(
+                    f"config: {ctx}.target_scope must be ['synthetic'] for "
+                    f"membership_inference, got {list(scopes)}"
+                )
+            mia: dict[str, Any] = {}
+            if "n_shadow" in attacker:
+                mia["n_shadow"] = int(attacker["n_shadow"])
+            if "subsample" in attacker:
+                mia["subsample"] = float(attacker["subsample"])
+            fprs = tuple(float(f) for f in a.get("fprs", [0.001, 0.01]))
+            if not fprs or any(not 0.0 < f < 1.0 for f in fprs):
+                raise ValueError(
+                    f"config: {ctx}.fprs must be non-empty fractions in (0, 1), got {list(fprs)}"
+                )
+            specs.append(
+                AttackSpec(
+                    attack_type=attack_type,
+                    known_points=(),
+                    distance="dtw",
+                    target_scopes=scopes,
+                    mia_params=tuple(sorted(mia.items())),
+                    fprs=fprs,
+                )
+            )
+            continue
         attacker = _req(a, "attacker", ctx)
         known = tuple(int(k) for k in _req(attacker, "known_points", f"{ctx}.attacker"))
         if not known:
             raise ValueError(f"config: {ctx}.attacker.known_points must not be empty")
-        scopes = tuple(str(s) for s in a.get("target_scope", ["raw"]))
-        unknown_scopes = set(scopes) - {"raw", "protected"}
-        if unknown_scopes:
-            raise ValueError(
-                f"config: {ctx}.target_scope {sorted(unknown_scopes)} unsupported "
-                "(synthetic targets land in a later phase)"
-            )
         specs.append(
             AttackSpec(
-                attack_type=str(_req(a, "type", ctx)),
+                attack_type=attack_type,
                 known_points=known,
                 distance=str(attacker.get("distance", "dtw")),
                 target_scopes=scopes,
@@ -157,11 +297,18 @@ def _canon_param(value: Any) -> Any:
     return value
 
 
-def _mechanism_specs(mechs: list[dict[str, Any]]) -> tuple[MechanismSpec, ...]:
-    """Validate ``privacy_mechanisms`` and expand list-valued params into a grid."""
+def _variant_specs(
+    entries: list[dict[str, Any]], section: str, canon: bool = True
+) -> tuple[MechanismSpec, ...]:
+    """Validate a ``{id, params}`` config list and expand list-valued params into a grid.
+
+    Mechanism params are canonicalized (YAML ``1`` == ``1.0``) because they feed cache
+    keys; generator params are kept verbatim (``canon=False``) — they go straight into
+    constructors that may require real ints (e.g. the Markov ``order``).
+    """
     specs: list[MechanismSpec] = []
-    for i, m in enumerate(mechs):
-        ctx = f"privacy_mechanisms[{i}]"
+    for i, m in enumerate(entries):
+        ctx = f"{section}[{i}]"
         mech_id = str(_req(m, "id", ctx))
         params = m.get("params", {})
         if not isinstance(params, dict):
@@ -171,7 +318,7 @@ def _mechanism_specs(mechs: list[dict[str, Any]]) -> tuple[MechanismSpec, ...]:
             values = value if isinstance(value, list) else [value]
             if not values:
                 raise ValueError(f"config: {ctx}.params.{key} must not be empty")
-            grid[str(key)] = [_canon_param(v) for v in values]
+            grid[str(key)] = [_canon_param(v) if canon else v for v in values]
         keys = sorted(grid)
         for combo in itertools.product(*(grid[k] for k in keys)):
             specs.append(MechanismSpec(mech_id, tuple(zip(keys, combo, strict=True))))
@@ -207,10 +354,12 @@ def load_config(path: str | Path) -> RunConfig:
             f"config: reporting.export {sorted(unknown_formats)} unsupported; only 'csv' exists"
         )
     plots = tuple(str(p) for p in reporting.get("plots", []))
-    unknown_plots = set(plots) - {"tradeoff"}
+    known_plots = {"tradeoff", "by_epsilon", "by_knowledge", "mechanisms", "runtime"}
+    unknown_plots = set(plots) - known_plots
     if unknown_plots:
         raise ValueError(
-            f"config: reporting.plots {sorted(unknown_plots)} unsupported; only 'tradeoff' exists"
+            f"config: reporting.plots {sorted(unknown_plots)} unsupported; "
+            f"available: {sorted(known_plots)}"
         )
 
     metric_names = tuple(str(m) for m in _req(metrics, "privacy", "metrics"))
@@ -223,17 +372,51 @@ def load_config(path: str | Path) -> RunConfig:
         )
     if "tradeoff" in plots and "cell_js_divergence" not in utility_names:
         raise ValueError("config: the tradeoff plot needs 'cell_js_divergence' in metrics.utility")
-    if "tradeoff" in plots and "top1_acc" not in metric_names:
-        raise ValueError("config: the tradeoff plot needs 'top1_acc' in metrics.privacy")
     grid_cfg = metrics.get("utility_grid", {})
 
     attacks = _req(raw, "attacks", "")
     if not attacks:
         raise ValueError("config: at least one attack is required")
+    attack_specs = _attack_specs(attacks)
+    mech_specs = _variant_specs(raw.get("privacy_mechanisms", []), "privacy_mechanisms")
+    gen_specs = _variant_specs(
+        raw.get("synthetic_generators", []), "synthetic_generators", canon=False
+    )
+
+    # Plot prerequisites that are knowable before the expensive pipeline: a plot
+    # whose axis cannot exist for this config is a config mistake, not an empty file.
+    if "by_knowledge" in plots and not any(s.known_points for s in attack_specs):
+        raise ValueError("config: the by_knowledge plot needs an attack with attacker.known_points")
+    for plot in ("by_epsilon", "mechanisms"):
+        if plot in plots and not mech_specs and not gen_specs:
+            raise ValueError(
+                f"config: the {plot} plot needs at least one privacy_mechanisms "
+                "or synthetic_generators arm"
+            )
+
+    # Per-attack runtime budget (report §6.6): the author fixed X at 300 s per
+    # attack invocation (5 Aug 2026). Exceeding it never fails or trims a run —
+    # it flags the invocation in run.json so the scope-reduction rules in
+    # docs/RUNNING.md can be applied to the *next* runs of a sweep.
+    budget_s = float(metrics.get("attack_time_budget_s", 300.0))
+    if budget_s <= 0:
+        raise ValueError(f"config: metrics.attack_time_budget_s must be > 0, got {budget_s}")
+
+    # Two seeds (design §6.4 repetitions): split_seed pins the population and the
+    # user split; seed drives everything stochastic downstream. Defaulting
+    # split_seed to seed keeps single-run configs unchanged, while repetition
+    # runs set split_seed explicitly and vary only seed — the split stays put.
+    seed = int(_req(exp, "seed", "experiment"))
+    split_seed = int(exp.get("split_seed", seed))
+    max_users_raw = ds.get("max_users")
+    max_users = None if max_users_raw is None else int(max_users_raw)
+    if max_users is not None and max_users < 1:
+        raise ValueError(f"config: dataset.max_users must be >= 1, got {max_users}")
 
     return RunConfig(
         exp_id=str(_req(exp, "id", "experiment")),
-        seed=int(_req(exp, "seed", "experiment")),
+        seed=seed,
+        split_seed=split_seed,
         output_dir=Path(exp.get("output_dir", f"results/{exp['id']}")),
         cache_dir=Path(exp.get("cache_dir", "data/processed")),
         protected_dir=Path(exp.get("protected_dir", "data/protected")),
@@ -245,6 +428,7 @@ def load_config(path: str | Path) -> RunConfig:
         dataset_id=str(_req(ds, "id", "dataset")),
         dataset_path=Path(_req(ds, "path", "dataset")),
         dataset_native_region=str(ds.get("native_region", "")),
+        max_users=max_users,
         cleaning=CleaningConfig(
             max_speed_kmh=float(_req(cl, "max_speed_kmh", "cleaning")),
             min_points=int(_req(cl, "min_points", "cleaning")),
@@ -257,14 +441,17 @@ def load_config(path: str | Path) -> RunConfig:
         k_candidates=int(mm.get("k_candidates", 8)),
         min_match_score=float(_req(mm, "min_match_score", "map_matching")),
         fractions={str(k): float(v) for k, v in _req(sp, "fractions", "split").items()},
-        mechanisms=_mechanism_specs(raw.get("privacy_mechanisms", [])),
-        attacks=_attack_specs(attacks),
+        mechanisms=mech_specs,
+        generators=gen_specs,
+        attacks=attack_specs,
         metric_names=metric_names,
         top_k=int(metrics.get("top_k", 5)),
         utility_names=utility_names,
         utility_grid=(int(grid_cfg.get("n_rows", 20)), int(grid_cfg.get("n_cols", 20))),
         bootstrap_n=int(_req(metrics, "bootstrap", "metrics").get("n", 1000)),
         bootstrap_ci=float(_req(metrics, "bootstrap", "metrics").get("ci", 0.95)),
+        measure_memory=bool(metrics.get("memory", True)),
+        attack_time_budget_s=budget_s,
         export=export,
         plots=plots,
     )
@@ -338,7 +525,10 @@ def _version_hash(cfg: RunConfig) -> str:
             cfg.k_candidates,
             cfg.min_match_score,
         ],
-        "split": [sorted(cfg.fractions.items()), cfg.seed],
+        # Population and split are pinned by split_seed (not the run seed), so
+        # repetition runs that vary only the run seed share this pool cache.
+        "sample": cfg.max_users,
+        "split": [sorted(cfg.fractions.items()), cfg.split_seed],
     }
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
 
@@ -500,7 +690,9 @@ def _matched_pool(
         c = clean(raw, cfg.cleaning)
         if c is not None:
             cleaned.append(c)
-    labelled = split_by_user(cleaned, cfg.fractions, cfg.seed)
+    if cfg.max_users is not None:
+        cleaned = _subsample_users(cleaned, cfg.max_users, cfg.split_seed)
+    labelled = split_by_user(cleaned, cfg.fractions, cfg.split_seed)
     split_counts: dict[str, int] = {}
     for t in labelled:
         split_counts[t.split or "none"] = split_counts.get(t.split or "none", 0) + 1
@@ -511,6 +703,23 @@ def _matched_pool(
 
     _write_pool_cache(cache, matched, clean_by_id, dropped, split_counts)
     return matched, clean_by_id, dropped, split_counts
+
+
+def _subsample_users(
+    trajs: list[CleanTrajectory], max_users: int, seed: int
+) -> list[CleanTrajectory]:
+    """Keep every trajectory of at most ``max_users`` users (design §6.4 sample sizes).
+
+    Users are drawn by a seeded permutation of the sorted user ids, so the kept
+    population is deterministic, independent of trajectory order, and nested:
+    a larger ``max_users`` under the same seed keeps a superset of the users.
+    """
+    users = sorted({t.user_id for t in trajs})
+    if len(users) <= max_users:
+        return trajs
+    rng = np.random.default_rng(seed)
+    kept = {users[i] for i in rng.permutation(len(users))[:max_users]}
+    return [t for t in trajs if t.user_id in kept]
 
 
 def _build_metrics(cfg: RunConfig) -> list[SampledMetric]:
@@ -536,6 +745,39 @@ class _Pool:
     clean_by_id: dict[str, CleanTrajectory]
     rematch_dropped: int
     spent_budget: float | None
+
+
+@dataclass(frozen=True)
+class _ArmInfo:
+    """Structured identity of one arm for the results table (no ref-string parsing)."""
+
+    scope: str  # raw | protected
+    arm_id: str  # mechanism registry id; "" for raw
+    epsilon: float | None
+    unit_m: float | None
+
+
+def _opt_float_attr(obj: Any, name: str) -> float | None:
+    """float(getattr(obj, name)) when the attribute exists, else None."""
+    value = getattr(obj, name, None)
+    return None if value is None else float(value)
+
+
+def _arm_infos(mech_plans: list[tuple[MechanismSpec, PrivacyMechanism]]) -> dict[str, _ArmInfo]:
+    """Per-ref arm identity for the raw arm and every mechanism arm.
+
+    epsilon/unit_m come from the instantiated mechanism (so defaults the YAML
+    omitted are still recorded), not from re-parsing the arm label.
+    """
+    infos = {"raw": _ArmInfo("raw", "", None, None)}
+    for mspec, mech in mech_plans:
+        infos[f"protected:{mspec.ref}"] = _ArmInfo(
+            "protected",
+            mspec.mech_id,
+            _opt_float_attr(mech, "epsilon"),
+            _opt_float_attr(mech, "unit_m"),
+        )
+    return infos
 
 
 def _noisy_clean(source: CleanTrajectory, payload: Any) -> CleanTrajectory:
@@ -627,6 +869,299 @@ def _target_pools(
     return pools
 
 
+def _run_measured(
+    measure_memory: bool, invoke: Callable[[], AttackResult]
+) -> tuple[AttackResult, float | None]:
+    """Run one attack, optionally recording its peak traced memory in megabytes.
+
+    tracemalloc counts only allocations made while tracing (numpy buffers
+    included), so the peak is the attack's own footprint, not the pipeline's.
+    Tracing slows execution — the runtime the attack measures internally then
+    carries that overhead, which is why ``metrics.memory`` can turn this off
+    for timing-critical sweeps (design §7.6).
+    """
+    if not measure_memory:
+        return invoke(), None
+    already_tracing = tracemalloc.is_tracing()  # e.g. an outer profiler; leave it running
+    if not already_tracing:
+        tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        result = invoke()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        if not already_tracing:
+            tracemalloc.stop()
+    return result, round(peak / 1e6, 3)
+
+
+def _reconstruction_values(
+    cfg: RunConfig,
+    spec: AttackSpec,
+    attack_cls: Callable[..., Attack],
+    pools: dict[str, _Pool],
+    clean_by_id: dict[str, CleanTrajectory],
+    mech_by_ref: dict[str, PrivacyMechanism],
+    arm_info: dict[str, _ArmInfo],
+) -> list[ResultRow]:
+    """Run the MAP reconstruction against every geo_indistinguishability arm.
+
+    Target and aux are the released (noisy) and true GPS points of the full
+    release, projected to the map CRS so the attack works in metres. Re-matching
+    survival does not matter here: the attacker inverts the release itself, not
+    the snapped pool. Arms of other mechanisms (e.g. the identity baseline) are
+    skipped — there is no planar-Laplace noise to invert.
+    """
+    transformer = Transformer.from_crs("EPSG:4326", cfg.map_crs, always_xy=True)
+
+    def project(points: Sequence[tuple[float, float, float]]) -> list[tuple[float, float]]:
+        xs, ys = transformer.transform([p[1] for p in points], [p[0] for p in points])
+        return list(zip(xs, ys, strict=True))
+
+    rows: list[ResultRow] = []
+    for ref, pool in pools.items():
+        mech = mech_by_ref.get(ref)
+        if not isinstance(mech, GeoIndistinguishability):
+            continue
+        ids = sorted(set(clean_by_id) & set(pool.clean_by_id))
+        target = [project(pool.clean_by_id[i].points) for i in ids]
+        aux = [project(clean_by_id[i].points) for i in ids]
+        attack = attack_cls(epsilon=mech.epsilon, unit_m=mech.unit_m, motion_m=spec.motion_m)
+        result_id = f"reconstruction:{ref}"
+        result, peak_mb = _run_measured(cfg.measure_memory, partial(attack.run, target, aux))
+        result = replace(
+            result,
+            exp_id=cfg.exp_id,
+            target_data_ref=ref,
+            result_id=result_id,
+        )
+        report = reconstruction_report(
+            result, n_bootstrap=cfg.bootstrap_n, ci=cfg.bootstrap_ci, seed=cfg.seed
+        )
+        info = arm_info[ref]
+        rows.extend(
+            ResultRow(
+                value=MetricValue(
+                    metric_id=f"{result_id}:{name}",
+                    result_id=result_id,
+                    name=name,
+                    value=mean,
+                    ci_low=lo,
+                    ci_high=hi,
+                    n_bootstrap=cfg.bootstrap_n,
+                ),
+                family="reconstruction",
+                scope=info.scope,
+                arm_id=info.arm_id,
+                target_ref=ref,
+                epsilon=info.epsilon,
+                unit_m=info.unit_m,
+                n_pool=len(pool.matched),
+                n_gallery_users=len({t.user_id for t in pool.matched}),
+                n_rematch_dropped=pool.rematch_dropped,
+                spent_budget=pool.spent_budget,
+                attack_runtime_s=result.runtime_s,
+                peak_memory_mb=peak_mb,
+            )
+            for name, (mean, lo, hi) in report.items()
+        )
+    return rows
+
+
+def _poi_attack(attack_cls: Callable[..., Attack], spec: AttackSpec) -> Attack:
+    """Instantiate the POI attack from the spec's stay-point knobs (fail-fast probe)."""
+    return attack_cls(**dict(spec.poi_params))
+
+
+def _poi_inference_values(
+    cfg: RunConfig,
+    spec: AttackSpec,
+    attack_cls: Callable[..., Attack],
+    pools: dict[str, _Pool],
+    clean_by_id: dict[str, CleanTrajectory],
+    arm_info: dict[str, _ArmInfo],
+) -> list[ResultRow]:
+    """Run home/work POI inference against every protected arm's released GPS pool.
+
+    Target is the arm's full release (``clean_by_id`` keeps every released
+    trajectory, so an arm whose noise empties the re-matched pool is still
+    attackable); truth is the raw clean pool, matched per ``user_id``. The
+    identity arm releases the raw points unchanged, so its rows are a
+    near-zero-error sanity baseline, not evidence of protection.
+    """
+    attack = _poi_attack(attack_cls, spec)
+    threshold = spec.threshold_m if spec.threshold_m is not None else 200.0
+    rows: list[ResultRow] = []
+    for ref, pool in pools.items():
+        if not ref.startswith("protected:"):
+            continue
+        result_id = f"poi_inference:{ref}"
+        result, peak_mb = _run_measured(
+            cfg.measure_memory,
+            partial(attack.run, list(pool.clean_by_id.values()), list(clean_by_id.values())),
+        )
+        result = replace(
+            result,
+            exp_id=cfg.exp_id,
+            target_data_ref=ref,
+            result_id=result_id,
+        )
+        report = attribute_report(
+            result,
+            threshold_m=threshold,
+            n_bootstrap=cfg.bootstrap_n,
+            ci=cfg.bootstrap_ci,
+            seed=cfg.seed,
+        )
+        info = arm_info[ref]
+        rows.extend(
+            ResultRow(
+                value=MetricValue(
+                    metric_id=f"{result_id}:{name}",
+                    result_id=result_id,
+                    name=name,
+                    value=mean,
+                    ci_low=lo,
+                    ci_high=hi,
+                    n_bootstrap=cfg.bootstrap_n,
+                ),
+                family="poi_inference",
+                scope=info.scope,
+                arm_id=info.arm_id,
+                target_ref=ref,
+                epsilon=info.epsilon,
+                unit_m=info.unit_m,
+                n_pool=len(pool.matched),
+                n_gallery_users=len({t.user_id for t in pool.matched}),
+                n_rematch_dropped=pool.rematch_dropped,
+                spent_budget=pool.spent_budget,
+                attack_runtime_s=result.runtime_s,
+                peak_memory_mb=peak_mb,
+            )
+            for name, (mean, lo, hi) in report.items()
+        )
+    return rows
+
+
+def _generator_ctor(
+    gen_cls: Callable[..., Any], params: dict[str, Any], cfg: RunConfig, provide: _NetProvider
+) -> Callable[[int], Any]:
+    """Seed-offset factory for one generator arm; injects network/seed where accepted.
+
+    Generator constructors differ (MarkovGenerator wants neither, RNLDPSynthGenerator
+    wants both), so injection is signature-driven: ``network`` comes from the memoized
+    provider, ``seed`` is ``cfg.seed + offset``. Offset 0 builds the target generator;
+    ``1000 + k`` builds the k-th same-class shadow (the ``rnldp_eval`` convention).
+    """
+    sig = inspect.signature(gen_cls)
+
+    def make(seed_offset: int) -> Any:
+        kwargs = dict(params)
+        if "network" in sig.parameters:
+            kwargs["network"] = provide()[0]
+        if "seed" in sig.parameters:
+            kwargs["seed"] = cfg.seed + seed_offset
+        return gen_cls(**kwargs)
+
+    return make
+
+
+def _mia_pool(
+    matched: list[MatchedTrajectory], clean_by_id: dict[str, CleanTrajectory]
+) -> tuple[list[tuple[int, ...]], list[tuple[int, bool]], list[MatchedTrajectory]]:
+    """Strict LiRA inputs from the split pools (fair MIA, design T3).
+
+    The shadow pool is the shadow split — the attacker's own background data — plus
+    the candidate sequences themselves (train members, test non-members), which the
+    attacker legitimately knows because it queries them. Uniform shadow subsampling
+    then lands each candidate inside roughly half the shadows (its IN group) and
+    outside the rest (OUT), without the shadows ever seeing non-candidate train data.
+    Returns ``(pool, candidates, train_matched)``.
+    """
+
+    def of_split(split: str) -> list[MatchedTrajectory]:
+        return [m for m in matched if clean_by_id[m.traj_id].split == split]
+
+    train_m, test_m, shadow_m = of_split("train"), of_split("test"), of_split("shadow")
+    if not train_m or not test_m:
+        raise ValueError(
+            f"membership_inference needs matched trajectories in both the train "
+            f"(members: {len(train_m)}) and test (non-members: {len(test_m)}) splits"
+        )
+    base = [tuple(int(e) for e in m.edge_seq) for m in shadow_m]
+    members = [tuple(int(e) for e in m.edge_seq) for m in train_m]
+    nonmembers = [tuple(int(e) for e in m.edge_seq) for m in test_m]
+    n0 = len(base)
+    candidates = [(n0 + i, i < len(members)) for i in range(len(members) + len(nonmembers))]
+    return base + members + nonmembers, candidates, train_m
+
+
+def _membership_values(
+    cfg: RunConfig,
+    spec: AttackSpec,
+    attack_cls: Callable[..., Attack],
+    matched: list[MatchedTrajectory],
+    clean_by_id: dict[str, CleanTrajectory],
+    gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]],
+) -> list[ResultRow]:
+    """Run LiRA membership inference against every fitted generator arm (design §6.2).
+
+    Per arm: the target generator fits on the train split (its release contract), and
+    the attack scores train members against test non-members using same-class shadow
+    generators from the arm's factory. AUC and TPR@FPR are score-based point values,
+    so the CI columns stay empty by design — the interval across seeds comes from
+    ``trajguard repeat``.
+    """
+    pool, candidates, train_m = _mia_pool(matched, clean_by_id)
+    n_members = sum(1 for _, is_member in candidates if is_member)
+    rows: list[ResultRow] = []
+    for gspec, make in gen_plans:
+        target = make(0)
+        target.fit([TrajectoryView(clean=clean_by_id[m.traj_id], matched=m) for m in train_m])
+        attack = attack_cls(
+            **dict(spec.mia_params),
+            shadow_factory=lambda k, _make=make: _make(1000 + k),
+        )
+        attack.configure(BackgroundKnowledge(known_points=0, distance="dtw", seed=cfg.seed))
+        ref = f"synthetic:{gspec.ref}"
+        result_id = f"membership_inference:{ref}"
+        result, peak_mb = _run_measured(
+            cfg.measure_memory, partial(attack.run, target, (pool, candidates))
+        )
+        result = replace(
+            result,
+            exp_id=cfg.exp_id,
+            target_data_ref=ref,
+            result_id=result_id,
+        )
+        rows.extend(
+            ResultRow(
+                value=MetricValue(
+                    metric_id=f"{result_id}:{name}",
+                    result_id=result_id,
+                    name=name,
+                    value=val,
+                    ci_low=None,
+                    ci_high=None,
+                    n_bootstrap=None,
+                ),
+                family="membership_inference",
+                scope="synthetic",
+                arm_id=gspec.mech_id,
+                target_ref=ref,
+                epsilon=_opt_float_attr(target, "epsilon"),
+                n_shadow=int(attack.n_shadow) if hasattr(attack, "n_shadow") else None,
+                n_pool=len(candidates),
+                n_members=n_members,
+                n_nonmembers=len(candidates) - n_members,
+                attack_runtime_s=result.runtime_s,
+                peak_memory_mb=peak_mb,
+            )
+            for name, val in membership_report(result, fprs=spec.fprs).items()
+        )
+    return rows
+
+
 def run(config_path: str | Path) -> list[MetricValue]:
     """Load a config file, run the experiment, and return all metric values."""
     return run_experiment(load_config(config_path))
@@ -668,24 +1203,59 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 f"config: attack {spec.attack_type!r} does not support "
                 f"target_scope {sorted(unsupported)}"
             )
-        # The run loop builds attacks with no arguments; an attack whose constructor
-        # needs params the orchestrator cannot supply (e.g. reconstruction's epsilon)
-        # must die here, not after the expensive pipeline.
-        try:
-            attack_cls()
-        except TypeError as err:
-            raise ValueError(
-                f"config: attack {spec.attack_type!r} takes constructor params "
-                f"the orchestrator does not supply: {err}"
-            ) from err
-        # Constructs fine but consumes a different input contract than the run loop
-        # supplies (e.g. poi_inference wants clean GPS, not the matched pool): fail
-        # fast here instead of crashing after the expensive pipeline.
+        # Consumes a different input contract than the run loop supplies (e.g.
+        # poi_inference wants clean GPS, not the matched pool): fail fast here
+        # instead of crashing after the expensive pipeline.
         if spec.attack_type not in _ORCHESTRATOR_ATTACKS:
             raise ValueError(
                 f"config: attack {spec.attack_type!r} is not wired into the orchestrator's "
                 f"run loop yet; only {sorted(_ORCHESTRATOR_ATTACKS)} runs end-to-end"
             )
+        if spec.attack_type == "reconstruction":
+            # The MAP inversion targets planar-Laplace noise, so it needs at least
+            # one geo_indistinguishability arm to attack; other arms are skipped.
+            if not any(m.mech_id == "geo_indistinguishability" for m in cfg.mechanisms):
+                raise ValueError(
+                    "config: reconstruction requires a geo_indistinguishability mechanism "
+                    "arm (the MAP inversion attacks planar-Laplace noise)"
+                )
+        elif spec.attack_type == "poi_inference":
+            # It attacks protected releases, so an empty mechanism section would
+            # silently produce no rows; and the constructor validates its knobs
+            # (e.g. dwell_s > 0), so probe it before the expensive pipeline.
+            if not cfg.mechanisms:
+                raise ValueError(
+                    "config: poi_inference targets protected releases, but no "
+                    "privacy_mechanisms are configured (the 'none' arm gives the "
+                    "sanity baseline)"
+                )
+            _poi_attack(attack_cls, spec)
+        elif spec.attack_type == "membership_inference":
+            # LiRA needs fitted generator arms plus member (train) and non-member
+            # (test) candidates; the constructor validates its own knobs
+            # (n_shadow >= 2, subsample in (0, 1)) — probe it before the pipeline.
+            if not cfg.generators:
+                raise ValueError(
+                    "config: membership_inference targets synthetic generators, but "
+                    "synthetic_generators is empty"
+                )
+            if cfg.fractions.get("train", 0.0) <= 0.0 or cfg.fractions.get("test", 0.0) <= 0.0:
+                raise ValueError(
+                    "config: membership_inference needs non-zero train (members) and "
+                    "test (non-members) split fractions"
+                )
+            attack_cls(**dict(spec.mia_params))
+        else:
+            # The reid-shaped loop builds attacks with no arguments; an attack whose
+            # constructor needs params the orchestrator cannot supply must die here,
+            # not after the expensive pipeline.
+            try:
+                attack_cls()
+            except TypeError as err:
+                raise ValueError(
+                    f"config: attack {spec.attack_type!r} takes constructor params "
+                    f"the orchestrator does not supply: {err}"
+                ) from err
         plans.append((spec, attack_cls))
     mech_plans: list[tuple[MechanismSpec, PrivacyMechanism]] = []
     for mspec in cfg.mechanisms:
@@ -699,14 +1269,47 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         mech_plans.append((mspec, mech))
 
     provide = _net_provider(cfg)
+    gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]] = []
+    for gspec in cfg.generators:
+        gen_cls = registry.get("generator", gspec.mech_id)
+        if not issubclass(gen_cls, SyntheticGenerator):  # pragma: no cover - registry enforces
+            raise TypeError(f"generator {gspec.mech_id!r} is not a SyntheticGenerator")
+        # Constructing may need the road network (rn_ldp_synth), so fail fast on
+        # misspelled param names via the signature instead of instantiating here.
+        try:
+            inspect.signature(gen_cls).bind_partial(**dict(gspec.params))
+        except TypeError as err:
+            raise ValueError(f"config: generator {gspec.ref!r} rejected its params: {err}") from err
+        gen_plans.append((gspec, _generator_ctor(gen_cls, dict(gspec.params), cfg, provide)))
+
     matched, clean_by_id, dropped, split_counts = _matched_pool(cfg, provide)
     metrics = _build_metrics(cfg)
     pools = _target_pools(cfg, matched, clean_by_id, mech_plans, provide)
 
-    all_values: list[MetricValue] = []
-    attack_rows: list[tuple[str, int, list[MetricValue]]] = []  # (ref, known_points, values)
+    mech_by_ref: dict[str, PrivacyMechanism] = {
+        f"protected:{mspec.ref}": mech for mspec, mech in mech_plans
+    }
+    arm_info = _arm_infos(mech_plans)
+    all_rows: list[ResultRow] = []
     probe_counts: dict[str, int] = {}
     for spec, attack_cls in plans:
+        if spec.attack_type == "reconstruction":
+            all_rows.extend(
+                _reconstruction_values(
+                    cfg, spec, attack_cls, pools, clean_by_id, mech_by_ref, arm_info
+                )
+            )
+            continue
+        if spec.attack_type == "poi_inference":
+            all_rows.extend(
+                _poi_inference_values(cfg, spec, attack_cls, pools, clean_by_id, arm_info)
+            )
+            continue
+        if spec.attack_type == "membership_inference":
+            all_rows.extend(
+                _membership_values(cfg, spec, attack_cls, matched, clean_by_id, gen_plans)
+            )
+            continue
         for ref, pool in pools.items():
             if ref.split(":", 1)[0] not in spec.target_scopes:
                 continue
@@ -718,7 +1321,9 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 attack.configure(
                     BackgroundKnowledge(known_points=k, distance=spec.distance, seed=cfg.seed)
                 )
-                result = attack.run(pool.matched, aux)
+                result, peak_mb = _run_measured(
+                    cfg.measure_memory, partial(attack.run, pool.matched, aux)
+                )
                 result = replace(
                     result,
                     exp_id=cfg.exp_id,
@@ -727,8 +1332,27 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 )
                 probe_counts[ref] = len(result.predictions)
                 values = evaluate(result, metrics, cfg.bootstrap_n, cfg.bootstrap_ci, cfg.seed)
-                all_values.extend(values)
-                attack_rows.append((ref, k, values))
+                info = arm_info[ref]
+                all_rows.extend(
+                    ResultRow(
+                        value=v,
+                        family=spec.attack_type,
+                        scope=info.scope,
+                        arm_id=info.arm_id,
+                        target_ref=ref,
+                        epsilon=info.epsilon,
+                        unit_m=info.unit_m,
+                        known_points=k,
+                        n_pool=len(pool.matched),
+                        n_gallery_users=len({t.user_id for t in pool.matched}),
+                        n_probes=len(result.predictions),
+                        n_rematch_dropped=pool.rematch_dropped,
+                        spent_budget=pool.spent_budget,
+                        attack_runtime_s=result.runtime_s,
+                        peak_memory_mb=peak_mb,
+                    )
+                    for v in values
+                )
 
     grid = Grid(bbox=cfg.map_bbox, n_rows=cfg.utility_grid[0], n_cols=cfg.utility_grid[1])
     utility_by_ref: dict[str, dict[str, float]] = {}
@@ -748,15 +1372,28 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 ci=cfg.bootstrap_ci,
                 rng=rng,
             )
-            all_values.append(
-                MetricValue(
-                    metric_id=f"utility:{ref}:{name}",
-                    result_id=f"utility:{ref}",
-                    name=name,
-                    value=point,
-                    ci_low=lo,
-                    ci_high=hi,
-                    n_bootstrap=cfg.bootstrap_n,
+            info = arm_info[ref]
+            all_rows.append(
+                ResultRow(
+                    value=MetricValue(
+                        metric_id=f"utility:{ref}:{name}",
+                        result_id=f"utility:{ref}",
+                        name=name,
+                        value=point,
+                        ci_low=lo,
+                        ci_high=hi,
+                        n_bootstrap=cfg.bootstrap_n,
+                    ),
+                    family="utility",
+                    scope=info.scope,
+                    arm_id=info.arm_id,
+                    target_ref=ref,
+                    epsilon=info.epsilon,
+                    unit_m=info.unit_m,
+                    n_pool=len(pool.matched),
+                    n_gallery_users=len({t.user_id for t in pool.matched}),
+                    n_rematch_dropped=pool.rematch_dropped,
+                    spent_budget=pool.spent_budget,
                 )
             )
             utility_by_ref.setdefault(ref, {})[name] = point
@@ -771,51 +1408,88 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         }
         for ref, pool in pools.items()
     }
-    matrix = _matrix_rows(list(pools), attack_rows)
+    matrix = _matrix_table(all_rows)
+    over_budget = _over_budget_attacks(all_rows, cfg.attack_time_budget_s)
     _write_results(
         cfg,
-        all_values,
+        all_rows,
         matched,
         dropped,
         split_counts,
         time.perf_counter() - started,
         arms,
         matrix,
+        over_budget,
     )
+    if over_budget:
+        worst = ", ".join(f"{o['result_id']} ({o['runtime_s']:.1f} s)" for o in over_budget)
+        print(
+            f"warning: {len(over_budget)} attack invocation(s) exceeded the "
+            f"{cfg.attack_time_budget_s:g} s runtime budget: {worst} — apply the "
+            "scope-reduction rules in docs/RUNNING.md (computational budget)"
+        )
     if "tradeoff" in cfg.plots:
-        plot_tradeoff(_tradeoff_points(matrix, utility_by_ref), cfg.output_dir / "tradeoff.png")
-    return all_values
+        for family, headline in matrix[0]:
+            points = _family_tradeoff_points(all_rows, family, utility_by_ref)
+            if not any(math.isfinite(x) and math.isfinite(y) for x, y, _ in points):
+                # e.g. membership inference: utility (the x-axis) is only measured
+                # over protected releases, so synthetic arms have no tradeoff point.
+                continue
+            name = "tradeoff.png" if family == "reidentification" else f"tradeoff_{family}.png"
+            plot_tradeoff(
+                points,
+                cfg.output_dir / name,
+                y_label=f"{family}: {headline}",
+                unit_interval=is_share_metric(headline),
+            )
+    plotters: dict[str, Callable[[Sequence[ResultRow], Path], list[Path]]] = {
+        "by_epsilon": plot_by_epsilon,
+        "by_knowledge": plot_by_knowledge,
+        "mechanisms": plot_mechanisms,
+        "runtime": plot_runtime,
+    }
+    for plot_name in cfg.plots:
+        plotter = plotters.get(plot_name)
+        if plotter is not None:
+            plotter(all_rows, cfg.output_dir)
+    return [r.value for r in all_rows]
 
 
-_Matrix = tuple[list[int], list[tuple[str, dict[int, float]]]]
+_Matrix = tuple[list[tuple[str, str]], list[tuple[str, dict[str, float]]]]
 
 
-def _matrix_rows(refs: list[str], attack_rows: list[tuple[str, int, list[MetricValue]]]) -> _Matrix:
-    """Pivot the headline metric into (known_points columns, target-ref rows)."""
-    cells: dict[tuple[str, int], float] = {}
-    for ref, k, values in attack_rows:
-        for v in values:
-            if v.name == _HEADLINE:
-                cells[(ref, k)] = v.value
-    ks = sorted({k for _, k in cells})
-    rows = [(ref, {k: cells[(ref, k)] for k in ks if (ref, k) in cells}) for ref in refs]
-    return ks, [(ref, kv) for ref, kv in rows if kv]
+def _matrix_table(rows: Sequence[ResultRow]) -> _Matrix:
+    """Pivot every family's headline metric into (family columns, target-arm rows)."""
+    families = sorted({r.family for r in rows if r.family != "utility"})
+    columns: list[tuple[str, str]] = []
+    cells: dict[str, dict[str, float]] = {}
+    order: dict[str, tuple[Any, ...]] = {}
+    for family in families:
+        headline, picked = headline_rows(rows, family)
+        columns.append((family, headline))
+        for r in picked:
+            value = _finite_or_none(r.value.value)
+            if value is None:
+                continue
+            cells.setdefault(r.target_ref, {})[family] = value
+            order.setdefault(r.target_ref, target_sort_key(r))
+    targets = sorted(cells, key=lambda t: order[t])
+    return columns, [(t, cells[t]) for t in targets]
 
 
-def _tradeoff_points(
-    matrix: _Matrix, utility_by_ref: dict[str, dict[str, float]]
+def _family_tradeoff_points(
+    rows: Sequence[ResultRow], family: str, utility_by_ref: dict[str, dict[str, float]]
 ) -> list[TradeoffPoint]:
-    """(cell JSD, headline accuracy at the largest known_points, arm label) per arm."""
-    ks, rows = matrix
-    if not ks:
-        return []
-    k_max = ks[-1]
+    """(cell JSD, family headline value, arm label) per target arm of one family."""
+    _, picked = headline_rows(rows, family)
     points: list[TradeoffPoint] = []
-    for ref, kv in rows:
-        if k_max not in kv:
-            continue
-        x = 0.0 if ref == "raw" else utility_by_ref.get(ref, {}).get("cell_js_divergence", math.nan)
-        points.append((x, kv[k_max], ref))
+    for r in picked:
+        x = (
+            0.0
+            if r.scope == "raw"
+            else utility_by_ref.get(r.target_ref, {}).get("cell_js_divergence", math.nan)
+        )
+        points.append((x, r.value.value, r.target_ref))
     return points
 
 
@@ -824,19 +1498,49 @@ def _finite_or_none(x: float | None) -> float | None:
     return None if x is None or not math.isfinite(x) else x
 
 
+def _over_budget_attacks(rows: Sequence[ResultRow], budget_s: float) -> list[dict[str, Any]]:
+    """Attack invocations whose runtime exceeded the budget, worst first (report §6.6).
+
+    Rows of one invocation share a result_id and carry the same runtime, so each
+    invocation is counted once. Exceeding the budget never invalidates the run:
+    the flag exists so the scope-reduction rules in docs/RUNNING.md can be
+    applied when planning the next runs of a sweep — never silently to this one.
+    """
+    seen: dict[str, float] = {}
+    for r in rows:
+        if r.family != "utility" and r.attack_runtime_s is not None:
+            seen.setdefault(r.value.result_id, r.attack_runtime_s)
+    over = sorted(((rid, t) for rid, t in seen.items() if t > budget_s), key=lambda item: -item[1])
+    return [{"result_id": rid, "runtime_s": round(t, 3)} for rid, t in over]
+
+
 def _write_results(
     cfg: RunConfig,
-    values: list[MetricValue],
+    rows: list[ResultRow],
     matched: list[MatchedTrajectory],
     dropped: int,
     split_counts: dict[str, int],
     runtime_s: float,
     arms: dict[str, dict[str, Any]],
     matrix: _Matrix,
+    over_budget: list[dict[str, Any]],
 ) -> None:
-    """Write the exported formats and run.json under the experiment output directory."""
+    """Write the exported formats, results.csv, and run.json under the output directory."""
+    values = [r.value for r in rows]
+    provenance: dict[str, Any] = {
+        "exp_id": cfg.exp_id,
+        "config_hash": _version_hash(cfg),
+        "git_commit": _git_commit(),
+        "seed": cfg.seed,
+        "split_seed": cfg.split_seed,
+        "max_users": cfg.max_users,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     if "csv" in cfg.export:
+        # The unified results table (docs/REZULTATI_SHEMA.md): metrics.csv rows plus
+        # run provenance, structured identity/axis columns, arm stats, and runtimes.
+        write_results_csv(cfg.output_dir / "results.csv", provenance, rows, round(runtime_s, 3))
         with (cfg.output_dir / "metrics.csv").open("w", newline="") as fh:
             writer = csv.writer(fh)
             writer.writerow(["result_id", "metric", "value", "ci_low", "ci_high", "n_bootstrap"])
@@ -853,25 +1557,30 @@ def _write_results(
                         v.n_bootstrap,
                     ]
                 )
-        ks, rows = matrix
-        if rows:
+        columns, matrix_rows = matrix
+        if matrix_rows:
+            # Per-run risk-matrix slice: one column per family's headline metric
+            # (reidentification at its largest known_points), one row per target arm.
             with (cfg.output_dir / "matrix.csv").open("w", newline="") as fh:
                 writer = csv.writer(fh)
-                writer.writerow(["target", *[f"k={k}" for k in ks]])
-                for ref, kv in rows:
-                    writer.writerow([ref, *[kv.get(k, "") for k in ks]])
+                writer.writerow(["target", *[f"{family}:{metric}" for family, metric in columns]])
+                for ref, kv in matrix_rows:
+                    writer.writerow([ref, *[kv.get(family, "") for family, _ in columns]])
 
     run_record = {
-        "exp_id": cfg.exp_id,
-        "config_hash": _version_hash(cfg),
-        "git_commit": _git_commit(),
-        "seed": cfg.seed,
-        "created_at": datetime.now(UTC).isoformat(),
+        **provenance,
         "n_matched": len(matched),
         "n_dropped": dropped,
         "split_counts": split_counts,
         "bootstrap": {"n": cfg.bootstrap_n, "ci": cfg.bootstrap_ci},
         "arms": arms,
+        # memory_traced marks runtimes measured under tracemalloc (inflated a bit);
+        # budget decisions should come from runs with metrics.memory turned off.
+        "over_budget": {
+            "budget_s": cfg.attack_time_budget_s,
+            "memory_traced": cfg.measure_memory,
+            "attacks": over_budget,
+        },
         "runtime_s": round(runtime_s, 3),
         "metrics": [
             {

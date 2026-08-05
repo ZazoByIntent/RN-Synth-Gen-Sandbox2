@@ -60,6 +60,9 @@ def base_config(tmp_path: Path, maps_dir: Path, region: str = "beijing") -> dict
             "privacy": ["top1_acc", "topk_acc", "linkage_rate"],
             "top_k": 5,
             "bootstrap": {"n": 200, "ci": 0.95},
+            # tracemalloc roughly doubles fixture attack time; keep the suite fast and
+            # cover the default-on path in test_peak_memory_recorded_by_default
+            "memory": False,
         },
     }
 
@@ -143,6 +146,53 @@ def test_matched_pool_is_cached_as_parquet(tmp_path: Path, beijing_maps_dir: Pat
     assert len(list((tmp_path / "cache").iterdir())) == 1
 
 
+# --- repetitions: split_seed pins the population, seed varies the noise ----------
+
+
+def test_version_hash_ignores_run_seed_when_split_seed_pinned(tmp_path: Path) -> None:
+    from trajguard.experiments.orchestrator import _version_hash
+
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["experiment"]["split_seed"] = 7
+    cfg["experiment"]["seed"] = 1
+    first = _version_hash(load_config(write_config(tmp_path, cfg)))
+    cfg["experiment"]["seed"] = 2
+    second = _version_hash(load_config(write_config(tmp_path, cfg)))
+    assert first == second  # repetition runs share the cleaned/matched pool cache
+    cfg["experiment"]["split_seed"] = 8
+    assert _version_hash(load_config(write_config(tmp_path, cfg))) != first
+
+
+def test_repetition_seeds_share_pool_but_not_noise(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """Two run seeds under one split_seed: one pool cache, one protected release each."""
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    cfg["experiment"]["split_seed"] = 7
+    for seed in (1, 2):
+        cfg["experiment"]["seed"] = seed
+        cfg["experiment"]["output_dir"] = str(tmp_path / "out" / f"seed{seed}")
+        run(write_config(tmp_path, cfg))
+    assert len(list((tmp_path / "cache").iterdir())) == 1  # same population and split
+    assert len(list((tmp_path / "protected").iterdir())) == 2  # fresh noise per seed
+    record = json.loads((tmp_path / "out" / "seed2" / "run.json").read_text())
+    assert record["seed"] == 2 and record["split_seed"] == 7
+
+
+def test_max_users_limits_population(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    cfg = base_config(tmp_path, beijing_maps_dir)
+    cfg["dataset"]["max_users"] = 1  # the fixture has 2 users
+    run(write_config(tmp_path, cfg))
+    record = json.loads((tmp_path / "out" / "run.json").read_text())
+    assert record["max_users"] == 1
+    assert record["arms"]["raw"]["n_gallery_users"] == 1
+
+
+def test_invalid_max_users_rejected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["dataset"]["max_users"] = 0
+    with pytest.raises(ValueError, match="max_users"):
+        run(write_config(tmp_path, cfg))
+
+
 # --- loud failures for config knobs the orchestrator does not (yet) support ------
 
 
@@ -153,31 +203,247 @@ def test_unknown_attack_type_fails_loudly(tmp_path: Path) -> None:
         run(write_config(tmp_path, cfg))
 
 
-def test_unconstructible_attack_fails_before_pipeline(tmp_path: Path) -> None:
-    # reconstruction needs epsilon, which the orchestrator cannot supply; the config
-    # points at an empty maps dir, so passing requires failing before any pipeline work.
+def test_reconstruction_rejects_reid_attacker_keys(tmp_path: Path) -> None:
+    # epsilon/unit_m come from the mechanism arm, and known_points has no meaning
+    # here — a reid-style attacker section on reconstruction is a config mistake.
     cfg = base_config(tmp_path, tmp_path / "maps")
     cfg["attacks"][0] = {
         "type": "reconstruction",
         "attacker": {"known_points": [3]},
         "target_scope": ["protected"],
     }
-    with pytest.raises(ValueError, match="'reconstruction' takes constructor params"):
+    with pytest.raises(ValueError, match="unsupported for reconstruction"):
         run(write_config(tmp_path, cfg))
 
 
-def test_poi_inference_attack_rejected_before_pipeline(tmp_path: Path) -> None:
-    # poi_inference constructs with all-default args, so it clears the constructor probe;
-    # it consumes clean GPS, not the matched pool, so the run loop would crash after the
-    # pipeline. An empty maps dir means passing requires failing before any pipeline work.
+def test_reconstruction_requires_geoind_arm(tmp_path: Path) -> None:
+    # base_config has only the identity mechanism: nothing to invert, fail before
+    # the pipeline (the empty maps dir would crash any pipeline work).
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {"type": "reconstruction", "target_scope": ["protected"]}
+    with pytest.raises(ValueError, match="geo_indistinguishability"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_reconstruction_target_scope_must_be_protected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {"type": "reconstruction", "target_scope": ["raw", "protected"]}
+    with pytest.raises(ValueError, match="must be \\['protected'\\]"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_poi_inference_rejects_reid_attacker_keys(tmp_path: Path) -> None:
+    # known_points/distance have no meaning for stay-point clustering — a
+    # reid-style attacker section on poi_inference is a config mistake.
     cfg = base_config(tmp_path, tmp_path / "maps")
     cfg["attacks"][0] = {
         "type": "poi_inference",
         "attacker": {"known_points": [3]},
         "target_scope": ["protected"],
     }
-    with pytest.raises(ValueError, match="not wired into the orchestrator"):
+    with pytest.raises(ValueError, match="unsupported for poi_inference"):
         run(write_config(tmp_path, cfg))
+
+
+def test_poi_inference_target_scope_must_be_protected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {"type": "poi_inference", "target_scope": ["raw", "protected"]}
+    with pytest.raises(ValueError, match="must be \\['protected'\\] for poi_inference"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_poi_inference_rejects_bad_stay_point_knobs(tmp_path: Path) -> None:
+    # The attack constructor validates its knobs; the probe must fire before any
+    # pipeline work (the empty maps dir would crash any pipeline stage).
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0] = {
+        "type": "poi_inference",
+        "attacker": {"dwell_s": -5},
+        "target_scope": ["protected"],
+    }
+    with pytest.raises(ValueError, match="dwell_s"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_poi_inference_requires_a_mechanism_arm(tmp_path: Path) -> None:
+    # With no mechanisms there are no protected arms and the attack would
+    # silently produce no rows — fail loudly before the pipeline instead.
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["privacy_mechanisms"] = []
+    cfg["attacks"][0] = {"type": "poi_inference", "target_scope": ["protected"]}
+    with pytest.raises(ValueError, match="privacy_mechanisms"):
+        run(write_config(tmp_path, cfg))
+
+
+# --- 1e: membership inference against synthetic generator arms -------------------
+
+
+def mia_config(tmp_path: Path, maps_dir: Path) -> dict[str, Any]:
+    """base_config with the MIA attack against a markov generator arm."""
+    cfg = base_config(tmp_path, maps_dir)
+    cfg["privacy_mechanisms"] = []
+    cfg["synthetic_generators"] = [{"id": "markov", "params": {"order": 1}}]
+    cfg["attacks"] = [
+        {
+            "type": "membership_inference",
+            "target_scope": ["synthetic"],
+            "attacker": {"n_shadow": 8, "subsample": 0.5},
+            "fprs": [0.25],  # fixture scale: few non-members, so the FPR floor is coarse
+        }
+    ]
+    return cfg
+
+
+def test_membership_rejects_reid_attacker_keys(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["attacker"] = {"known_points": [3]}
+    with pytest.raises(ValueError, match="unsupported for membership_inference"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_membership_target_scope_must_be_synthetic(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["target_scope"] = ["protected"]
+    with pytest.raises(ValueError, match="must be \\['synthetic'\\]"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_membership_requires_a_generator_arm(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["synthetic_generators"] = []
+    with pytest.raises(ValueError, match="synthetic_generators"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_membership_rejects_bad_fprs(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["fprs"] = [1.5]
+    with pytest.raises(ValueError, match="fprs"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_membership_rejects_bad_lira_knobs(tmp_path: Path) -> None:
+    # The attack constructor validates n_shadow >= 2; the probe must fire before
+    # any pipeline work (the empty maps dir would crash any pipeline stage).
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["attacker"] = {"n_shadow": 1}
+    with pytest.raises(ValueError, match="n_shadow"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_unknown_generator_fails_loudly(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["synthetic_generators"] = [{"id": "no_such_generator"}]
+    with pytest.raises(KeyError, match="no_such_generator"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_misspelled_generator_param_rejected(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")
+    cfg["synthetic_generators"] = [{"id": "markov", "params": {"orderr": 1}}]
+    with pytest.raises(ValueError, match="rejected its params"):
+        run(write_config(tmp_path, cfg))
+
+
+def _mia_traj(traj_id: str, user: str, split: str, edges: tuple[int, ...]) -> tuple[Any, Any]:
+    """A minimal (matched, clean) pair carrying just an edge sequence and a split label."""
+    from trajguard.datamodel import CleanTrajectory, MatchedTrajectory
+
+    matched = MatchedTrajectory(
+        traj_id=traj_id,
+        user_id=user,
+        map_id="beijing",
+        edge_seq=edges,
+        matched_points=(),
+        match_score=1.0,
+        frac_matched=1.0,
+    )
+    clean = CleanTrajectory(
+        traj_id=traj_id,
+        user_id=user,
+        points=((0.0, 0.0, 0.0),),
+        bbox=(0.0, 0.0, 0.0, 0.0),
+        duration_s=0.0,
+        length_m=0.0,
+        mean_speed=0.0,
+        cleaning_flags=(),
+        split=split,
+    )
+    return matched, clean
+
+
+def test_mia_pool_builds_the_strict_shadow_protocol() -> None:
+    """Shadow split first as the attacker's base, then train members, then test
+    non-members as labelled candidates; the attack split stays out entirely."""
+    from trajguard.experiments.orchestrator import _mia_pool
+
+    pairs = [
+        _mia_traj("t1", "u1", "train", (1, 2)),
+        _mia_traj("t2", "u1", "train", (2, 3)),
+        _mia_traj("s1", "u2", "shadow", (7, 8)),
+        _mia_traj("e1", "u3", "test", (4, 5)),
+        _mia_traj("a1", "u4", "attack", (9, 9)),
+    ]
+    matched = [m for m, _ in pairs]
+    clean_by_id = {c.traj_id: c for _, c in pairs}
+    pool, candidates, train_m = _mia_pool(matched, clean_by_id)
+    assert pool == [(7, 8), (1, 2), (2, 3), (4, 5)]
+    assert candidates == [(1, True), (2, True), (3, False)]
+    assert [m.traj_id for m in train_m] == ["t1", "t2"]
+
+
+def test_mia_pool_requires_members_and_nonmembers() -> None:
+    from trajguard.experiments.orchestrator import _mia_pool
+
+    pairs = [_mia_traj("t1", "u1", "train", (1, 2))]
+    matched = [m for m, _ in pairs]
+    clean_by_id = {c.traj_id: c for _, c in pairs}
+    with pytest.raises(ValueError, match="non-members"):
+        _mia_pool(matched, clean_by_id)
+
+
+def test_membership_inference_runs_end_to_end(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """End to end: one MIA row set per generator arm, score-based metrics without CI."""
+    cfg = mia_config(tmp_path, beijing_maps_dir)
+    values = run(write_config(tmp_path, cfg))
+
+    mia = [v for v in values if v.result_id.startswith("membership_inference:")]
+    assert {v.result_id for v in mia} == {"membership_inference:synthetic:markov:order=1"}
+    by_name = {v.name: v for v in mia}
+    assert set(by_name) == {"auc", "tpr@fpr=0.25"}
+    auc = by_name["auc"]
+    assert 0.0 <= auc.value <= 1.0
+    # markov memorizes the tiny fixture train split: the non-private ceiling beats chance
+    assert auc.value > 0.5
+    # score-based metrics carry no within-run CI by design; repeat gives the interval
+    assert auc.ci_low is None and auc.ci_high is None and auc.n_bootstrap is None
+    rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
+    mia_rows = [r for r in rows if r["result_id"].startswith("membership_inference:")]
+    assert mia_rows and all(r["ci_low"] == "" and r["ci_high"] == "" for r in mia_rows)
+    # deterministic under the same seeds
+    assert [v.value for v in run(write_config(tmp_path, cfg))] == [v.value for v in values]
+
+
+def test_membership_runs_against_rn_ldp_synth_arm(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """The private generator arm builds via the injected network and per-shadow seeds."""
+    cfg = mia_config(tmp_path, beijing_maps_dir)
+    cfg["synthetic_generators"].append(
+        {
+            "id": "rn_ldp_synth",
+            "params": {"epsilon": 80.0, "n_rows": 10, "n_cols": 10, "l_max": 12},
+        }
+    )
+    cfg["attacks"][0]["attacker"] = {"n_shadow": 4, "subsample": 0.5}
+    values = run(write_config(tmp_path, cfg))
+
+    mia = {v.result_id for v in values if v.result_id.startswith("membership_inference:")}
+    assert mia == {
+        "membership_inference:synthetic:markov:order=1",
+        "membership_inference:synthetic:rn_ldp_synth:epsilon=80.0,l_max=12,n_cols=10,n_rows=10",
+    }
+    rn = {v.name: v.value for v in values if "rn_ldp_synth" in v.result_id}
+    assert set(rn) == {"auc", "tpr@fpr=0.25"}
+    assert 0.0 <= rn["auc"] <= 1.0
 
 
 def test_data_raw_guard_catches_absolute_path_from_any_cwd(
@@ -304,16 +570,238 @@ def test_perturbing_mechanism_rematches_end_to_end(tmp_path: Path, beijing_maps_
     assert meta["mechanism"] == GEOIND_REF and meta["spent_budget"] > 0
 
 
+def test_reconstruction_runs_against_geoind_arms_only(
+    tmp_path: Path, beijing_maps_dir: Path
+) -> None:
+    """End to end: reconstruction inverts the geo-ind release, skips the identity arm."""
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    cfg["attacks"].append({"type": "reconstruction", "target_scope": ["protected"]})
+    values = run(write_config(tmp_path, cfg))
+
+    recon = [v for v in values if v.result_id.startswith("reconstruction:")]
+    assert {v.result_id for v in recon} == {f"reconstruction:protected:{GEOIND_REF}"}
+    by_name = {v.name: v for v in recon}
+    assert set(by_name) == {"hausdorff_m", "dtw_m", "mean_spatial_error_m"}
+    for v in by_name.values():
+        assert v.value is not None and v.value > 0.0
+        assert v.ci_low is not None and v.ci_high is not None
+        assert v.ci_low <= v.value <= v.ci_high
+    # per-point metrics stay at the noise scale (mean radius 2*25/10 = 5 m);
+    # dtw_m is a path-summed distance, so it is only checked for finiteness above
+    assert by_name["hausdorff_m"].value < 100.0
+    # the MAP estimate must beat the raw noisy release on average: with the
+    # Gamma(2, b=2.5 m) radius the released points sit ~5 m off, the smoother less
+    assert by_name["mean_spatial_error_m"].value < 5.0
+    # reconstruction rows land in metrics.csv alongside the reid rows
+    rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
+    assert any(r["result_id"].startswith("reconstruction:") for r in rows)
+    # the matrix pivots the family's headline metric next to the reid column;
+    # only the geo-ind arm has a reconstruction value (the identity arm is skipped)
+    matrix = list(csv.DictReader((tmp_path / "out" / "matrix.csv").open()))
+    by_target = {r["target"]: r for r in matrix}
+    assert float(by_target[f"protected:{GEOIND_REF}"]["reconstruction:mean_spatial_error_m"]) > 0.0
+    assert by_target["raw"]["reconstruction:mean_spatial_error_m"] == ""
+    # each family with utility on its arms gets its own tradeoff plot
+    assert (tmp_path / "out" / "tradeoff.png").stat().st_size > 0
+    assert (tmp_path / "out" / "tradeoff_reconstruction.png").stat().st_size > 0
+
+
+def test_poi_inference_runs_against_protected_arms(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """End to end: POI rows per protected arm; the identity arm is the ~zero-error sanity check."""
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    # Fixture trajectories are short drives, not dwells: widen the stay-point radius
+    # past the fixture bbox (~2 km) and shrink the dwell time below the trajectory
+    # span so every trajectory yields one stay-point, and let both hour windows
+    # cover the whole day so home and work always resolve (cf. tests/test_attribute.py).
+    cfg["attacks"].append(
+        {
+            "type": "poi_inference",
+            "target_scope": ["protected"],
+            "attacker": {
+                "dwell_s": 10,
+                "radius_m": 5000,
+                "home_hours": [0, 24],
+                "work_hours": [0, 24],
+            },
+            "threshold_m": 200,
+        }
+    )
+    values = run(write_config(tmp_path, cfg))
+
+    poi = [v for v in values if v.result_id.startswith("poi_inference:")]
+    assert {v.result_id for v in poi} == {
+        "poi_inference:protected:none",
+        f"poi_inference:protected:{GEOIND_REF}",
+    }
+    by_arm: dict[str, dict[str, Any]] = {}
+    for v in poi:
+        by_arm.setdefault(v.result_id, {})[v.name] = v
+    names = {"home_error_m", "work_error_m", "home_localised", "work_localised"}
+    for arm in by_arm.values():
+        assert set(arm) == names
+    # Identity arm releases the raw points: exact recovery is a sanity value, not protection.
+    identity = by_arm["poi_inference:protected:none"]
+    assert identity["home_error_m"].value == 0.0
+    assert identity["work_error_m"].value == 0.0
+    assert identity["home_localised"].value == 1.0
+    assert identity["work_localised"].value == 1.0
+    # The geo-ind arm (mean displacement 5 m) leaves a small nonzero centroid error,
+    # still inside the 200 m localisation threshold, with a bootstrap CI around it.
+    noisy = by_arm[f"poi_inference:protected:{GEOIND_REF}"]
+    err = noisy["home_error_m"]
+    assert 0.0 < err.value < 200.0
+    assert err.ci_low is not None and err.ci_high is not None
+    assert err.ci_low <= err.value <= err.ci_high
+    assert noisy["home_localised"].value == 1.0
+    # POI rows land in metrics.csv and pivot into the matrix's poi_inference column.
+    rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
+    assert any(r["result_id"].startswith("poi_inference:") for r in rows)
+    matrix = list(csv.DictReader((tmp_path / "out" / "matrix.csv").open()))
+    by_target = {r["target"]: r for r in matrix}
+    assert by_target["protected:none"]["poi_inference:home_error_m"] == "0.0"
+    assert float(by_target[f"protected:{GEOIND_REF}"]["poi_inference:home_error_m"]) > 0.0
+    assert by_target["raw"]["poi_inference:home_error_m"] == ""
+    assert (tmp_path / "out" / "tradeoff_poi_inference.png").stat().st_size > 0
+
+
+# --- wave 2 (O4): the unified results table, docs/REZULTATI_SHEMA.md ---------------
+
+
+def test_results_csv_follows_schema(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """Every run writes results.csv per the schema: same rows as metrics.csv, plus
+    provenance, structured identity/axis columns, arm stats, and runtimes."""
+    from trajguard.reporting.results_schema import RESULTS_COLUMNS
+
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    cfg["attacks"].append({"type": "reconstruction", "target_scope": ["protected"]})
+    values = run(write_config(tmp_path, cfg))
+
+    with (tmp_path / "out" / "results.csv").open() as fh:
+        reader = csv.reader(fh)
+        assert tuple(next(reader)) == RESULTS_COLUMNS
+    rows = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    assert len(rows) == len(values)  # one results row per metric value, same order
+    assert [r["result_id"] for r in rows] == [v.result_id for v in values]
+
+    for r in rows:
+        # provenance repeated on every row
+        assert r["exp_id"] == "test_reid" and r["seed"] == "42" and r["split_seed"] == "42"
+        assert len(r["config_hash"]) == 16 and r["created_at"]
+        assert float(r["run_runtime_s"]) > 0.0
+
+    by_family: dict[str, list[dict[str, str]]] = {}
+    for r in rows:
+        by_family.setdefault(r["family"], []).append(r)
+    assert set(by_family) == {"reidentification", "reconstruction", "utility"}
+
+    raw = [r for r in by_family["reidentification"] if r["scope"] == "raw"]
+    assert raw and all(r["arm_id"] == "" and r["epsilon"] == "" for r in raw)
+    assert {r["known_points"] for r in by_family["reidentification"]} == {"3", "5"}
+    geo = [r for r in by_family["reidentification"] if r["arm_id"] == "geo_indistinguishability"]
+    assert geo and all(r["epsilon"] == "10.0" and r["unit_m"] == "25.0" for r in geo)
+    assert all(float(r["attack_runtime_s"]) >= 0.0 for r in by_family["reidentification"])
+
+    recon = by_family["reconstruction"]
+    assert all(
+        r["epsilon"] == "10.0" and r["known_points"] == "" and r["scope"] == "protected"
+        for r in recon
+    )
+    # utility rows describe the arm, not an attack: no attack runtime
+    assert all(r["attack_runtime_s"] == "" for r in by_family["utility"])
+    # the fixture config turns memory tracing off, so the column stays blank
+    assert all(r["peak_memory_mb"] == "" for r in rows)
+    # arm statistics match run.json
+    arms = json.loads((tmp_path / "out" / "run.json").read_text())["arms"]
+    for r in geo:
+        assert int(r["n_pool"]) == arms[f"protected:{GEOIND_REF}"]["n_pool"]
+        assert int(r["n_rematch_dropped"]) == arms[f"protected:{GEOIND_REF}"]["n_rematch_dropped"]
+
+
+def test_results_csv_membership_columns(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """MIA rows carry the generator axis columns and the member/non-member counts."""
+    cfg = mia_config(tmp_path, beijing_maps_dir)
+    run(write_config(tmp_path, cfg))
+    rows = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    mia = [r for r in rows if r["family"] == "membership_inference"]
+    assert mia and all(r["scope"] == "synthetic" and r["arm_id"] == "markov" for r in mia)
+    for r in mia:
+        assert r["n_shadow"] == "8" and r["epsilon"] == ""  # markov has no epsilon
+        assert int(r["n_members"]) + int(r["n_nonmembers"]) == int(r["n_pool"])
+        assert r["ci_low"] == "" and r["ci_high"] == ""  # score-based: no within-run CI
+
+
+def test_peak_memory_recorded_by_default(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """Without metrics.memory the orchestrator traces each attack's peak memory (O6)."""
+    cfg = base_config(tmp_path, beijing_maps_dir)
+    del cfg["metrics"]["memory"]
+    run(write_config(tmp_path, cfg))
+    rows = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    attack_rows = [r for r in rows if r["family"] != "utility"]
+    assert attack_rows and all(float(r["peak_memory_mb"]) > 0.0 for r in attack_rows)
+    # rows of the same attack invocation share one measurement
+    by_result: dict[str, set[str]] = {}
+    for r in attack_rows:
+        by_result.setdefault(r["result_id"], set()).add(r["peak_memory_mb"])
+    assert all(len(peaks) == 1 for peaks in by_result.values())
+
+
+def test_over_budget_attacks_are_flagged_not_trimmed(
+    tmp_path: Path, beijing_maps_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A tiny runtime budget flags every attack invocation in run.json and warns on
+    the console, but the run and its results stay complete (report §6.6)."""
+    cfg = base_config(tmp_path, beijing_maps_dir)
+    cfg["metrics"]["attack_time_budget_s"] = 1e-6
+    values = run(write_config(tmp_path, cfg))
+
+    over = json.loads((tmp_path / "out" / "run.json").read_text())["over_budget"]
+    assert over["budget_s"] == 1e-6 and over["memory_traced"] is False
+    flagged = [o["result_id"] for o in over["attacks"]]
+    assert sorted(flagged) == sorted(
+        f"reidentification:{ref}:k{k}" for ref in ("raw", "protected:none") for k in (3, 5)
+    )
+    runtimes = [o["runtime_s"] for o in over["attacks"]]
+    assert runtimes == sorted(runtimes, reverse=True)  # worst first
+    assert "warning:" in capsys.readouterr().out
+    # nothing is trimmed: results.csv still has one row per metric value
+    rows = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    assert len(rows) == len(values)
+
+
+def test_default_budget_is_300s_and_quiet(
+    tmp_path: Path, beijing_maps_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(write_config(tmp_path, base_config(tmp_path, beijing_maps_dir)))
+    over = json.loads((tmp_path / "out" / "run.json").read_text())["over_budget"]
+    assert over == {"budget_s": 300.0, "memory_traced": False, "attacks": []}
+    assert "warning:" not in capsys.readouterr().out
+
+
+def test_non_positive_time_budget_rejected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["metrics"]["attack_time_budget_s"] = 0
+    with pytest.raises(ValueError, match="attack_time_budget_s"):
+        run(write_config(tmp_path, cfg))
+
+
 def test_matrix_and_tradeoff_artifacts_written(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """matrix.csv pivots each family's headline metric (reid at max known_points)."""
     run(write_config(tmp_path, geoind_config(tmp_path, beijing_maps_dir)))
 
     with (tmp_path / "out" / "matrix.csv").open() as fh:
         rows = list(csv.reader(fh))
-    assert rows[0] == ["target", "k=3", "k=5"]
+    assert rows[0] == ["target", "reidentification:top1_acc"]
     assert [r[0] for r in rows[1:]] == ["raw", "protected:none", f"protected:{GEOIND_REF}"]
     for row in rows[1:]:
-        for cell in row[1:]:
-            assert 0.0 <= float(cell) <= 1.0
+        assert 0.0 <= float(row[1]) <= 1.0
+    # the pivoted cell is the value at the largest known_points level (k=5)
+    results = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    (raw_k5,) = [
+        r
+        for r in results
+        if r["target_ref"] == "raw" and r["metric"] == "top1_acc" and r["known_points"] == "5"
+    ]
+    assert rows[1][1] == raw_k5["value"]
     assert (tmp_path / "out" / "tradeoff.png").stat().st_size > 0
 
 
@@ -324,6 +812,37 @@ def test_protected_pool_cache_is_reused(tmp_path: Path, beijing_maps_dir: Path) 
     second = run(config_path)  # warm protected cache: same values, no new entries
     assert [v.value for v in first] == [v.value for v in second]
     assert len(list((tmp_path / "protected").iterdir())) == 1
+
+
+def test_planned_plots_written_end_to_end(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """The four wave-2 plots come out of one run when reporting.plots asks for them."""
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    cfg["reporting"]["plots"] = ["tradeoff", "by_epsilon", "by_knowledge", "mechanisms", "runtime"]
+    run(write_config(tmp_path, cfg))
+    for name in (
+        "tradeoff.png",
+        "by_epsilon_reidentification.png",
+        "by_knowledge_reidentification.png",
+        "mechanisms_reidentification.png",
+        "runtime.png",
+    ):
+        assert (tmp_path / "out" / name).stat().st_size > 0, name
+
+
+def test_by_knowledge_plot_requires_a_knowledge_attack(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")  # membership inference has no known_points
+    cfg["reporting"] = {"export": ["csv"], "plots": ["by_knowledge"]}
+    with pytest.raises(ValueError, match="by_knowledge"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_by_epsilon_plot_requires_an_arm(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["privacy_mechanisms"] = []
+    cfg["attacks"][0]["target_scope"] = ["raw"]
+    cfg["reporting"] = {"export": ["csv"], "plots": ["by_epsilon"]}
+    with pytest.raises(ValueError, match="by_epsilon"):
+        run(write_config(tmp_path, cfg))
 
 
 def test_tradeoff_plot_requires_utility_metric(tmp_path: Path) -> None:
