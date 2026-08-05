@@ -25,10 +25,15 @@ razdelek `synthetic_generators` v orkestratorju (`0608755`, `9388cc8`). S tem so
 zaprti in **val 1 je zaključen**: vsi štirje scenariji tečejo iz ene konfiguracije. Shema
 `Rezultati_predloga` je dogovorjena in zapisana v `docs/REZULTATI_SHEMA.md` (5. avgust 2026);
 **O4 iz vala 2 je izveden** (`0433079`, `6bfb35b`): vsak zagon zapiše `results.csv` po shemi,
-`trajguard report` zlepi `reports/results_master.csv`. Iz vala 2 ostajata O5 (štirje grafi in
-vodilna metrika po družini) in O6 (pomnilnik, pravila krčenja); alternativa ostaja A3 iz
-vala 3. Kjer se je med izvedbo izkazalo drugače, kot napoveduje besedilo spodaj,
-je popravek vpisan na mestu in označen z **[izvedba]** (po istem vzorcu kot **[recenzija]**).
+`trajguard report` zlepi `reports/results_master.csv`. **O5 in O6 sta izvedena 5. avgusta
+2026** (O5: `3c59167`, `b5fdf27`; O6: `34d5416`): vodilna metrika po družini vrti
+`matrix.csv` in grafe kompromisa, štirje načrtovani grafi se rišejo iz enotne tabele,
+pomnilniška špica se meri v stolpec `peak_memory_mb` — podrobnosti v bloku **[izvedba]**
+pri valu 2. Od vala 2 ostajajo samo še pravila za krčenje obsega, blokirana na odprti
+odločitvi o pragu X (razdelek 1.9); naslednje delo je A3 iz vala 3 ali sistematični
+parametrski preizkusi (mejnik S4). Kjer se je med izvedbo izkazalo drugače, kot napoveduje
+besedilo spodaj, je popravek vpisan na mestu in označen z **[izvedba]** (po istem vzorcu
+kot **[recenzija]**).
 
 **To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
 Prvotno besedilo ni bilo recenzirano; spodnja različica vključuje izid recenzije.
@@ -323,6 +328,45 @@ družini iz opombe pri 1.6.
   grafu kompromisa), O6 (pomnilniška špica, pravila krčenja obsega) ter neobvezni dopolnitvi
   `.parquet` zrcalo glavne tabele in stolpca porekla v `repetitions.csv`.
 
+**[izvedba, 5. avgust 2026] — O5 izveden (`3c59167`, `b5fdf27`), O6 izveden (`34d5416`).
+Kaj in zakaj:**
+
+- **Vodilna metrika po družini (`3c59167`).** Preslikava družina → vodilna metrika je zdaj
+  ena sama: javna `HEADLINE_PREFERENCE` v novem modulu `reporting/plots.py`, ki jo uvažata
+  tako `report.py` kot orkestrator — poročilo in zagon se ne moreta razhajati. `matrix.csv`
+  je postal rezina matrike tveganj za en zagon: vrstica na vejo, stolpec na družino
+  (`<družina>:<vodilna metrika>`, reidentifikacija pri največjem predznanju); pogled po
+  `known_points` ostaja v `results.csv` in na grafu `by_knowledge`. Graf kompromisa se riše
+  za vsako družino z utility vrednostmi na vejah — reidentifikacija obdrži ime
+  `tradeoff.png`, druge družine dobijo `tradeoff_<družina>.png`; sklepanje o članstvu na ta
+  graf ne more, ker se utility meri samo nad protected vejami (sintetične veje nimajo osi x).
+  Validacijska zahteva po `top1_acc` je odpadla; nadomesti jo družinski izbor z rezervo
+  (prednostna metrika, sicer prva prisotna po abecedi).
+- **Štirje grafi (`b5fdf27`).** `by_epsilon_<družina>.png` (vodilna metrika glede na ε,
+  logaritemska os, črta na vejo in pri reidentifikaciji na stopnjo predznanja),
+  `by_knowledge_<družina>.png` (glede na `known_points`, črta na vejo),
+  `mechanisms_<družina>.png` (vodoravni stolpci z bootstrap intervali, primerjava vej) in
+  `runtime.png` (čas na zagon napada, logaritemska os, barva po družini). Vse funkcije v
+  `reporting/plots.py` berejo vrstice enotne tabele — iste `ResultRow`, ki gredo v
+  `results.csv` — brez razčlenjevanja `result_id`. Vklop v `reporting.plots`; graf brez
+  ustreznih vrstic ne zapiše datoteke, graf, katerega os za dano konfiguracijo sploh ne more
+  obstajati, je zavrnjen že ob branju konfiguracije. Vzorčna konfiguracija
+  `geolife_geoind_reid.yaml` vklaplja vseh pet grafov.
+- **O6 — pomnilniška špica (`34d5416`).** Orkestrator ovije vsak klic `attack.run` s
+  `tracemalloc` (standardna knjižnica, brez nove odvisnosti) in zapiše vršno porabo novih
+  alokacij v stolpec `peak_memory_mb`; opis stolpca je v `docs/REZULTATI_SHEMA.md` v istem
+  commitu. Past za nadaljnje delo: sledenje približno podvoji čas napada, zato
+  `attack_runtime_s` ob vklopljenem merjenju nosi pribitek — ključ `metrics.memory: false`
+  merjenje izklopi (privzeto je vklopljeno). Testna zbirka ga v skupni fixture konfiguraciji
+  izklaplja, da ostane hitra; privzeto (vklopljeno) pot pokriva namenski test.
+- **Namenoma ni narejeno:** pravila za krčenje obsega (drugi del O6) — blokirana na
+  odločitvi avtorja o pragu računskega časa X (razdelek 1.9); risanje istih grafov v
+  `trajguard report` čez več zagonov ali čez ponovitve (`results_master.csv`,
+  `repetitions.csv`) — funkcije so pisane nad vrsticami enotne tabele, zato je priključitev
+  poceni, ko jo bo kdo potreboval; posplošitev report-level grafov kompromisa (`report.py`
+  še naprej riše reidentifikacijskega na zagon); shranjeni izhod zvezka 02 kaže staro
+  obliko `matrix.csv` (zvezkov nič ne poganja — znano neskladje D5).
+
 **Val 3 — dopolnitve znotraj obstoječih štirih scenarijev (M2, A3, A4).** Top-k POI skupaj z
 `as_poi_visits()` odklene razdelek 7.5; rekonstrukcija z omejitvijo omrežja je vsebinsko najbolj
 zanimiva za članek, ker je primerjava »z omrežjem proti brez omrežja« empirični argument za
@@ -346,14 +390,15 @@ popravkom poročila (glej razdelek 1.1), ne z implementacijo.
 ### Naslednji konkreten korak
 
 **[recenzija — prvotni predlog M1 + O2 + O3 je umaknjen** iz razlogov, opisanih pri valu 1.]
-Val 0, celoten val 1 (koraki 1a–1e) in O4 iz vala 2 so izvedeni (glej oznake zgoraj):
-razdelek 7.1 poročila je izvedljiv iz ene konfiguracije, rezultati pa se samodejno zapisujejo
-v enotno tabelo po `docs/REZULTATI_SHEMA.md` (`results.csv` na zagon,
-`reports/results_master.csv` čez vse zagone). Naslednje delo znotraj vala 2 je O5 — štirje
-načrtovani grafi in vodilna metrika po družini (`matrix.csv` in graf kompromisa danes vrtita
-samo `top1_acc` reidentifikacije) — nato O6 (pomnilniška špica, pravila krčenja obsega).
-Alternativa brez blokad ostaja A3 iz vala 3 (rekonstrukcija z omejitvijo cestnega omrežja).
-Izbira je avtorjeva.
+Val 0, celoten val 1 (koraki 1a–1e) in val 2 (O4, O5, O6 — merjenje) so izvedeni (glej
+oznake zgoraj): razdelek 7.1 poročila je izvedljiv iz ene konfiguracije, rezultati se
+samodejno zapisujejo v enotno tabelo po `docs/REZULTATI_SHEMA.md` (s časom in pomnilniško
+špico na napad), en zagon pa nariše vseh pet grafov (kompromis po družinah ter glede na ε,
+predznanje, mehanizme in računski čas). Od vala 2 ostajajo samo pravila za krčenje obsega:
+niso koda, dokler avtor ne določi praga računskega časa X (razdelek 1.9) — to je prva
+odprta odločitev za naslednjo sejo. Naslednje delo brez blokad je A3 iz vala 3
+(rekonstrukcija z omejitvijo cestnega omrežja) ali sistematični parametrski preizkusi
+(mejnik S4), za katere je zajem rezultatov zdaj pripravljen. Izbira je avtorjeva.
 
 ---
 
