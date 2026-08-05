@@ -282,6 +282,9 @@ trajectory.
   true person is the attacker's first / among the top-five guesses) and
   `linkage_rate`.
 - `results/geolife_reid_baseline/` containing `metrics.csv` (long-form metrics),
+  `results.csv` (the same rows in the unified results-table schema from
+  `docs/REZULTATI_SHEMA.md`: run provenance, pivot-axis columns like ε and
+  known_points, arm statistics, and runtimes — the file you pivot in Excel),
   `matrix.csv` (the risk-matrix slice), and `run.json` (run metadata: how many
   trajectories survived each stage — your first stop when numbers look odd).
 - Console lines `Searching closeby nodes with linear search...` during matching are
@@ -394,8 +397,11 @@ uv run trajguard report
 Aggregates everything under `results/` into `reports/`.
 
 **Expected outcome:** the line `report: reports/report.md`, plus `metrics_long.csv`,
-`metrics_long.parquet`, `risk_matrix.csv`, and one `tradeoff_<experiment>.png` per
-experiment that produced trade-off data. Open `reports/report.md` for the summary.
+`metrics_long.parquet`, `risk_matrix.csv`, `results_master.csv` (every run's
+`results.csv` concatenated into one table following `docs/REZULTATI_SHEMA.md` —
+repetition runs under `seed<N>/` included; the single file to hand to Excel or
+pandas), and one `tradeoff_<experiment>.png` per experiment that produced
+trade-off data. Open `reports/report.md` for the summary.
 Options: `--results <dir>` and `--out <dir>` if you keep results elsewhere.
 
 ## 9. RN-LDP-Synth evidence sweep (offline, fixture scale)
