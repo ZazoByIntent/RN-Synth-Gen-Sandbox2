@@ -37,6 +37,7 @@ from trajguard.maps.base import RoadNetwork
 from trajguard.matching.base import MapMatcher, match_many
 from trajguard.privacy.base import PrivacyMechanism
 from trajguard.privacy.geoind import GeoIndistinguishability
+from trajguard.reporting.results_schema import ResultRow, write_results_csv
 from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
 from trajguard.representation import Grid, TrajectoryView
 from trajguard.synthesis.base import SyntheticGenerator
@@ -711,6 +712,39 @@ class _Pool:
     spent_budget: float | None
 
 
+@dataclass(frozen=True)
+class _ArmInfo:
+    """Structured identity of one arm for the results table (no ref-string parsing)."""
+
+    scope: str  # raw | protected
+    arm_id: str  # mechanism registry id; "" for raw
+    epsilon: float | None
+    unit_m: float | None
+
+
+def _opt_float_attr(obj: Any, name: str) -> float | None:
+    """float(getattr(obj, name)) when the attribute exists, else None."""
+    value = getattr(obj, name, None)
+    return None if value is None else float(value)
+
+
+def _arm_infos(mech_plans: list[tuple[MechanismSpec, PrivacyMechanism]]) -> dict[str, _ArmInfo]:
+    """Per-ref arm identity for the raw arm and every mechanism arm.
+
+    epsilon/unit_m come from the instantiated mechanism (so defaults the YAML
+    omitted are still recorded), not from re-parsing the arm label.
+    """
+    infos = {"raw": _ArmInfo("raw", "", None, None)}
+    for mspec, mech in mech_plans:
+        infos[f"protected:{mspec.ref}"] = _ArmInfo(
+            "protected",
+            mspec.mech_id,
+            _opt_float_attr(mech, "epsilon"),
+            _opt_float_attr(mech, "unit_m"),
+        )
+    return infos
+
+
 def _noisy_clean(source: CleanTrajectory, payload: Any) -> CleanTrajectory:
     """A CleanTrajectory carrying the released (noisy) points, geometry recomputed."""
     pts = tuple((float(lat), float(lon), float(t)) for lat, lon, t in payload)
@@ -807,7 +841,8 @@ def _reconstruction_values(
     pools: dict[str, _Pool],
     clean_by_id: dict[str, CleanTrajectory],
     mech_by_ref: dict[str, PrivacyMechanism],
-) -> list[MetricValue]:
+    arm_info: dict[str, _ArmInfo],
+) -> list[ResultRow]:
     """Run the MAP reconstruction against every geo_indistinguishability arm.
 
     Target and aux are the released (noisy) and true GPS points of the full
@@ -822,7 +857,7 @@ def _reconstruction_values(
         xs, ys = transformer.transform([p[1] for p in points], [p[0] for p in points])
         return list(zip(xs, ys, strict=True))
 
-    values: list[MetricValue] = []
+    rows: list[ResultRow] = []
     for ref, pool in pools.items():
         mech = mech_by_ref.get(ref)
         if not isinstance(mech, GeoIndistinguishability):
@@ -841,19 +876,33 @@ def _reconstruction_values(
         report = reconstruction_report(
             result, n_bootstrap=cfg.bootstrap_n, ci=cfg.bootstrap_ci, seed=cfg.seed
         )
-        values.extend(
-            MetricValue(
-                metric_id=f"{result_id}:{name}",
-                result_id=result_id,
-                name=name,
-                value=mean,
-                ci_low=lo,
-                ci_high=hi,
-                n_bootstrap=cfg.bootstrap_n,
+        info = arm_info[ref]
+        rows.extend(
+            ResultRow(
+                value=MetricValue(
+                    metric_id=f"{result_id}:{name}",
+                    result_id=result_id,
+                    name=name,
+                    value=mean,
+                    ci_low=lo,
+                    ci_high=hi,
+                    n_bootstrap=cfg.bootstrap_n,
+                ),
+                family="reconstruction",
+                scope=info.scope,
+                arm_id=info.arm_id,
+                target_ref=ref,
+                epsilon=info.epsilon,
+                unit_m=info.unit_m,
+                n_pool=len(pool.matched),
+                n_gallery_users=len({t.user_id for t in pool.matched}),
+                n_rematch_dropped=pool.rematch_dropped,
+                spent_budget=pool.spent_budget,
+                attack_runtime_s=result.runtime_s,
             )
             for name, (mean, lo, hi) in report.items()
         )
-    return values
+    return rows
 
 
 def _poi_attack(attack_cls: Callable[..., Attack], spec: AttackSpec) -> Attack:
@@ -867,7 +916,8 @@ def _poi_inference_values(
     attack_cls: Callable[..., Attack],
     pools: dict[str, _Pool],
     clean_by_id: dict[str, CleanTrajectory],
-) -> list[MetricValue]:
+    arm_info: dict[str, _ArmInfo],
+) -> list[ResultRow]:
     """Run home/work POI inference against every protected arm's released GPS pool.
 
     Target is the arm's full release (``clean_by_id`` keeps every released
@@ -878,7 +928,7 @@ def _poi_inference_values(
     """
     attack = _poi_attack(attack_cls, spec)
     threshold = spec.threshold_m if spec.threshold_m is not None else 200.0
-    values: list[MetricValue] = []
+    rows: list[ResultRow] = []
     for ref, pool in pools.items():
         if not ref.startswith("protected:"):
             continue
@@ -896,19 +946,33 @@ def _poi_inference_values(
             ci=cfg.bootstrap_ci,
             seed=cfg.seed,
         )
-        values.extend(
-            MetricValue(
-                metric_id=f"{result_id}:{name}",
-                result_id=result_id,
-                name=name,
-                value=mean,
-                ci_low=lo,
-                ci_high=hi,
-                n_bootstrap=cfg.bootstrap_n,
+        info = arm_info[ref]
+        rows.extend(
+            ResultRow(
+                value=MetricValue(
+                    metric_id=f"{result_id}:{name}",
+                    result_id=result_id,
+                    name=name,
+                    value=mean,
+                    ci_low=lo,
+                    ci_high=hi,
+                    n_bootstrap=cfg.bootstrap_n,
+                ),
+                family="poi_inference",
+                scope=info.scope,
+                arm_id=info.arm_id,
+                target_ref=ref,
+                epsilon=info.epsilon,
+                unit_m=info.unit_m,
+                n_pool=len(pool.matched),
+                n_gallery_users=len({t.user_id for t in pool.matched}),
+                n_rematch_dropped=pool.rematch_dropped,
+                spent_budget=pool.spent_budget,
+                attack_runtime_s=result.runtime_s,
             )
             for name, (mean, lo, hi) in report.items()
         )
-    return values
+    return rows
 
 
 def _generator_ctor(
@@ -971,7 +1035,7 @@ def _membership_values(
     matched: list[MatchedTrajectory],
     clean_by_id: dict[str, CleanTrajectory],
     gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]],
-) -> list[MetricValue]:
+) -> list[ResultRow]:
     """Run LiRA membership inference against every fitted generator arm (design §6.2).
 
     Per arm: the target generator fits on the train split (its release contract), and
@@ -981,7 +1045,8 @@ def _membership_values(
     ``trajguard repeat``.
     """
     pool, candidates, train_m = _mia_pool(matched, clean_by_id)
-    values: list[MetricValue] = []
+    n_members = sum(1 for _, is_member in candidates if is_member)
+    rows: list[ResultRow] = []
     for gspec, make in gen_plans:
         target = make(0)
         target.fit([TrajectoryView(clean=clean_by_id[m.traj_id], matched=m) for m in train_m])
@@ -998,19 +1063,31 @@ def _membership_values(
             target_data_ref=ref,
             result_id=result_id,
         )
-        values.extend(
-            MetricValue(
-                metric_id=f"{result_id}:{name}",
-                result_id=result_id,
-                name=name,
-                value=val,
-                ci_low=None,
-                ci_high=None,
-                n_bootstrap=None,
+        rows.extend(
+            ResultRow(
+                value=MetricValue(
+                    metric_id=f"{result_id}:{name}",
+                    result_id=result_id,
+                    name=name,
+                    value=val,
+                    ci_low=None,
+                    ci_high=None,
+                    n_bootstrap=None,
+                ),
+                family="membership_inference",
+                scope="synthetic",
+                arm_id=gspec.mech_id,
+                target_ref=ref,
+                epsilon=_opt_float_attr(target, "epsilon"),
+                n_shadow=int(attack.n_shadow) if hasattr(attack, "n_shadow") else None,
+                n_pool=len(candidates),
+                n_members=n_members,
+                n_nonmembers=len(candidates) - n_members,
+                attack_runtime_s=result.runtime_s,
             )
             for name, val in membership_report(result, fprs=spec.fprs).items()
         )
-    return values
+    return rows
 
 
 def run(config_path: str | Path) -> list[MetricValue]:
@@ -1140,20 +1217,25 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     mech_by_ref: dict[str, PrivacyMechanism] = {
         f"protected:{mspec.ref}": mech for mspec, mech in mech_plans
     }
-    all_values: list[MetricValue] = []
+    arm_info = _arm_infos(mech_plans)
+    all_rows: list[ResultRow] = []
     attack_rows: list[tuple[str, int, list[MetricValue]]] = []  # (ref, known_points, values)
     probe_counts: dict[str, int] = {}
     for spec, attack_cls in plans:
         if spec.attack_type == "reconstruction":
-            all_values.extend(
-                _reconstruction_values(cfg, spec, attack_cls, pools, clean_by_id, mech_by_ref)
+            all_rows.extend(
+                _reconstruction_values(
+                    cfg, spec, attack_cls, pools, clean_by_id, mech_by_ref, arm_info
+                )
             )
             continue
         if spec.attack_type == "poi_inference":
-            all_values.extend(_poi_inference_values(cfg, spec, attack_cls, pools, clean_by_id))
+            all_rows.extend(
+                _poi_inference_values(cfg, spec, attack_cls, pools, clean_by_id, arm_info)
+            )
             continue
         if spec.attack_type == "membership_inference":
-            all_values.extend(
+            all_rows.extend(
                 _membership_values(cfg, spec, attack_cls, matched, clean_by_id, gen_plans)
             )
             continue
@@ -1177,7 +1259,26 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 )
                 probe_counts[ref] = len(result.predictions)
                 values = evaluate(result, metrics, cfg.bootstrap_n, cfg.bootstrap_ci, cfg.seed)
-                all_values.extend(values)
+                info = arm_info[ref]
+                all_rows.extend(
+                    ResultRow(
+                        value=v,
+                        family=spec.attack_type,
+                        scope=info.scope,
+                        arm_id=info.arm_id,
+                        target_ref=ref,
+                        epsilon=info.epsilon,
+                        unit_m=info.unit_m,
+                        known_points=k,
+                        n_pool=len(pool.matched),
+                        n_gallery_users=len({t.user_id for t in pool.matched}),
+                        n_probes=len(result.predictions),
+                        n_rematch_dropped=pool.rematch_dropped,
+                        spent_budget=pool.spent_budget,
+                        attack_runtime_s=result.runtime_s,
+                    )
+                    for v in values
+                )
                 attack_rows.append((ref, k, values))
 
     grid = Grid(bbox=cfg.map_bbox, n_rows=cfg.utility_grid[0], n_cols=cfg.utility_grid[1])
@@ -1198,15 +1299,28 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 ci=cfg.bootstrap_ci,
                 rng=rng,
             )
-            all_values.append(
-                MetricValue(
-                    metric_id=f"utility:{ref}:{name}",
-                    result_id=f"utility:{ref}",
-                    name=name,
-                    value=point,
-                    ci_low=lo,
-                    ci_high=hi,
-                    n_bootstrap=cfg.bootstrap_n,
+            info = arm_info[ref]
+            all_rows.append(
+                ResultRow(
+                    value=MetricValue(
+                        metric_id=f"utility:{ref}:{name}",
+                        result_id=f"utility:{ref}",
+                        name=name,
+                        value=point,
+                        ci_low=lo,
+                        ci_high=hi,
+                        n_bootstrap=cfg.bootstrap_n,
+                    ),
+                    family="utility",
+                    scope=info.scope,
+                    arm_id=info.arm_id,
+                    target_ref=ref,
+                    epsilon=info.epsilon,
+                    unit_m=info.unit_m,
+                    n_pool=len(pool.matched),
+                    n_gallery_users=len({t.user_id for t in pool.matched}),
+                    n_rematch_dropped=pool.rematch_dropped,
+                    spent_budget=pool.spent_budget,
                 )
             )
             utility_by_ref.setdefault(ref, {})[name] = point
@@ -1224,7 +1338,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     matrix = _matrix_rows(list(pools), attack_rows)
     _write_results(
         cfg,
-        all_values,
+        all_rows,
         matched,
         dropped,
         split_counts,
@@ -1234,7 +1348,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     )
     if "tradeoff" in cfg.plots:
         plot_tradeoff(_tradeoff_points(matrix, utility_by_ref), cfg.output_dir / "tradeoff.png")
-    return all_values
+    return [r.value for r in all_rows]
 
 
 _Matrix = tuple[list[int], list[tuple[str, dict[int, float]]]]
@@ -1276,7 +1390,7 @@ def _finite_or_none(x: float | None) -> float | None:
 
 def _write_results(
     cfg: RunConfig,
-    values: list[MetricValue],
+    rows: list[ResultRow],
     matched: list[MatchedTrajectory],
     dropped: int,
     split_counts: dict[str, int],
@@ -1284,9 +1398,22 @@ def _write_results(
     arms: dict[str, dict[str, Any]],
     matrix: _Matrix,
 ) -> None:
-    """Write the exported formats and run.json under the experiment output directory."""
+    """Write the exported formats, results.csv, and run.json under the output directory."""
+    values = [r.value for r in rows]
+    provenance: dict[str, Any] = {
+        "exp_id": cfg.exp_id,
+        "config_hash": _version_hash(cfg),
+        "git_commit": _git_commit(),
+        "seed": cfg.seed,
+        "split_seed": cfg.split_seed,
+        "max_users": cfg.max_users,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     if "csv" in cfg.export:
+        # The unified results table (docs/REZULTATI_SHEMA.md): metrics.csv rows plus
+        # run provenance, structured identity/axis columns, arm stats, and runtimes.
+        write_results_csv(cfg.output_dir / "results.csv", provenance, rows, round(runtime_s, 3))
         with (cfg.output_dir / "metrics.csv").open("w", newline="") as fh:
             writer = csv.writer(fh)
             writer.writerow(["result_id", "metric", "value", "ci_low", "ci_high", "n_bootstrap"])
@@ -1303,22 +1430,16 @@ def _write_results(
                         v.n_bootstrap,
                     ]
                 )
-        ks, rows = matrix
-        if rows:
+        ks, matrix_rows = matrix
+        if matrix_rows:
             with (cfg.output_dir / "matrix.csv").open("w", newline="") as fh:
                 writer = csv.writer(fh)
                 writer.writerow(["target", *[f"k={k}" for k in ks]])
-                for ref, kv in rows:
+                for ref, kv in matrix_rows:
                     writer.writerow([ref, *[kv.get(k, "") for k in ks]])
 
     run_record = {
-        "exp_id": cfg.exp_id,
-        "config_hash": _version_hash(cfg),
-        "git_commit": _git_commit(),
-        "seed": cfg.seed,
-        "split_seed": cfg.split_seed,
-        "max_users": cfg.max_users,
-        "created_at": datetime.now(UTC).isoformat(),
+        **provenance,
         "n_matched": len(matched),
         "n_dropped": dropped,
         "split_counts": split_counts,

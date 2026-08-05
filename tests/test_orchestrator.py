@@ -651,6 +651,70 @@ def test_poi_inference_runs_against_protected_arms(tmp_path: Path, beijing_maps_
         assert all(not row.startswith("poi_inference") for row in fh)
 
 
+# --- wave 2 (O4): the unified results table, docs/REZULTATI_SHEMA.md ---------------
+
+
+def test_results_csv_follows_schema(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """Every run writes results.csv per the schema: same rows as metrics.csv, plus
+    provenance, structured identity/axis columns, arm stats, and runtimes."""
+    from trajguard.reporting.results_schema import RESULTS_COLUMNS
+
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    cfg["attacks"].append({"type": "reconstruction", "target_scope": ["protected"]})
+    values = run(write_config(tmp_path, cfg))
+
+    with (tmp_path / "out" / "results.csv").open() as fh:
+        reader = csv.reader(fh)
+        assert tuple(next(reader)) == RESULTS_COLUMNS
+    rows = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    assert len(rows) == len(values)  # one results row per metric value, same order
+    assert [r["result_id"] for r in rows] == [v.result_id for v in values]
+
+    for r in rows:
+        # provenance repeated on every row
+        assert r["exp_id"] == "test_reid" and r["seed"] == "42" and r["split_seed"] == "42"
+        assert len(r["config_hash"]) == 16 and r["created_at"]
+        assert float(r["run_runtime_s"]) > 0.0
+
+    by_family: dict[str, list[dict[str, str]]] = {}
+    for r in rows:
+        by_family.setdefault(r["family"], []).append(r)
+    assert set(by_family) == {"reidentification", "reconstruction", "utility"}
+
+    raw = [r for r in by_family["reidentification"] if r["scope"] == "raw"]
+    assert raw and all(r["arm_id"] == "" and r["epsilon"] == "" for r in raw)
+    assert {r["known_points"] for r in by_family["reidentification"]} == {"3", "5"}
+    geo = [r for r in by_family["reidentification"] if r["arm_id"] == "geo_indistinguishability"]
+    assert geo and all(r["epsilon"] == "10.0" and r["unit_m"] == "25.0" for r in geo)
+    assert all(float(r["attack_runtime_s"]) >= 0.0 for r in by_family["reidentification"])
+
+    recon = by_family["reconstruction"]
+    assert all(
+        r["epsilon"] == "10.0" and r["known_points"] == "" and r["scope"] == "protected"
+        for r in recon
+    )
+    # utility rows describe the arm, not an attack: no attack runtime
+    assert all(r["attack_runtime_s"] == "" for r in by_family["utility"])
+    # arm statistics match run.json
+    arms = json.loads((tmp_path / "out" / "run.json").read_text())["arms"]
+    for r in geo:
+        assert int(r["n_pool"]) == arms[f"protected:{GEOIND_REF}"]["n_pool"]
+        assert int(r["n_rematch_dropped"]) == arms[f"protected:{GEOIND_REF}"]["n_rematch_dropped"]
+
+
+def test_results_csv_membership_columns(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """MIA rows carry the generator axis columns and the member/non-member counts."""
+    cfg = mia_config(tmp_path, beijing_maps_dir)
+    run(write_config(tmp_path, cfg))
+    rows = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    mia = [r for r in rows if r["family"] == "membership_inference"]
+    assert mia and all(r["scope"] == "synthetic" and r["arm_id"] == "markov" for r in mia)
+    for r in mia:
+        assert r["n_shadow"] == "8" and r["epsilon"] == ""  # markov has no epsilon
+        assert int(r["n_members"]) + int(r["n_nonmembers"]) == int(r["n_pool"])
+        assert r["ci_low"] == "" and r["ci_high"] == ""  # score-based: no within-run CI
+
+
 def test_matrix_and_tradeoff_artifacts_written(tmp_path: Path, beijing_maps_dir: Path) -> None:
     run(write_config(tmp_path, geoind_config(tmp_path, beijing_maps_dir)))
 
