@@ -71,6 +71,8 @@ metrics:
   utility: [cell_js_divergence, length_dist_error]
   utility_grid: {n_rows: 20, n_cols: 20}
   bootstrap: {n: 1000, ci: 0.95}
+  # memory: false            # peak-memory tracing (peak_memory_mb) is on by default;
+  #                          # turn it off for timing-critical runs — it slows attacks
 
 reporting:
   export: [csv]

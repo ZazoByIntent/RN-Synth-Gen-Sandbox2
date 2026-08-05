@@ -60,6 +60,9 @@ def base_config(tmp_path: Path, maps_dir: Path, region: str = "beijing") -> dict
             "privacy": ["top1_acc", "topk_acc", "linkage_rate"],
             "top_k": 5,
             "bootstrap": {"n": 200, "ci": 0.95},
+            # tracemalloc roughly doubles fixture attack time; keep the suite fast and
+            # cover the default-on path in test_peak_memory_recorded_by_default
+            "memory": False,
         },
     }
 
@@ -705,6 +708,8 @@ def test_results_csv_follows_schema(tmp_path: Path, beijing_maps_dir: Path) -> N
     )
     # utility rows describe the arm, not an attack: no attack runtime
     assert all(r["attack_runtime_s"] == "" for r in by_family["utility"])
+    # the fixture config turns memory tracing off, so the column stays blank
+    assert all(r["peak_memory_mb"] == "" for r in rows)
     # arm statistics match run.json
     arms = json.loads((tmp_path / "out" / "run.json").read_text())["arms"]
     for r in geo:
@@ -723,6 +728,21 @@ def test_results_csv_membership_columns(tmp_path: Path, beijing_maps_dir: Path) 
         assert r["n_shadow"] == "8" and r["epsilon"] == ""  # markov has no epsilon
         assert int(r["n_members"]) + int(r["n_nonmembers"]) == int(r["n_pool"])
         assert r["ci_low"] == "" and r["ci_high"] == ""  # score-based: no within-run CI
+
+
+def test_peak_memory_recorded_by_default(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """Without metrics.memory the orchestrator traces each attack's peak memory (O6)."""
+    cfg = base_config(tmp_path, beijing_maps_dir)
+    del cfg["metrics"]["memory"]
+    run(write_config(tmp_path, cfg))
+    rows = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    attack_rows = [r for r in rows if r["family"] != "utility"]
+    assert attack_rows and all(float(r["peak_memory_mb"]) > 0.0 for r in attack_rows)
+    # rows of the same attack invocation share one measurement
+    by_result: dict[str, set[str]] = {}
+    for r in attack_rows:
+        by_result.setdefault(r["result_id"], set()).add(r["peak_memory_mb"])
+    assert all(len(peaks) == 1 for peaks in by_result.values())
 
 
 def test_matrix_and_tradeoff_artifacts_written(tmp_path: Path, beijing_maps_dir: Path) -> None:

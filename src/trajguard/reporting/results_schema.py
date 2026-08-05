@@ -52,8 +52,9 @@ RESULTS_COLUMNS: tuple[str, ...] = (
     "n_members",
     "n_nonmembers",
     "spent_budget",
-    # runtime
+    # runtime and memory
     "attack_runtime_s",
+    "peak_memory_mb",
     "run_runtime_s",
 )
 
@@ -85,6 +86,7 @@ class ResultRow:
     n_nonmembers: int | None = None
     spent_budget: float | None = None
     attack_runtime_s: float | None = None
+    peak_memory_mb: float | None = None  # blank when metrics.memory turned tracing off
 
 
 def _cell(x: Any) -> Any:
@@ -139,6 +141,7 @@ def write_results_csv(
                 "n_nonmembers": row.n_nonmembers,
                 "spent_budget": row.spent_budget,
                 "attack_runtime_s": row.attack_runtime_s,
+                "peak_memory_mb": row.peak_memory_mb,
                 "run_runtime_s": run_runtime_s,
             }
             writer.writerow({k: _cell(val) for k, val in record.items()})

@@ -9,9 +9,11 @@ import math
 import os
 import subprocess
 import time
+import tracemalloc
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +27,7 @@ from trajguard.attacks.attribute import attribute_report
 from trajguard.attacks.base import Attack, BackgroundKnowledge
 from trajguard.attacks.membership import membership_report
 from trajguard.attacks.reconstruction import reconstruction_report
-from trajguard.datamodel import CleanTrajectory, MatchedTrajectory, MetricValue
+from trajguard.datamodel import AttackResult, CleanTrajectory, MatchedTrajectory, MetricValue
 from trajguard.datasets.base import DatasetLoader
 from trajguard.datasets.cleaning import CleaningConfig, clean, haversine_m
 from trajguard.datasets.split import split_by_user
@@ -137,6 +139,7 @@ class RunConfig:
     utility_grid: tuple[int, int]  # (n_rows, n_cols)
     bootstrap_n: int
     bootstrap_ci: float
+    measure_memory: bool  # trace each attack's peak memory (metrics.memory, default on)
     export: tuple[str, ...]
     plots: tuple[str, ...]
 
@@ -440,6 +443,7 @@ def load_config(path: str | Path) -> RunConfig:
         utility_grid=(int(grid_cfg.get("n_rows", 20)), int(grid_cfg.get("n_cols", 20))),
         bootstrap_n=int(_req(metrics, "bootstrap", "metrics").get("n", 1000)),
         bootstrap_ci=float(_req(metrics, "bootstrap", "metrics").get("ci", 0.95)),
+        measure_memory=bool(metrics.get("memory", True)),
         export=export,
         plots=plots,
     )
@@ -857,6 +861,32 @@ def _target_pools(
     return pools
 
 
+def _run_measured(
+    measure_memory: bool, invoke: Callable[[], AttackResult]
+) -> tuple[AttackResult, float | None]:
+    """Run one attack, optionally recording its peak traced memory in megabytes.
+
+    tracemalloc counts only allocations made while tracing (numpy buffers
+    included), so the peak is the attack's own footprint, not the pipeline's.
+    Tracing slows execution — the runtime the attack measures internally then
+    carries that overhead, which is why ``metrics.memory`` can turn this off
+    for timing-critical sweeps (design §7.6).
+    """
+    if not measure_memory:
+        return invoke(), None
+    already_tracing = tracemalloc.is_tracing()  # e.g. an outer profiler; leave it running
+    if not already_tracing:
+        tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        result = invoke()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        if not already_tracing:
+            tracemalloc.stop()
+    return result, round(peak / 1e6, 3)
+
+
 def _reconstruction_values(
     cfg: RunConfig,
     spec: AttackSpec,
@@ -890,8 +920,9 @@ def _reconstruction_values(
         aux = [project(clean_by_id[i].points) for i in ids]
         attack = attack_cls(epsilon=mech.epsilon, unit_m=mech.unit_m, motion_m=spec.motion_m)
         result_id = f"reconstruction:{ref}"
+        result, peak_mb = _run_measured(cfg.measure_memory, partial(attack.run, target, aux))
         result = replace(
-            attack.run(target, aux),
+            result,
             exp_id=cfg.exp_id,
             target_data_ref=ref,
             result_id=result_id,
@@ -922,6 +953,7 @@ def _reconstruction_values(
                 n_rematch_dropped=pool.rematch_dropped,
                 spent_budget=pool.spent_budget,
                 attack_runtime_s=result.runtime_s,
+                peak_memory_mb=peak_mb,
             )
             for name, (mean, lo, hi) in report.items()
         )
@@ -956,8 +988,12 @@ def _poi_inference_values(
         if not ref.startswith("protected:"):
             continue
         result_id = f"poi_inference:{ref}"
+        result, peak_mb = _run_measured(
+            cfg.measure_memory,
+            partial(attack.run, list(pool.clean_by_id.values()), list(clean_by_id.values())),
+        )
         result = replace(
-            attack.run(list(pool.clean_by_id.values()), list(clean_by_id.values())),
+            result,
             exp_id=cfg.exp_id,
             target_data_ref=ref,
             result_id=result_id,
@@ -992,6 +1028,7 @@ def _poi_inference_values(
                 n_rematch_dropped=pool.rematch_dropped,
                 spent_budget=pool.spent_budget,
                 attack_runtime_s=result.runtime_s,
+                peak_memory_mb=peak_mb,
             )
             for name, (mean, lo, hi) in report.items()
         )
@@ -1080,8 +1117,11 @@ def _membership_values(
         attack.configure(BackgroundKnowledge(known_points=0, distance="dtw", seed=cfg.seed))
         ref = f"synthetic:{gspec.ref}"
         result_id = f"membership_inference:{ref}"
+        result, peak_mb = _run_measured(
+            cfg.measure_memory, partial(attack.run, target, (pool, candidates))
+        )
         result = replace(
-            attack.run(target, (pool, candidates)),
+            result,
             exp_id=cfg.exp_id,
             target_data_ref=ref,
             result_id=result_id,
@@ -1107,6 +1147,7 @@ def _membership_values(
                 n_members=n_members,
                 n_nonmembers=len(candidates) - n_members,
                 attack_runtime_s=result.runtime_s,
+                peak_memory_mb=peak_mb,
             )
             for name, val in membership_report(result, fprs=spec.fprs).items()
         )
@@ -1272,7 +1313,9 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 attack.configure(
                     BackgroundKnowledge(known_points=k, distance=spec.distance, seed=cfg.seed)
                 )
-                result = attack.run(pool.matched, aux)
+                result, peak_mb = _run_measured(
+                    cfg.measure_memory, partial(attack.run, pool.matched, aux)
+                )
                 result = replace(
                     result,
                     exp_id=cfg.exp_id,
@@ -1298,6 +1341,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                         n_rematch_dropped=pool.rematch_dropped,
                         spent_budget=pool.spent_budget,
                         attack_runtime_s=result.runtime_s,
+                        peak_memory_mb=peak_mb,
                     )
                     for v in values
                 )

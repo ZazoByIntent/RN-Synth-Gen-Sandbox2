@@ -93,15 +93,18 @@ Ti stolpci se ob implementaciji polnijo iz strukturiranih specifikacij (`AttackS
 | `n_members`, `n_nonmembers` | celo/prazno | MIA: število članov in ne-članov — brez tega se `tpr@fpr` ne da brati (spodnja meja FPR je `1/n_nonmembers`) | novo (iz `_mia_pool`) |
 | `spent_budget` | število/prazno | dejansko porabljeni ε mehanizma | `run.json` `arms` |
 
-### Čas izvajanja
+### Čas izvajanja in pomnilnik
 
 | stolpec | tip | pomen | vir danes |
 |---|---|---|---|
 | `attack_runtime_s` | število/prazno | čas enega zagona napada (prazno pri utility vrsticah) | `AttackResult.runtime_s` (se meri, a se še ne zapisuje ob vrstice) |
+| `peak_memory_mb` | število/prazno | vršna poraba pomnilnika enega zagona napada (megabajti, 10⁶ B), izmerjena s `tracemalloc` v orkestratorju okoli klica `attack.run`; prazno pri utility vrsticah in ob izklopljenem merjenju | O6 (5. avgust 2026) |
 | `run_runtime_s` | število | čas celotnega zagona | `run.json` |
 
-Pomnilniška špica (O6) v shemi še nima stolpca; ko jo val 2 začne meriti, se doda
-`peak_memory_mb` in ta dokument dopolni.
+Opomba k `peak_memory_mb`: `tracemalloc` med sledenjem upočasni izvajanje napada,
+zato `attack_runtime_s`, izmerjen ob vklopljenem merjenju pomnilnika, nosi pribitek.
+Merjenje je privzeto vklopljeno; za časovno kritične preizkuse (prag X iz poročila
+§6.6) se izklopi s ključem `metrics.memory: false` — stolpec je takrat prazen.
 
 ## Zgleda vrstic (transponirano)
 
@@ -135,6 +138,9 @@ blok porekla (ne moreta se razhajati), `reports/results_master.csv` je čisto zl
 zagonskih tabel z glasno zavrnitvijo tuje glave stolpcev. Obstoječi izhodi (`metrics.csv`,
 `matrix.csv`, `run.json`, `repetitions.csv`) so nespremenjeni.
 
-Odprto ostaja troje neobveznega oziroma kasnejšega: `.parquet` zrcalo glavne tabele, stolpca
-`exp_id`/`config_hash` v `repetitions.csv` in stolpec `peak_memory_mb`, ki pride z merjenjem
-pomnilnika (O6).
+Z O6 (5. avgust 2026) je dodan stolpec `peak_memory_mb`: orkestrator meri vršno porabo
+pomnilnika vsakega zagona napada s `tracemalloc` (standardna knjižnica, brez novih
+odvisnosti), z izklopom prek `metrics.memory: false`.
+
+Odprto ostaja dvoje neobveznega oziroma kasnejšega: `.parquet` zrcalo glavne tabele in
+stolpca `exp_id`/`config_hash` v `repetitions.csv`.

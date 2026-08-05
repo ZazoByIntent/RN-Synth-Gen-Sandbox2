@@ -61,6 +61,7 @@ def test_write_results_csv_follows_column_order(tmp_path: Path) -> None:
         n_probes=8,
         n_rematch_dropped=0,
         attack_runtime_s=0.25,
+        peak_memory_mb=12.5,
     )
     path = tmp_path / "results.csv"
     write_results_csv(path, PROVENANCE, [row], run_runtime_s=1.5)
@@ -77,6 +78,7 @@ def test_write_results_csv_follows_column_order(tmp_path: Path) -> None:
     assert record["known_points"] == "5" and record["epsilon"] == ""
     assert record["metric"] == "top1_acc" and record["value"] == "0.5"
     assert record["attack_runtime_s"] == "0.25" and record["run_runtime_s"] == "1.5"
+    assert record["peak_memory_mb"] == "12.5"
 
 
 def test_write_results_csv_blanks_none_and_non_finite(tmp_path: Path) -> None:

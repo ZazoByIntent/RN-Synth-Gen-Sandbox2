@@ -284,7 +284,10 @@ trajectory.
 - `results/geolife_reid_baseline/` containing `metrics.csv` (long-form metrics),
   `results.csv` (the same rows in the unified results-table schema from
   `docs/REZULTATI_SHEMA.md`: run provenance, pivot-axis columns like ε and
-  known_points, arm statistics, and runtimes — the file you pivot in Excel),
+  known_points, arm statistics, runtimes, and each attack's peak memory in MB —
+  the file you pivot in Excel; `peak_memory_mb` is traced with `tracemalloc`,
+  which slows the attacks and thereby inflates `attack_runtime_s` a little, so
+  set `metrics: {memory: false}` for timing-critical sweeps),
   `matrix.csv` (the per-run risk-matrix slice: one row per target arm, one column
   per attack family's headline metric — reidentification at its largest
   known-points level; the per-k view stays in `results.csv`), and `run.json`
