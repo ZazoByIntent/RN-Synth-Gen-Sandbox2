@@ -1,9 +1,11 @@
 # Shema enotne tabele rezultatov (»Rezultati_predloga«)
 
-**Status:** dogovorjena predloga, 5. avgust 2026 — še ni implementirana. Ta dokument je
-merodajni opis sheme za val 2 (O4 iz `docs/HANDOFF.md`): avtomatsko zapisovanje rezultatov
-v obliko, ki gre brez ročnega prepisovanja v Excel in v poglavje 7 poročila. Ob implementaciji
-se morebitna odstopanja popravijo tukaj, v istem zahtevku za združitev.
+**Status:** dogovorjena 5. avgusta 2026 in **implementirana isti dan** (commita `0433079` in
+`6bfb35b`): vsak zagon zapiše `results.csv`, `trajguard report` zlepi glavno tabelo. Shema kot
+koda živi v `src/trajguard/reporting/results_schema.py` (`RESULTS_COLUMNS`); test
+`tests/test_results_schema.py` preverja, da je vsak stolpec, ki ga koda zapisuje, imenovan v tem
+dokumentu, zato dokument in koda ne moreta neopazno razpasti. Ta dokument ostaja merodajni opis:
+ob spremembi sheme se popravita oba, v istem zahtevku za združitev.
 
 ## Odločitve, na katerih shema stoji (avtor, 5. avgust 2026)
 
@@ -124,12 +126,15 @@ Pomnilniška špica (O6) v shemi še nima stolpca; ko jo val 2 začne meriti, se
 | `n_rematch_dropped` / `spent_budget` | `220` / `1.0` | (prazno) / (prazno) |
 | `attack_runtime_s` / `run_runtime_s` | `84.2` / `1930.5` | `412.7` / `1930.5` |
 
-## Kaj že obstaja in kaj mora val 2 dograditi
+## Stanje izvedbe
 
-Že zapisano danes: vse poreklo zagona in statistika raw/protected vej (`run.json`), vse
-vrstice metrik z intervali (`metrics.csv`), skupni čas zagona. Val 2 mora torej predvsem
-**pripeti obstoječe podatke vrsticam** in dograditi troje: (1) strukturirane stolpce
-`family`/`scope`/`arm_id`/osi iz specifikacij namesto nizov, (2) `attack_runtime_s` ob
-vrstice (danes se izmeri in zavrže), (3) MIA števce `n_members`/`n_nonmembers` (danes se ne
-zapisujeta). Zlepljenje v `reports/results_master.csv` sodi v `trajguard report`, ki že
-obhodi vse zagone pod `results/`.
+Implementirano (commita `0433079`, `6bfb35b`): strukturirani stolpci se polnijo pri izvoru
+iz specifikacij (`_arm_infos`, družinske funkcije v orkestratorju), `attack_runtime_s` in MIA
+števca `n_members`/`n_nonmembers` se zapisujejo, `run.json` in `results.csv` delita en sam
+blok porekla (ne moreta se razhajati), `reports/results_master.csv` je čisto zlepljenje
+zagonskih tabel z glasno zavrnitvijo tuje glave stolpcev. Obstoječi izhodi (`metrics.csv`,
+`matrix.csv`, `run.json`, `repetitions.csv`) so nespremenjeni.
+
+Odprto ostaja troje neobveznega oziroma kasnejšega: `.parquet` zrcalo glavne tabele, stolpca
+`exp_id`/`config_hash` v `repetitions.csv` in stolpec `peak_memory_mb`, ki pride z merjenjem
+pomnilnika (O6).

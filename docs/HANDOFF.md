@@ -23,9 +23,11 @@ odvisnost — prepleteno seme, opisano pri O3 — ki spremeni sestavo vala 1 v r
 `poi_inference` v zanki orkestratorja (`c24cb48`), korak 1e — `membership_inference` in
 razdelek `synthetic_generators` v orkestratorju (`0608755`, `9388cc8`). S tem so O1, O2 in O3
 zaprti in **val 1 je zaključen**: vsi štirje scenariji tečejo iz ene konfiguracije. Shema
-`Rezultati_predloga` je dogovorjena in zapisana v `docs/REZULTATI_SHEMA.md` (5. avgust 2026),
-zato **val 2 ni več blokiran**; alternativa ostaja val 3 (A3 nima blokad) — izbira je
-avtorjeva. Kjer se je med izvedbo izkazalo drugače, kot napoveduje besedilo spodaj,
+`Rezultati_predloga` je dogovorjena in zapisana v `docs/REZULTATI_SHEMA.md` (5. avgust 2026);
+**O4 iz vala 2 je izveden** (`0433079`, `6bfb35b`): vsak zagon zapiše `results.csv` po shemi,
+`trajguard report` zlepi `reports/results_master.csv`. Iz vala 2 ostajata O5 (štirje grafi in
+vodilna metrika po družini) in O6 (pomnilnik, pravila krčenja); alternativa ostaja A3 iz
+vala 3. Kjer se je med izvedbo izkazalo drugače, kot napoveduje besedilo spodaj,
 je popravek vpisan na mestu in označen z **[izvedba]** (po istem vzorcu kot **[recenzija]**).
 
 **To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
@@ -285,11 +287,41 @@ kar je pri petih ponovitvah krat šest vrednosti ε krat pet stopenj predznanja 
 **[recenzija]** Blokiran, dokler shema `Rezultati_predloga` ni na voljo (datoteki
 `IZV_nacrt_eksperimentov.xlsx` in `IZV_porocilo.docx` nista v repozitoriju); gradi na
 obstoječem `reporting/report.py`, ne od začetka. **[izvedba, 5. avgust 2026]** Shema je
-zdaj v `docs/REZULTATI_SHEMA.md` — blokada je odpravljena; tam je tudi popisano, kaj od
-sestavin že obstaja in kaj mora val 2 dograditi (strukturirani stolpci iz specifikacij,
-`attack_runtime_s` ob vrstice, MIA števca `n_members`/`n_nonmembers`, zlepljenje v
-`reports/results_master.csv` prek `trajguard report`). Sem sodi tudi vodilna metrika po
+zdaj v `docs/REZULTATI_SHEMA.md` — blokada je odpravljena. Sem sodi tudi vodilna metrika po
 družini iz opombe pri 1.6.
+
+**[izvedba, 5. avgust 2026] — O4 izveden (`0433079`, `6bfb35b`). Kaj in zakaj:**
+
+- **`results.csv` ob vsakem zagonu** po shemi iz `docs/REZULTATI_SHEMA.md`. Shema kot koda
+  živi v novem modulu `reporting/results_schema.py` (`RESULTS_COLUMNS`, `ResultRow`,
+  `write_results_csv`); vrstice se zapisujejo imensko, ne pozicijsko, zato stolpec ne more
+  pristati na napačnem mestu. Zakaj: ročno prepisovanje rezultatov je pri 5 ponovitvah × 6 ε
+  × 5 stopenj predznanja vir napak, ki ga ta tabela odpravi.
+- **Stolpci se polnijo pri izvoru** iz strukturiranih specifikacij (nova `_arm_infos` +
+  družinske funkcije v orkestratorju vračajo `ResultRow`), nikoli z razčlenjevanjem oznak
+  nazaj. Ob tem se je začelo zapisovati troje, kar se je prej izmerilo in zavrglo ali sploh
+  ni obstajalo: `attack_runtime_s` ob vsaki vrstici napada, ε/`unit_m` veje tudi kadar ju
+  YAML ni izrecno navedel (bereta se z instance mehanizma), ter MIA števca
+  `n_members`/`n_nonmembers` (brez njih se `tpr@fpr` ne da brati).
+- **En blok porekla** (`exp_id`, `config_hash`, `git_commit`, obe semeni, `max_users`,
+  časovni žig) se deli med `run.json` in `results.csv`. Zakaj: dva izvora iste resnice bi
+  se lahko razšla.
+- **`reports/results_master.csv`**: `trajguard report` čisto zlepi vse zagonske tabele
+  (tudi ponovitve pod `seed<N>/`); tabela s tujo glavo stolpcev je glasna napaka, ne tiho
+  zamaknjeni stolpci. Obstoječi izhodi (`metrics.csv`, `matrix.csv`, `run.json`,
+  `repetitions.csv`) so nespremenjeni, zato `trajguard repeat` in stari odjemalci delajo
+  naprej.
+- **Mimogrede odkrita in odpravljena latentna napaka:** razčlenjevalnik `result_id` v
+  `report.py` je zahteval pripono `:k<N>`, zato bi se `trajguard report` sesul na vsakem
+  zagonu z rekonstrukcijo, POI ali MIA (družine iz 1c–1e). Popravljeno z regresijskim
+  testom; napaka je hkrati konkreten dokaz, zakaj shema prepoveduje razčlenjevanje nizov.
+- **Testi skladnosti s shemo:** `tests/test_results_schema.py` pribije vrstni red stolpcev,
+  pravila praznih celic in — prek testa sinhronizacije z dokumentom — da je vsak stolpec,
+  ki ga koda zapisuje, imenovan v `docs/REZULTATI_SHEMA.md`; end-to-end testi preverjajo
+  tabelo na fixture zagonih za vse družine ter enakost glavne tabele z zagonsko.
+- **Ni del tega koraka:** O5 (štirje grafi in vodilna metrika po družini v `matrix.csv` /
+  grafu kompromisa), O6 (pomnilniška špica, pravila krčenja obsega) ter neobvezni dopolnitvi
+  `.parquet` zrcalo glavne tabele in stolpca porekla v `repetitions.csv`.
 
 **Val 3 — dopolnitve znotraj obstoječih štirih scenarijev (M2, A3, A4).** Top-k POI skupaj z
 `as_poi_visits()` odklene razdelek 7.5; rekonstrukcija z omejitvijo omrežja je vsebinsko najbolj
@@ -314,13 +346,14 @@ popravkom poročila (glej razdelek 1.1), ne z implementacijo.
 ### Naslednji konkreten korak
 
 **[recenzija — prvotni predlog M1 + O2 + O3 je umaknjen** iz razlogov, opisanih pri valu 1.]
-Val 0 in celoten val 1 (koraki 1a–1e) so izvedeni (glej oznake zgoraj); razdelek 7.1 poročila
-je s tem izvedljiv iz ene konfiguracije. Shema `Rezultati_predloga` je dogovorjena in zapisana
-v `docs/REZULTATI_SHEMA.md`, zato je val 2 odblokiran in naravni naslednji korak: izvedba
-sheme (pripenjanje porekla zagona vrsticam, strukturirani stolpci, `results.csv` na zagon in
-zlepljenje v glavno tabelo prek `trajguard report`), šele nato štirje načrtovani grafi (O5)
-in merjenje pomnilnika (O6). Alternativa brez blokad ostaja A3 iz vala 3 (rekonstrukcija z
-omejitvijo cestnega omrežja). Izbira med njima je avtorjeva.
+Val 0, celoten val 1 (koraki 1a–1e) in O4 iz vala 2 so izvedeni (glej oznake zgoraj):
+razdelek 7.1 poročila je izvedljiv iz ene konfiguracije, rezultati pa se samodejno zapisujejo
+v enotno tabelo po `docs/REZULTATI_SHEMA.md` (`results.csv` na zagon,
+`reports/results_master.csv` čez vse zagone). Naslednje delo znotraj vala 2 je O5 — štirje
+načrtovani grafi in vodilna metrika po družini (`matrix.csv` in graf kompromisa danes vrtita
+samo `top1_acc` reidentifikacije) — nato O6 (pomnilniška špica, pravila krčenja obsega).
+Alternativa brez blokad ostaja A3 iz vala 3 (rekonstrukcija z omejitvijo cestnega omrežja).
+Izbira je avtorjeva.
 
 ---
 
