@@ -74,4 +74,6 @@ metrics:
 
 reporting:
   export: [csv]
-  plots: [tradeoff]          # top1_acc (at max known_points) vs cell JS divergence
+  # tradeoff: headline metric (at max known_points) vs cell JS divergence, per family;
+  # the other four are the planned report figures (§6.8, §7.2–7.6), see docs/RUNNING.md
+  plots: [tradeoff, by_epsilon, by_knowledge, mechanisms, runtime]

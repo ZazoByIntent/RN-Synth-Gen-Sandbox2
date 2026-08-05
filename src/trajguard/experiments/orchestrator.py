@@ -37,7 +37,15 @@ from trajguard.maps.base import RoadNetwork
 from trajguard.matching.base import MapMatcher, match_many
 from trajguard.privacy.base import PrivacyMechanism
 from trajguard.privacy.geoind import GeoIndistinguishability
-from trajguard.reporting.plots import headline_metric, is_share_metric
+from trajguard.reporting.plots import (
+    headline_rows,
+    is_share_metric,
+    plot_by_epsilon,
+    plot_by_knowledge,
+    plot_mechanisms,
+    plot_runtime,
+    target_sort_key,
+)
 from trajguard.reporting.results_schema import ResultRow, write_results_csv
 from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
 from trajguard.representation import Grid, TrajectoryView
@@ -342,10 +350,12 @@ def load_config(path: str | Path) -> RunConfig:
             f"config: reporting.export {sorted(unknown_formats)} unsupported; only 'csv' exists"
         )
     plots = tuple(str(p) for p in reporting.get("plots", []))
-    unknown_plots = set(plots) - {"tradeoff"}
+    known_plots = {"tradeoff", "by_epsilon", "by_knowledge", "mechanisms", "runtime"}
+    unknown_plots = set(plots) - known_plots
     if unknown_plots:
         raise ValueError(
-            f"config: reporting.plots {sorted(unknown_plots)} unsupported; only 'tradeoff' exists"
+            f"config: reporting.plots {sorted(unknown_plots)} unsupported; "
+            f"available: {sorted(known_plots)}"
         )
 
     metric_names = tuple(str(m) for m in _req(metrics, "privacy", "metrics"))
@@ -363,6 +373,24 @@ def load_config(path: str | Path) -> RunConfig:
     attacks = _req(raw, "attacks", "")
     if not attacks:
         raise ValueError("config: at least one attack is required")
+    attack_specs = _attack_specs(attacks)
+    mech_specs = _variant_specs(raw.get("privacy_mechanisms", []), "privacy_mechanisms")
+    gen_specs = _variant_specs(
+        raw.get("synthetic_generators", []), "synthetic_generators", canon=False
+    )
+
+    # Plot prerequisites that are knowable before the expensive pipeline: a plot
+    # whose axis cannot exist for this config is a config mistake, not an empty file.
+    if "by_knowledge" in plots and not any(s.known_points for s in attack_specs):
+        raise ValueError(
+            "config: the by_knowledge plot needs an attack with attacker.known_points"
+        )
+    for plot in ("by_epsilon", "mechanisms"):
+        if plot in plots and not mech_specs and not gen_specs:
+            raise ValueError(
+                f"config: the {plot} plot needs at least one privacy_mechanisms "
+                "or synthetic_generators arm"
+            )
 
     # Two seeds (design §6.4 repetitions): split_seed pins the population and the
     # user split; seed drives everything stochastic downstream. Defaulting
@@ -403,11 +431,9 @@ def load_config(path: str | Path) -> RunConfig:
         k_candidates=int(mm.get("k_candidates", 8)),
         min_match_score=float(_req(mm, "min_match_score", "map_matching")),
         fractions={str(k): float(v) for k, v in _req(sp, "fractions", "split").items()},
-        mechanisms=_variant_specs(raw.get("privacy_mechanisms", []), "privacy_mechanisms"),
-        generators=_variant_specs(
-            raw.get("synthetic_generators", []), "synthetic_generators", canon=False
-        ),
-        attacks=_attack_specs(attacks),
+        mechanisms=mech_specs,
+        generators=gen_specs,
+        attacks=attack_specs,
         metric_names=metric_names,
         top_k=int(metrics.get("top_k", 5)),
         utility_names=utility_names,
@@ -1355,45 +1381,20 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 y_label=f"{family}: {headline}",
                 unit_interval=is_share_metric(headline),
             )
+    plotters: dict[str, Callable[[Sequence[ResultRow], Path], list[Path]]] = {
+        "by_epsilon": plot_by_epsilon,
+        "by_knowledge": plot_by_knowledge,
+        "mechanisms": plot_mechanisms,
+        "runtime": plot_runtime,
+    }
+    for plot_name in cfg.plots:
+        plotter = plotters.get(plot_name)
+        if plotter is not None:
+            plotter(all_rows, cfg.output_dir)
     return [r.value for r in all_rows]
 
 
-_SCOPE_ORDER = {"raw": 0, "protected": 1, "synthetic": 2}
-
 _Matrix = tuple[list[tuple[str, str]], list[tuple[str, dict[str, float]]]]
-
-
-def _target_key(row: ResultRow) -> tuple[Any, ...]:
-    """Display order for target arms from structured columns: raw, identity, then params."""
-    return (
-        _SCOPE_ORDER.get(row.scope, len(_SCOPE_ORDER)),
-        0 if row.arm_id in ("", "none") else 1,
-        row.arm_id,
-        math.inf if row.epsilon is None else row.epsilon,
-        math.inf if row.unit_m is None else row.unit_m,
-        row.target_ref,
-    )
-
-
-def _headline_rows(rows: Sequence[ResultRow], family: str) -> tuple[str, list[ResultRow]]:
-    """The family's headline metric and its row per target arm, ordered for display.
-
-    Families with a knowledge knob (reidentification) emit one row per
-    known_points level; the arm is represented by its largest level, matching
-    the risk matrix in ``trajguard report``.
-    """
-    fam = [r for r in rows if r.family == family]
-    headline = headline_metric(family, [r.value.name for r in fam])
-    by_target: dict[str, list[ResultRow]] = {}
-    for r in fam:
-        if r.value.name == headline:
-            by_target.setdefault(r.target_ref, []).append(r)
-    picked = [
-        max(target_rows, key=lambda r: -1 if r.known_points is None else r.known_points)
-        for target_rows in by_target.values()
-    ]
-    picked.sort(key=_target_key)
-    return headline, picked
 
 
 def _matrix_table(rows: Sequence[ResultRow]) -> _Matrix:
@@ -1403,14 +1404,14 @@ def _matrix_table(rows: Sequence[ResultRow]) -> _Matrix:
     cells: dict[str, dict[str, float]] = {}
     order: dict[str, tuple[Any, ...]] = {}
     for family in families:
-        headline, picked = _headline_rows(rows, family)
+        headline, picked = headline_rows(rows, family)
         columns.append((family, headline))
         for r in picked:
             value = _finite_or_none(r.value.value)
             if value is None:
                 continue
             cells.setdefault(r.target_ref, {})[family] = value
-            order.setdefault(r.target_ref, _target_key(r))
+            order.setdefault(r.target_ref, target_sort_key(r))
     targets = sorted(cells, key=lambda t: order[t])
     return columns, [(t, cells[t]) for t in targets]
 
@@ -1419,7 +1420,7 @@ def _family_tradeoff_points(
     rows: Sequence[ResultRow], family: str, utility_by_ref: dict[str, dict[str, float]]
 ) -> list[TradeoffPoint]:
     """(cell JSD, family headline value, arm label) per target arm of one family."""
-    _, picked = _headline_rows(rows, family)
+    _, picked = headline_rows(rows, family)
     points: list[TradeoffPoint] = []
     for r in picked:
         x = (

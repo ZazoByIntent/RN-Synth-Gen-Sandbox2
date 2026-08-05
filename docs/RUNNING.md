@@ -314,7 +314,27 @@ utility damage) plus one `tradeoff_<family>.png` per further attack family whose
 arms carry utility values (e.g. `tradeoff_reconstruction.png`; membership
 inference gets none — utility is only measured over protected releases, and its
 arms are synthetic), and utility metrics (`cell_js_divergence`,
-`length_dist_error`) quantify how much the noise distorted the data. The config also runs the reconstruction attack: one
+`length_dist_error`) quantify how much the noise distorted the data.
+
+Beyond `tradeoff`, `reporting.plots` accepts the four planned report figures
+(report §6.8, §7.2–7.6), all drawn from the same rows that go into `results.csv`:
+
+- `by_epsilon` — one `by_epsilon_<family>.png` per attack family: the family's
+  headline metric versus the arm's ε (log axis), a line per arm and — for
+  reidentification — per known-points level. Arms without an ε (raw, identity,
+  non-private generators) do not appear.
+- `by_knowledge` — `by_knowledge_<family>.png` for families with the
+  known-points knob (today reidentification): headline metric versus the number
+  of points the attacker knows, a line per target arm.
+- `mechanisms` — `mechanisms_<family>.png`: horizontal bars comparing all arms
+  on the family's headline metric (reidentification at its largest
+  known-points), with the within-run bootstrap interval as whiskers.
+- `runtime` — a single `runtime.png`: one bar per attack invocation with its
+  runtime in seconds (log axis), coloured by family.
+
+A requested plot for which the run produced no matching rows is simply not
+written (no empty file); a plot whose axis cannot exist for the config at all
+(e.g. `by_knowledge` without a known-points attack) is rejected up front. The config also runs the reconstruction attack: one
 `reconstruction:protected:geo_indistinguishability:epsilon=…` row per ε arm with
 `hausdorff_m`, `dtw_m`, and `mean_spatial_error_m` in metres — the attacker's MAP
 inversion of the noise (it knows ε and unit_m, design §6.3). Expect the mean

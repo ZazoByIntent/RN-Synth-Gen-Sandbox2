@@ -755,6 +755,37 @@ def test_protected_pool_cache_is_reused(tmp_path: Path, beijing_maps_dir: Path) 
     assert len(list((tmp_path / "protected").iterdir())) == 1
 
 
+def test_planned_plots_written_end_to_end(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """The four wave-2 plots come out of one run when reporting.plots asks for them."""
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    cfg["reporting"]["plots"] = ["tradeoff", "by_epsilon", "by_knowledge", "mechanisms", "runtime"]
+    run(write_config(tmp_path, cfg))
+    for name in (
+        "tradeoff.png",
+        "by_epsilon_reidentification.png",
+        "by_knowledge_reidentification.png",
+        "mechanisms_reidentification.png",
+        "runtime.png",
+    ):
+        assert (tmp_path / "out" / name).stat().st_size > 0, name
+
+
+def test_by_knowledge_plot_requires_a_knowledge_attack(tmp_path: Path) -> None:
+    cfg = mia_config(tmp_path, tmp_path / "maps")  # membership inference has no known_points
+    cfg["reporting"] = {"export": ["csv"], "plots": ["by_knowledge"]}
+    with pytest.raises(ValueError, match="by_knowledge"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_by_epsilon_plot_requires_an_arm(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["privacy_mechanisms"] = []
+    cfg["attacks"][0]["target_scope"] = ["raw"]
+    cfg["reporting"] = {"export": ["csv"], "plots": ["by_epsilon"]}
+    with pytest.raises(ValueError, match="by_epsilon"):
+        run(write_config(tmp_path, cfg))
+
+
 def test_tradeoff_plot_requires_utility_metric(tmp_path: Path) -> None:
     cfg = base_config(tmp_path, tmp_path / "maps")
     cfg["reporting"] = {"export": ["csv"], "plots": ["tradeoff"]}
