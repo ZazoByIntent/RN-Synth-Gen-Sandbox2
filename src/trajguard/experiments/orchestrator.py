@@ -140,6 +140,7 @@ class RunConfig:
     bootstrap_n: int
     bootstrap_ci: float
     measure_memory: bool  # trace each attack's peak memory (metrics.memory, default on)
+    attack_time_budget_s: float  # per-invocation runtime budget, report §6.6 (X = 300 s)
     export: tuple[str, ...]
     plots: tuple[str, ...]
 
@@ -395,6 +396,14 @@ def load_config(path: str | Path) -> RunConfig:
                 "or synthetic_generators arm"
             )
 
+    # Per-attack runtime budget (report §6.6): the author fixed X at 300 s per
+    # attack invocation (5 Aug 2026). Exceeding it never fails or trims a run —
+    # it flags the invocation in run.json so the scope-reduction rules in
+    # docs/RUNNING.md can be applied to the *next* runs of a sweep.
+    budget_s = float(metrics.get("attack_time_budget_s", 300.0))
+    if budget_s <= 0:
+        raise ValueError(f"config: metrics.attack_time_budget_s must be > 0, got {budget_s}")
+
     # Two seeds (design §6.4 repetitions): split_seed pins the population and the
     # user split; seed drives everything stochastic downstream. Defaulting
     # split_seed to seed keeps single-run configs unchanged, while repetition
@@ -444,6 +453,7 @@ def load_config(path: str | Path) -> RunConfig:
         bootstrap_n=int(_req(metrics, "bootstrap", "metrics").get("n", 1000)),
         bootstrap_ci=float(_req(metrics, "bootstrap", "metrics").get("ci", 0.95)),
         measure_memory=bool(metrics.get("memory", True)),
+        attack_time_budget_s=budget_s,
         export=export,
         plots=plots,
     )
@@ -1401,6 +1411,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         for ref, pool in pools.items()
     }
     matrix = _matrix_table(all_rows)
+    over_budget = _over_budget_attacks(all_rows, cfg.attack_time_budget_s)
     _write_results(
         cfg,
         all_rows,
@@ -1410,7 +1421,15 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         time.perf_counter() - started,
         arms,
         matrix,
+        over_budget,
     )
+    if over_budget:
+        worst = ", ".join(f"{o['result_id']} ({o['runtime_s']:.1f} s)" for o in over_budget)
+        print(
+            f"warning: {len(over_budget)} attack invocation(s) exceeded the "
+            f"{cfg.attack_time_budget_s:g} s runtime budget: {worst} — apply the "
+            "scope-reduction rules in docs/RUNNING.md (computational budget)"
+        )
     if "tradeoff" in cfg.plots:
         for family, headline in matrix[0]:
             points = _family_tradeoff_points(all_rows, family, utility_by_ref)
@@ -1481,6 +1500,24 @@ def _finite_or_none(x: float | None) -> float | None:
     return None if x is None or not math.isfinite(x) else x
 
 
+def _over_budget_attacks(rows: Sequence[ResultRow], budget_s: float) -> list[dict[str, Any]]:
+    """Attack invocations whose runtime exceeded the budget, worst first (report §6.6).
+
+    Rows of one invocation share a result_id and carry the same runtime, so each
+    invocation is counted once. Exceeding the budget never invalidates the run:
+    the flag exists so the scope-reduction rules in docs/RUNNING.md can be
+    applied when planning the next runs of a sweep — never silently to this one.
+    """
+    seen: dict[str, float] = {}
+    for r in rows:
+        if r.family != "utility" and r.attack_runtime_s is not None:
+            seen.setdefault(r.value.result_id, r.attack_runtime_s)
+    over = sorted(
+        ((rid, t) for rid, t in seen.items() if t > budget_s), key=lambda item: -item[1]
+    )
+    return [{"result_id": rid, "runtime_s": round(t, 3)} for rid, t in over]
+
+
 def _write_results(
     cfg: RunConfig,
     rows: list[ResultRow],
@@ -1490,6 +1527,7 @@ def _write_results(
     runtime_s: float,
     arms: dict[str, dict[str, Any]],
     matrix: _Matrix,
+    over_budget: list[dict[str, Any]],
 ) -> None:
     """Write the exported formats, results.csv, and run.json under the output directory."""
     values = [r.value for r in rows]
@@ -1540,6 +1578,13 @@ def _write_results(
         "split_counts": split_counts,
         "bootstrap": {"n": cfg.bootstrap_n, "ci": cfg.bootstrap_ci},
         "arms": arms,
+        # memory_traced marks runtimes measured under tracemalloc (inflated a bit);
+        # budget decisions should come from runs with metrics.memory turned off.
+        "over_budget": {
+            "budget_s": cfg.attack_time_budget_s,
+            "memory_traced": cfg.measure_memory,
+            "attacks": over_budget,
+        },
         "runtime_s": round(runtime_s, 3),
         "metrics": [
             {

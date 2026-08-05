@@ -417,6 +417,40 @@ same-class shadows sharing that ε. Read those rows against the markov ceiling:
 a working privacy mechanism pulls `auc` toward 0.5 and the low-FPR TPR toward
 zero as ε shrinks.
 
+## 7.3 Computational budget and scope reduction (report §6.6)
+
+Every attack invocation has a runtime budget of **X = 300 seconds** (the author's
+decision, 5 Aug 2026), configurable as `metrics.attack_time_budget_s`. The
+orchestrator compares each invocation's `attack_runtime_s` against it and, when
+exceeded, prints a console warning and records the offenders in `run.json` under
+`over_budget` (`budget_s`, `memory_traced`, and the worst-first `attacks` list).
+Exceeding the budget **never fails or trims a run** — results stay complete, and
+automatic scope reduction is deliberately absent because it would silently change
+the experiment. The flag exists so you apply the rules below when planning the
+*next* runs of a sweep.
+
+The rules, applied one step at a time (re-measure after each step):
+
+- **R0 — how to measure.** The budget applies to one attack invocation
+  (`attack_runtime_s` in `results.csv`). Decide on times measured with
+  `metrics: {memory: false}`: peak-memory tracing roughly doubles attack time,
+  and `run.json` marks such runs with `memory_traced: true`.
+- **R1 — the run stands.** An over-budget run stays in `results/` and in the
+  master table; reduction applies to future runs only.
+- **R2 — the reduction ladder.**
+  1. Reduce `dataset.max_users` one step down the design §6.4 sample ladder:
+     182 → 100 → 50 → 20.
+  2. If still over budget at 20 users, turn the family's own knob:
+     membership inference — halve `n_shadow` (not below 8); reidentification —
+     drop the largest `known_points` level. Reconstruction and POI inference
+     have no knob of their own (their cost scales with the pool), so go to 3.
+  3. Whatever remains over budget is **excluded from the sweep** (the arm or
+     the attack), and the exclusion — with its measured runtime — is recorded
+     in the report and in `docs/HANDOFF.md`.
+- **R3 — traceability.** Record every reduction as a comment in the experiment
+  YAML (which ladder step, why); the `max_users` and `config_hash` columns in
+  `results.csv` keep reduced runs distinguishable on their own.
+
 ## 8. Aggregate risk report
 
 ```sh

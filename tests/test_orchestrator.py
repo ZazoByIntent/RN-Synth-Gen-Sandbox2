@@ -745,6 +745,45 @@ def test_peak_memory_recorded_by_default(tmp_path: Path, beijing_maps_dir: Path)
     assert all(len(peaks) == 1 for peaks in by_result.values())
 
 
+def test_over_budget_attacks_are_flagged_not_trimmed(
+    tmp_path: Path, beijing_maps_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A tiny runtime budget flags every attack invocation in run.json and warns on
+    the console, but the run and its results stay complete (report §6.6)."""
+    cfg = base_config(tmp_path, beijing_maps_dir)
+    cfg["metrics"]["attack_time_budget_s"] = 1e-6
+    values = run(write_config(tmp_path, cfg))
+
+    over = json.loads((tmp_path / "out" / "run.json").read_text())["over_budget"]
+    assert over["budget_s"] == 1e-6 and over["memory_traced"] is False
+    flagged = [o["result_id"] for o in over["attacks"]]
+    assert sorted(flagged) == sorted(
+        f"reidentification:{ref}:k{k}" for ref in ("raw", "protected:none") for k in (3, 5)
+    )
+    runtimes = [o["runtime_s"] for o in over["attacks"]]
+    assert runtimes == sorted(runtimes, reverse=True)  # worst first
+    assert "warning:" in capsys.readouterr().out
+    # nothing is trimmed: results.csv still has one row per metric value
+    rows = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
+    assert len(rows) == len(values)
+
+
+def test_default_budget_is_300s_and_quiet(
+    tmp_path: Path, beijing_maps_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(write_config(tmp_path, base_config(tmp_path, beijing_maps_dir)))
+    over = json.loads((tmp_path / "out" / "run.json").read_text())["over_budget"]
+    assert over == {"budget_s": 300.0, "memory_traced": False, "attacks": []}
+    assert "warning:" not in capsys.readouterr().out
+
+
+def test_non_positive_time_budget_rejected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["metrics"]["attack_time_budget_s"] = 0
+    with pytest.raises(ValueError, match="attack_time_budget_s"):
+        run(write_config(tmp_path, cfg))
+
+
 def test_matrix_and_tradeoff_artifacts_written(tmp_path: Path, beijing_maps_dir: Path) -> None:
     """matrix.csv pivots each family's headline metric (reid at max known_points)."""
     run(write_config(tmp_path, geoind_config(tmp_path, beijing_maps_dir)))
