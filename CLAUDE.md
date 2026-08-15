@@ -6,8 +6,13 @@ doctoral project. This file is the constitution for the repo; read it every sess
 ## Status
 
 **All phases P0–P7 are implemented and merged; RN-LDP-Synth has a working v1
-prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). Next: systematic parameter-sweep
-runs (S4) and follow-up work.**
+prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). The first S4 parameter-sweep run is
+done and partially successful (15–16 Aug 2026): the whole pipeline runs end to end
+on real Geolife at `dataset.max_users: 20` and the analysis notebook draws every
+planned figure, but the run exposed four open points — S4-1 to S4-4 in
+`docs/HANDOFF.md` §1.10. Settle those before running any further sweeps: the
+numbers this campaign produced do not yet carry statistical weight, and one of the
+four is an author's decision the others depend on.**
 Whoever completes a phase updates this line in the same PR.
 
 ## Doc map (read on demand — do not load everything up front)

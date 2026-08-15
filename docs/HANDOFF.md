@@ -49,6 +49,22 @@ odkrita robna vrzel, ki ostaja odprta: `load_results` v `reporting/report.py` i�
 `results/` sami ponovitveni zagoni (`seed<N>/` podmape); zvezek to obide, ker glavno
 tabelo zna zlepiti sam prek `merge_results_tables`.
 
+**[izvedba, 15.–16. avgust 2026] — prvi zagon kampanje S4 na pravem Geolife.** Kampanja je
+prvič tekla na resničnih podatkih (ne na fixturih) pri najnižji stopnji lestvice vzorcev,
+`dataset.max_users: 20`. Celotna pot deluje od konca do konca in analitična plast iz bloka
+zgoraj se je izkazala za uporabno, hkrati pa je zagon razkril **štiri nove vrzeli in eno
+opažanje**. **Te odprte točke je treba urediti, preden kampanja napreduje na višjo stopnjo
+lestvice vzorcev in preden gre katerakoli številka v poročilo** — prvi zagon je torej urejen
+in delno uspešen, ne pa zaključen. Vse skupaj je
+zapisano v novem razdelku **1.10**; tam so tudi natančne izmerjene vrednosti in mesta v
+kodi. Na kratko: iz podatkov po ujemanju na ceste ostane premalo materiala (razdelek 1.10,
+S4-1), zato napad na članstvo meri na osemnajstih kandidatih in ne pove ničesar (S4-2);
+napad na članstvo proti `rn_ldp_synth` presega 300-sekundni proračun po sami zgradbi
+mehanizma in lestvica krčenja iz `docs/RUNNING.md` §7.3 tega ne reši (S4-3); robna vrzel
+`trajguard report` iz bloka zgoraj se je v resnični kampanji pokazala kot blokada
+poročanja, ne kot robni primer (S4-4). **Delo na teh točkah je bilo namenoma odloženo v
+ločeno sejo** — ta blok in razdelek 1.10 sta zapis stanja, ne načrt izvedbe.
+
 **To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
 Prvotno besedilo ni bilo recenzirano; spodnja različica vključuje izid recenzije.
 
@@ -231,6 +247,108 @@ za krčenje obsega so napisana (`834321f`) — protokol z lestvijo krčenja v `d
 §7.3, samodejna oznaka prekoračitev v `run.json` (blok `over_budget`, ključ
 `metrics.attack_time_budget_s`). Odprti ostajata odločitvi o pragovih zadostnosti zaščite
 (§8.2) in o pomenu M3.
+
+### 1.10 Prvi zagon kampanje S4 na pravem Geolife (15.–16. avgust 2026)
+
+Ta razdelek je **zapis stanja po prvem zagonu na resničnih podatkih**, ne načrt. Ničesar od
+spodnjega nisem popravljal: naloga te seje je bila pognati kampanjo in ugotovitve zapisati,
+izvedbo in načrt pa se dogovori v ločeni seji na podlagi tega besedila.
+
+**Kaj je bilo pognano.** Dve novi konfiguraciji, ker `max_users` ni os, ki bi se razširila
+sama iz mreže parametrov, in da originalni konfiguraciji za polni obseg ostaneta nedotaknjeni:
+`config/experiments/geolife_geoind_reid_u20.yaml` (pet semen, 1–5) in
+`config/experiments/geolife_synth_mia_u20.yaml` (tri semena, 1–3). Obe imata
+`dataset.max_users: 20`, svoj `experiment.id` in `output_dir` ter `metrics.memory: false`
+(pravilo R0 iz `docs/RUNNING.md` §7.3: merjenje pomnilniške špice podvoji čas napada, zato
+bi ga primerjava s pragom 300 s morala izključiti; posledica je, da je stolpec
+`peak_memory_mb` v tej kampanji prazen). Razlogi so vpisani kot komentarji v obeh datotekah,
+kot zahteva pravilo R3 o sledljivosti. Zagoni so v `results/geolife_geoind_reid_u20/seed{1..5}/`
+in `results/geolife_synth_mia_u20/seed{1..3}/`, glavna tabela v `reports/results_master.csv`,
+slike v `reports/s4_figures/`, izvedeni zvezek je `notebooks/03_s4_sweep.ipynb`. Nič od tega
+ni v gitu (mape so ignorirane); v delovnem drevesu sta ostali samo novi konfiguraciji in
+izveden zvezek, brez commita.
+
+**Časi za oceno naslednjih stopenj lestvice.** Prvi zagon geoind 811 s (hladen predpomnilnik,
+večina na čiščenje in ujemanje), naslednji štirje po približno 105 s (topel predpomnilnik
+bazena). Vsak zagon napada na članstvo približno 42 minut. Predpomnilnik bazena je vezan tudi
+na `max_users`, zato bo prva stopnja pri 50 uporabnikih spet plačala celotno čiščenje in
+ujemanje.
+
+**S4-1 — po ujemanju na ceste ostane 2,8 odstotka podatkov.** Od 1607 očiščenih trajektorij
+dvajsetih uporabnikov jih prag `map_matching.min_match_score: 0.6` prestane **45**, in te
+pokrivajo samo **devet** uporabnikov (`n_matched`, `n_dropped` in `arms.*.n_gallery_users` v
+`results/geolife_geoind_reid_u20/seed1/run.json`). Vse številke reidentifikacije so torej nad
+galerijo devetih ljudi. Zakaj to ni presenečenje: Geolife vsebuje veliko hoje, kolesarjenja in
+vožnje s podzemno železnico, ki ne sledijo voznemu omrežju, del sledi pa pade zunaj očrtnega
+pravokotnika iz konfiguracije. Zakaj vseeno šteje kot vrzel: pri tako majhnem preživelem
+bazenu nobena od štirih družin nima statistične teže, in ker odstotek preživetja ni odvisen od
+`max_users`, se z višjimi stopnjami lestvice vzorcev **ne bo popravil sam**. Odločitev, ki je
+odprta, je vsebinska in ne tehnična — kaj je populacija, ki jo poročilo meri (samo vozne sledi,
+ali tudi ostale načine prevoza), in šele iz tega sledi, ali se premakne prag ujemanja, tip
+cestnega omrežja pri gradnji zemljevida ali obseg podatkovne množice.
+
+**S4-2 — napad na članstvo meri na osemnajstih kandidatih, od tega treh nečlanih.** V
+`results/geolife_synth_mia_u20/seed1/results.csv` so `n_pool = 18`, `n_members = 15`,
+`n_nonmembers = 3`. Posledici sta dve in obe sta resni: ploščina pod krivuljo (AUC) nad tremi
+negativnimi primeri skoraj ne nosi informacije, `tpr@fpr=0.001` pa **po definiciji ne more**
+razločiti stopnje lažnih alarmov pod 1/3, zato je izmerjena vrednost 0,067 artefakt
+zaokroževanja in ne meritev. To se vidi tudi v intervalih čez semena: spodnja meja pri ε = 8
+je −0,099, kar je znak, da Studentov t interval nad tremi ponovitvami pri teh velikostih ni
+smiseln. Vzrok je sestavljen — S4-1 zmanjša bazen na 45 poti, razrez `train: 0.5, test: 0.2`
+pa iz tega naredi 15 članov proti 3 nečlanom. Odprto je torej, ali je to zgolj posledica S4-1
+in izgine z večjim bazenom, ali pa sestava kandidatnega nabora pri majhnih bazenih potrebuje
+svoje pravilo; presoditi je treba tudi, ali sta pri tako majhnem številu nečlanov obe
+operativni točki iz `fprs` sploh smiselni.
+
+**S4-3 — napad na članstvo proti `rn_ldp_synth` presega proračun po zgradbi mehanizma, ne po
+velikosti vzorca.** Vseh devet klicev (tri veje ε krat tri semena) je trajalo med **755 in 866
+sekundami** proti pragu 300 s, medtem ko je vsak drug napad v kampanji pod 11 sekundami — to
+je razmerje okoli 1 : 1000 in je najbolj vidno na sliki `reports/s4_figures/runtime.png`.
+Izmerjen vzrok: konstruktor `RNLDPSynthGenerator` (`src/trajguard/synthesis/rn_ldp_synth.py`,
+metoda `_calibrate_inflation`, klicana iz `__init__`) umeri faktor napihnjenosti dekodiranja s
+približno 300 Dijkstrovimi iskanji čez celoten graf, kar na zgrajenem pekinškem omrežju
+(35.764 vozlišč, 80.652 povezav) traja **65 sekund na en generator**; napad zgradi
+`n_shadow + 1 = 17` generatorjev na vejo, ker `_train_shadows` kliče `shadow_factory` za vsak
+senčni model posebej. **Bistveno za naslednjo sejo:** lestvica krčenja obsega iz
+`docs/RUNNING.md` §7.3 tega primera ne reši, kar je prvi znani protiprimer njenim pravilom.
+Korak 1 (nižji `max_users`) na to ceno ne vpliva niti za sekundo, ker je umerjanje odvisno
+samo od zemljevida in konfiguracije, ne od podatkov; korak 2 (prepolovitev `n_shadow` na 8) bi
+dal še vedno okoli 400 sekund, torej še vedno čez prag; korak 3 bi pomenil izločitev vseh vej
+`rn_ldp_synth` iz kampanje, kar bi odstranilo prav tisto, kar naj bi kampanja izmerila.
+Odprto je oboje: kaj storiti s samim mehanizmom (podatek, da je umerjanje odvisno izključno od
+javnih struktur, je pri tem ključen, ker pomeni, da se med generatorji istega zemljevida
+podvaja) in ali pravila §7.3 potrebujejo še eno vejo za primere, kjer strošek ni v podatkih.
+
+**S4-4 — `trajguard report` na tej kampanji pade; iz robne vrzeli je postala blokada.** Vrzel
+je bila zabeležena že 15. avgusta v razdelku 0 kot robni primer: `load_results` v
+`src/trajguard/reporting/report.py` išče `run.json` samo neposredno pod `results/<exp>/`, ne
+pa v podmapah `seed<N>/`. V resnični kampanji so **vsi** zagoni ponovitveni, zato ukaz pade z
+`FileNotFoundError` in nedosegljivi ostanejo `report.md`, `risk_matrix.csv` ter
+`metrics_long.csv`/`.parquet` — torej celoten izhod razdelka §8 iz `docs/RUNNING.md`. Zvezek
+`03_s4_sweep.ipynb` to obide, ker `merge_results_tables` išče rekurzivno (`rglob`), tako da je
+`reports/results_master.csv` pravilna in slike nastanejo; manjka pa vse ostalo. Popravka
+nisem izvedel, ker razdelek 0 tega dokumenta zanj izrecno predvideva odločitev avtorja.
+
+**S4-5 (opažanje, morda ne potrebuje kode).** Surova veja in identitetna veja `protected:none`
+dasta v vseh petih semenih popolnoma enake vrednosti, zato je njun interval čez ponovitve
+širine nič (`top1_acc` pri desetih znanih točkah je 0,500 z intervalom [0,500, 0,500]). To ni
+napaka: seme zagona premakne samo šum mehanizma in izbor senčnih podmnožic, napadalčevih
+enakomerno razporejenih znanih točk (`_evenly_spaced` v `attacks/reidentification.py`) pa ne,
+zato pri vejah brez šuma ponovitve nimajo česa premakniti. Vredno je zapisati zato, ker bo
+tabela v poročilu po §7.1 pri teh dveh vrsticah kazala interval brez razpona in bo to videti
+kot napaka, če ni pojasnjeno.
+
+**Kaj kampanja kljub temu pokaže.** Da ne bo videti kot sam neuspeh: cevovod od konca do konca
+teče, vzorci pa so vsebinsko pravilni. Rekonstrukcija pada s šumom (povprečna prostorska napaka
+657 → 92 → 16 metrov pri ε = 0,1 → 1 → 10) in vse tri vrednosti so pod povprečnim premikom šuma
+`2·unit_m/ε`, kar je pričakovano. Sklepanje o domu in službi vrne pri identitetni veji točno
+ničelno napako in stoodstotno lokalizacijo, kar je pravi zdravstveni znak merilne verige.
+Reidentifikacija pade s 0,500 na nezaščitenih na 0,277 pri ε = 10 in na nič pri ε = 1 in
+ε = 0,1, kjer šum uniči vse poti pri ponovnem ujemanju. Pri napadu na članstvo `markov` doseže
+AUC točno 1,000 v vseh treh semenih — strop memorizacije stoji tako, kot mora — `rn_ldp_synth`
+pa je pri 0,585 / 0,556 / 0,578 za ε = 0,5 / 2 / 8, torej blizu naključnega ugibanja; te tri
+vrednosti so ob upoštevanju S4-2 uporabne kvečjemu kot znak, da merilna veriga teče, ne kot
+rezultat.
 
 ---
 
@@ -424,6 +542,16 @@ prekoračitve časovnega proračuna pa so označene v `run.json` s protokolom kr
 omejitvijo cestnega omrežja) ali sistematični parametrski preizkusi (mejnik S4), za
 katere je zajem rezultatov zdaj pripravljen. Izbira je avtorjeva.
 
+**[izvedba, 15.–16. avgust 2026]** Kampanja S4 je bila prvič pognana na pravem Geolife pri
+`max_users: 20` (podrobnosti in izmerjene vrednosti v razdelku **1.10**). S tem se naslednji
+konkreten korak premakne: pred širjenjem kampanje na višje stopnje lestvice vzorcev je treba
+obravnavati štiri vrzeli, ki jih je zagon razkril (S4-1 do S4-4). Med njimi je ena vsebinska
+odločitev avtorja, ki blokira vse ostalo — kaj je populacija, ki jo poročilo meri (S4-1) —
+ker sta S4-2 in deloma tudi statistična teža celotne kampanje njena posledica. S4-3 in S4-4
+sta neodvisna od te odločitve in ju je mogoče obravnavati vzporedno. **Načrt in razrez po
+zahtevkih za združitev nista določena**; nastaneta v seji, ki se te skupine loti, po pravilih
+iz razdelka »Vezni pogoji« (načrtovalni način, razrez pri več kot približno petih datotekah).
+
 ---
 
 ## 3. Kaj sem pričakoval od recenzije — **opravljeno**
@@ -453,6 +581,12 @@ v istem zahtevku za združitev, ne tiho odstopanje od njega.
 Besedilo spodaj je mišljeno za lepljenje v svežo sejo. Prvotni recenzijski prompt je opravil
 svoje (recenzija je vpisana v ta dokument); spodnja različica nadaljuje izvedbo. Če se izkaže
 za koristnega trajno, sodi v `docs/PROMPTS.md`.
+
+**[izvedba, 16. avgust 2026] — prompt spodaj je zastarel.** Nanaša se na korak 1d, ki je
+opravljen (`c24cb48`), in ga puščam samo kot zgled oblike. Seja, ki se loti skupine S4-1 do
+S4-4, naj izhaja iz razdelka **1.10** in iz bloka pri »Naslednji konkreten korak«. Novega
+prompta namenoma ne pišem: naloga te seje je bila kampanjo pognati in ugotovitve zapisati,
+naročilo za nadaljevanje pa oblikuje avtor.
 
 ```
 Preberi CLAUDE.md in docs/HANDOFF.md.

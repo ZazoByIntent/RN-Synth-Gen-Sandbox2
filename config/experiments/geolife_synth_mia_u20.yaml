@@ -1,0 +1,72 @@
+# S4 sweep step: geolife_synth_mia at the 20-user rung of the design §6.4 sample
+# ladder (182 -> 100 -> 50 -> 20). Same arms and attack as the full-scale config;
+# only dataset.max_users and the metrics.memory switch differ.
+#
+# Why 20 users (RUNNING.md §7.3, R2 step 1): first measured point of the S4 campaign.
+# Why memory: false (R0): peak-memory tracing roughly doubles attack time, so the
+# 300 s budget must be judged on untraced runs. peak_memory_mb stays empty here.
+#
+# Cost warning, measured on the full maps/beijing build (35.8k nodes / 80.7k edges):
+# constructing ONE RNLDPSynthGenerator takes ~65 s, because __init__ calibrates the
+# decode inflation factor with ~300 full-graph Dijkstra calls. The attack builds
+# n_shadow + 1 generators per arm, so each rn_ldp_synth arm costs roughly
+# (n_shadow + 1) * 65 s of attack runtime before any scoring happens. That is far
+# over the 300 s budget by construction, not because of the 20-user sample.
+experiment:
+  id: geolife_synth_mia_u20
+  seed: 42                   # run seed: shadow subsets, generator fit noise
+  split_seed: 42             # population seed: user subsample + split; pinned across seeds
+  output_dir: results/geolife_synth_mia_u20
+
+map:
+  source: osm
+  region: beijing            # must equal the Geolife native region (orchestrator enforces)
+  bbox: [116.20, 39.75, 116.55, 40.05]
+  crs: EPSG:32650
+
+dataset:
+  id: geolife
+  path: data/raw/geolife
+  native_region: beijing
+  max_users: 20              # design §6.4 sample ladder: 20/50/100/182
+
+cleaning:
+  max_speed_kmh: 200
+  min_points: 20
+  min_length_m: 500
+  resample_s: 5
+
+map_matching:
+  matcher: leuven
+  k_candidates: 8
+  radius_m: 50
+  gps_error_m: 20
+  min_match_score: 0.6
+
+split:
+  scheme: by_user
+  fractions: {train: 0.5, test: 0.2, shadow: 0.2, attack: 0.1}
+
+privacy_mechanisms: []       # no protected arms here: MIA targets the fitted generators
+
+synthetic_generators:
+  - id: markov               # non-private baseline (memorizes the train split)
+    params: {order: 1}
+  - id: rn_ldp_synth         # LDP prototype (docs/RN_LDP_SYNTH_DESIGN.md): one arm
+    params: {epsilon: [0.5, 2.0, 8.0]}   # per epsilon; same-class shadows share the
+                                         # arm's epsilon; grid/l_max keep v1 defaults
+
+attacks:
+  - type: membership_inference
+    target_scope: [synthetic]
+    attacker: {n_shadow: 16, subsample: 0.5}
+    fprs: [0.001, 0.01]      # Carlini low-FPR operating points (design §6.2)
+
+metrics:
+  privacy: []                # MIA brings its own family metrics (auc, tpr@fpr=...)
+  bootstrap: {n: 1000, ci: 0.95}   # unused by MIA rows: score-based, CI across seeds
+  memory: false              # see the R0 note above
+  attack_time_budget_s: 300  # report §6.6, X = 300 s per attack invocation
+
+reporting:
+  export: [csv]
