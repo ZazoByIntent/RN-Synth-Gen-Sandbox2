@@ -36,6 +36,19 @@ Naslednje delo je A3 iz vala 3 ali sistematični parametrski preizkusi (mejnik S
 besedilo spodaj, je popravek vpisan na mestu in označen z **[izvedba]** (po istem vzorcu
 kot **[recenzija]**).
 
+**[izvedba, 15. avgust 2026] — analitična plast za mejnik S4.** Nov modul
+`src/trajguard/reporting/results_io.py` bere enotno tabelo (`results.csv` /
+`results_master.csv`) nazaj v `ResultRow` vrstice in združuje ponovitve čez semena
+(povprečje + Studentov t interval; nikoli pomešan z bootstrap intervalom znotraj zagona);
+nov zvezek `notebooks/03_s4_sweep.ipynb` nad tem riše štiri načrtovane grafe čez ponovitve
+in pregleduje prekoračitve 300 s proračuna (`docs/RUNNING.md` §3.2). **Glava stolpcev
+`results.csv` je s tem vmesnik s štirimi odjemalci — pred kakršnokoli spremembo sheme
+preberi opozorilo v `docs/REZULTATI_SHEMA.md` (razdelek »Odjemalci sheme«).** Ob izvedbi
+odkrita robna vrzel, ki ostaja odprta: `load_results` v `reporting/report.py` išče
+`run.json` samo neposredno pod `results/<exp>/`, zato `trajguard report` pade, kadar so v
+`results/` sami ponovitveni zagoni (`seed<N>/` podmape); zvezek to obide, ker glavno
+tabelo zna zlepiti sam prek `merge_results_tables`.
+
 **To je predlog, ne naročilo.** Nastal je v eni sami seji, iz ene same interpretacije poročila.
 Prvotno besedilo ni bilo recenzirano; spodnja različica vključuje izid recenzije.
 

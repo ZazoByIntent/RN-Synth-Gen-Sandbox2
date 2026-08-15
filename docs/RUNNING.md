@@ -145,6 +145,38 @@ and at the end a small orchestrated run whose `tradeoff.png` is displayed inline
 Note that no automation executes the notebooks (CI runs only `ruff`, `mypy`,
 `pytest`), so re-run them manually after changes that alter their outputs.
 
+## 3.2 S4 sweep-analysis notebook (reads results, runs nothing)
+
+`notebooks/03_s4_sweep.ipynb` is the analysis layer for the S4 campaign of
+systematic runs: it reads `reports/results_master.csv` (or concatenates the
+per-run `results.csv` tables itself when the master does not exist yet),
+aggregates repetitions of the same experiment across seeds via
+`trajguard.reporting.results_io` (mean + Student-t 95% CI, the §7.1 across-seed
+kind — never mixed with within-run bootstrap intervals), draws the four planned
+report figures into `reports/s4_figures/` and inline, and lists every attack
+invocation that exceeded the 300 s budget together with the §7.3 reduction
+ladder. It is strictly a reader: it never launches experiments and never writes
+under `results/`.
+
+Run experiments first (§6–§7.2), then execute the notebook headlessly, or open
+it interactively like the other notebooks (§3):
+
+```sh
+uv run jupyter nbconvert --to notebook --execute --inplace notebooks/03_s4_sweep.ipynb
+```
+
+**Expected outcome:** every cell executes; with only fixture-scale runs under
+`results/` you get the same statistically meaningless numbers as §5 — the point
+is the plumbing. With no runs at all, the first cell stops with a clear
+"run an experiment first" error.
+
+**Stability warning:** the notebook and `src/trajguard/reporting/results_io.py`
+are pinned to the results-table header (`RESULTS_COLUMNS`,
+`docs/REZULTATI_SHEMA.md`). A table with a foreign header fails loudly instead
+of misaligning columns — so any schema change must update the schema module,
+the doc, `results_io.py`, and this notebook in the same PR. CI does not execute
+notebooks, so refresh this one manually after new runs.
+
 ## 4. Quick visual recipes
 
 Two small standalone scripts for common "let me just look at it" needs. Both write a

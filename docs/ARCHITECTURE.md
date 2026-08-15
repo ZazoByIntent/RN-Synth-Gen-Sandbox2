@@ -190,9 +190,9 @@ trajguard/
 │   ├── attacks/             # Attack + 4 attack families
 │   ├── evaluation/          # Metric + metrics, bootstrap CI
 │   ├── experiments/         # orchestrator, registry, seeding, versioning
-│   ├── reporting/           # tables, plots, report template
+│   ├── reporting/           # tables, plots, results-table schema + read-back I/O
 │   └── datamodel/           # frozen dataclass entities
-├── notebooks/               # sanity-check visualisations
+├── notebooks/               # sanity checks, pipeline walkthrough, S4 analysis
 ├── results/                 # experiment outputs
 ├── reports/                 # generated reports
 ├── tests/                   # fixture-based; runs in seconds, no network

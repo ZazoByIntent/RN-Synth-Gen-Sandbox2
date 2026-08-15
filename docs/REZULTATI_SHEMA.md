@@ -142,5 +142,23 @@ Z O6 (5. avgust 2026) je dodan stolpec `peak_memory_mb`: orkestrator meri vršno
 pomnilnika vsakega zagona napada s `tracemalloc` (standardna knjižnica, brez novih
 odvisnosti), z izklopom prek `metrics.memory: false`.
 
+## Odjemalci sheme — glava stolpcev je vmesnik, ne podrobnost
+
+Na točno to glavo (`RESULTS_COLUMNS`, vrstni red in imena stolpcev) so vezani štirje
+odjemalci; **preimenovanje, brisanje ali premik stolpca je zlom vmesnika** in zahteva
+posodobitev vseh naštetih v istem zahtevku za združitev:
+
+- `src/trajguard/reporting/results_schema.py` — zapisovalec (`write_results_csv`);
+- `src/trajguard/reporting/report.py` — `merge_results_tables` (glavna tabela; tujo glavo
+  glasno zavrne);
+- `src/trajguard/reporting/results_io.py` — bralnik nazaj v `ResultRow` in združevanje čez
+  semena (`read_results_csv`, `aggregate_over_seeds`; tujo glavo glasno zavrne);
+- `notebooks/03_s4_sweep.ipynb` — analiza kampanje S4 gradi na `results_io` in na teh
+  stolpcih (celice za uvoz, združevanje in grafe).
+
+Varovala: test `tests/test_results_schema.py` sinhronizira kodo s tem dokumentom, testi v
+`tests/test_results_io.py` pa krožno pot zapis → branje. *Dodajanje* novega stolpca na konec
+je varno šele, ko se v istem PR dopolnijo shema, oba modula, ta dokument in po potrebi zvezek.
+
 Odprto ostaja dvoje neobveznega oziroma kasnejšega: `.parquet` zrcalo glavne tabele in
 stolpca `exp_id`/`config_hash` v `repetitions.csv`.
