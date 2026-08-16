@@ -16,8 +16,11 @@ ob spremembi sheme se popravita oba, v istem zahtevku za združitev.
 3. **Obseg** — poleg metrik napadov tudi utility metrike (kot vrstice), statistika veje
    (kot stolpci) in čas izvajanja.
 4. **Vrstice po semenih** — glavna tabela vsebuje surove vrednosti enega zagona (z bootstrap
-   intervalom znotraj zagona); povprečja in intervale čez semena še naprej daje ločena
-   `repetitions.csv`, da se dve vrsti intervalov ne moreta pomešati.
+   intervalom znotraj zagona); povprečja in intervale čez semena dajeta `repetitions.csv` in —
+   od popravka S4-4 (avgust 2026) — tudi `trajguard report` (`report.md`, `risk_matrix.csv`,
+   `metrics_long.*`), ki ponovitvene zagone `seed<N>/` združi v eno vrstico na roko poskusa
+   z istim Studentovim t intervalom. Ločitev obeh vrst intervalov zdaj zagotavlja sloj
+   (glavna tabela = po semenih, poročilo = čez semena), ne več datoteka.
 
 ## Datoteke
 
@@ -90,7 +93,7 @@ Ti stolpci se ob implementaciji polnijo iz strukturiranih specifikacij (`AttackS
 | `n_gallery_users` | celo/prazno | število uporabnikov v galeriji | `run.json` `arms` |
 | `n_probes` | celo/prazno | število sond (reidentifikacija) | `run.json` `arms` |
 | `n_rematch_dropped` | celo/prazno | poti, izgubljene pri ponovnem ujemanju izdane veje | `run.json` `arms` |
-| `n_members`, `n_nonmembers` | celo/prazno | MIA: število članov in ne-članov — brez tega se `tpr@fpr` ne da brati (spodnja meja FPR je `1/n_nonmembers`) | novo (iz `_mia_pool`) |
+| `n_members`, `n_nonmembers` | celo/prazno | MIA: število članov in ne-članov — brez tega se `tpr@fpr` ne da brati (spodnja meja FPR je `1/n_nonmembers`). Pravilo veljavnosti (S4-2): točka `tpr@fpr=f` potrebuje vsaj `1/f` ne-članov (meja šteje kot veljavna); pod tem pragom napad zapiše NaN (prazno celico) z opozorilom v `run.json`, `trajguard report` pa shranjene starejše vrednosti zamolči in opozori v razdelku Warnings | novo (iz `_mia_pool`) |
 | `spent_budget` | število/prazno | dejansko porabljeni ε mehanizma | `run.json` `arms` |
 
 ### Čas izvajanja in pomnilnik
@@ -150,7 +153,8 @@ posodobitev vseh naštetih v istem zahtevku za združitev:
 
 - `src/trajguard/reporting/results_schema.py` — zapisovalec (`write_results_csv`);
 - `src/trajguard/reporting/report.py` — `merge_results_tables` (glavna tabela; tujo glavo
-  glasno zavrne);
+  glasno zavrne) in od popravka S4-4 tudi `load_results`, ki pri ponovitvenih zagonih bere
+  `seed<N>/results.csv` prek `results_io`;
 - `src/trajguard/reporting/results_io.py` — bralnik nazaj v `ResultRow` in združevanje čez
   semena (`read_results_csv`, `aggregate_over_seeds`; tujo glavo glasno zavrne);
 - `notebooks/03_s4_sweep.ipynb` — analiza kampanje S4 gradi na `results_io` in na teh

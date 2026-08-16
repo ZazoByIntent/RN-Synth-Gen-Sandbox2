@@ -419,6 +419,15 @@ interval reflects variance *between* repetitions; the bootstrap interval inside
 each seed's `metrics.csv` reflects resampling uncertainty *within* one run — do
 not mix the two in report tables.
 
+**Expected zero-width intervals that are not a bug:** the `raw` arm and the
+identity arm `protected:none` produce *identical* values in every seed, so their
+across-seed interval has width zero (e.g. `top1_acc = 0.500 [0.500, 0.500]`).
+The run seed only redraws the mechanism noise and the shadow subsets; the
+attacker's known points are evenly spaced (`_evenly_spaced` in
+`attacks/reidentification.py`), not sampled. An arm without noise therefore has
+no source of randomness left, and a degenerate interval is the correct answer,
+not a missing one (first S4 campaign, HANDOFF S4-5).
+
 ## 7.2 Experiment: membership inference against synthetic generators
 
 ```sh
@@ -489,7 +498,24 @@ The rules, applied one step at a time (re-measure after each step):
 uv run trajguard report
 ```
 
-Aggregates everything under `results/` into `reports/`.
+Aggregates everything under `results/` into `reports/`. Both layouts are
+discovered: a single run at `results/<exp_id>/run.json` and a repetition
+experiment at `results/<exp_id>/seed<N>/run.json` (mixing the two inside one
+experiment directory is a loud error). A repetition experiment is folded into
+**one row per experiment arm**: the value is the across-seed mean and the CI the
+Student-t 95% interval — the same statistics as `repetitions.csv` and the
+`03_s4_sweep.ipynb` notebook, computed from the per-seed `results.csv` files.
+Consequently the CIs in `metrics_long.*` mean different things by layout: the
+within-run bootstrap interval for a single run, the across-seed interval for a
+repetition experiment. The raw per-seed rows always remain available in
+`results_master.csv`.
+
+The report also enforces the `tpr@fpr` validity rule (HANDOFF S4-2): the
+operating point needs at least `1/fpr` non-members (the boundary counts as
+valid). New runs already record NaN plus a `run.json` warning for unresolvable
+points; stored values from older runs are suppressed at report time. Suppressed
+cells render as "–"/blank, and every suppression is listed in the report's
+**Warnings** section together with warnings carried in `run.json`.
 
 **Expected outcome:** the line `report: reports/report.md`, plus `metrics_long.csv`,
 `metrics_long.parquet`, `risk_matrix.csv`, `results_master.csv` (every run's

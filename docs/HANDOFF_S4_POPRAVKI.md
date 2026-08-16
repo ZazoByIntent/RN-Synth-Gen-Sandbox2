@@ -124,7 +124,11 @@ En PR = en poseg; vsaka seja začne v načrtovalnem načinu (pravila `CLAUDE.md`
 - **PR 1 — poročilo in varovalo (neodvisen, takoj):** popravek S4-4; varovalo
   `NaN` + opozorilo iz S4-2; razširitev `fprs` na `{0.001, 0.01, 0.1}` v
   konfiguracijah MIA; odstavek S4-5 v dokumentaciji rezultatov. Testi proti fixturam
-  za rekurzivno odkrivanje, združevanje in varovalo.
+  za rekurzivno odkrivanje, združevanje in varovalo. **Izvedeno 16. avgusta 2026**
+  (veja `claude/s4-pr1-report-aggregation-mia-guard`); poleg dogovorjenega varovala
+  ob izračunu poročilo shranjene neveljavne vrednosti `tpr@fpr` iz starejših zagonov
+  zamolči še retroaktivno (isti predikat) in jih izpiše v razdelku Warnings, zato
+  `trajguard report` že deluje nad rezultati prvega pogona.
 - **PR 2 — mehanizem in pravila (neodvisen, takoj):** predpomnjenje umerjanja
   (S4-3) s testom determinističnosti (dva generatorja istega zemljevida delita
   vrednost; različna parametra je ne delita); korak 0 v `docs/RUNNING.md` §7.3.
