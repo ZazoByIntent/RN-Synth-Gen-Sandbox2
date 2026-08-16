@@ -479,6 +479,16 @@ The rules, applied one step at a time (re-measure after each step):
 - **R1 — the run stands.** An over-budget run stays in `results/` and in the
   master table; reduction applies to future runs only.
 - **R2 — the reduction ladder.**
+  0. **Diagnose before reducing:** check that the over-budget cost depends on
+     the data at all — compare `attack_runtime_s` across runs with different
+     `dataset.max_users` (or one cheap re-run at a lower step). If `max_users`
+     does not move the cost, the cause sits in how the mechanism or attack is
+     built, the fix belongs there, and the ladder below does not apply to it.
+     First known counterexample: HANDOFF S4-3 — the `rn_ldp_synth` constructor
+     calibrated its decode-inflation factor from the map and config alone
+     (~65 s per generator, 17 generators per MIA arm), so no `max_users` step
+     could touch the cost; the fix was caching the calibration result across
+     generators, not reducing scope.
   1. Reduce `dataset.max_users` one step down the design §6.4 sample ladder:
      182 → 100 → 50 → 20.
   2. If still over budget at 20 users, turn the family's own knob:

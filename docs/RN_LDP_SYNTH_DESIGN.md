@@ -142,7 +142,10 @@ Entering a zone lands away from the boundary to the next one, so a k-step zone w
 than k projected zone transitions. The stretch factor is a property of the **public** structures and the
 decoding procedure alone, so it is measured once at construction: walks sampled from the *uniform* kernel
 with a fixed public seed are decoded and re-projected; c = mean(projected transitions / walk steps),
-floored at 1. Sampled length targets are divided by c before walking.
+floored at 1. Sampled length targets are divided by c before walking. Because c is deterministic in
+(map, n_rows, n_cols, l_max) — fixed public seed, uniform kernels, no private inputs — it is measured
+once per such combination and shared across generator instances through a process-wide cache
+(HANDOFF S4-3); the shared value is bit-identical to an independent measurement.
 
 Measured on `beijing_fixture` (183 nodes / 388 edges, 10×10 grid → 59 zones, 178 arcs): c = 2.15;
 with calibration the synthetic population's mean zone-transition count tracks the training population at

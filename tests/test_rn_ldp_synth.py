@@ -10,6 +10,7 @@ import pytest
 from trajguard.datamodel import CleanTrajectory, MatchedTrajectory
 from trajguard.maps.base import RoadNetwork
 from trajguard.representation import TrajectoryView
+from trajguard.synthesis import rn_ldp_synth
 from trajguard.synthesis.rn_ldp_synth import RNLDPSynthGenerator
 
 MAP_ID = "osm_beijing_fixture"
@@ -259,6 +260,88 @@ def test_zone_rep_weights_are_valid_distributions(gen: RNLDPSynthGenerator) -> N
         assert len(reps) == len(weights)
         assert np.all(np.isfinite(weights))
         assert float(weights.sum()) == pytest.approx(1.0)
+
+
+def _fresh_inflation_cache(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    """Isolate the module cache and count real _calibrate_inflation invocations."""
+    monkeypatch.setattr(rn_ldp_synth, "_INFLATION_CACHE", {})
+    calls = {"n": 0}
+    original = RNLDPSynthGenerator._calibrate_inflation
+
+    def counted(self: RNLDPSynthGenerator) -> float:
+        calls["n"] += 1
+        return original(self)
+
+    monkeypatch.setattr(RNLDPSynthGenerator, "_calibrate_inflation", counted)
+    return calls
+
+
+def _scaled_network(network: RoadNetwork) -> RoadNetwork:
+    """A copy of the network with every edge length doubled (same topology)."""
+    edges = network.edges.copy()
+    edges["length_m"] = edges["length_m"] * 2.0
+    graph = network.graph.copy()
+    for _u, _v, _k, data in graph.edges(keys=True, data=True):
+        data["length"] = float(data.get("length", 0.0)) * 2.0
+    return RoadNetwork(
+        graph=graph, nodes=network.nodes, edges=edges, region=network.region, crs=network.crs
+    )
+
+
+def test_inflation_shared_and_calibrated_once_per_map_and_params(
+    fixture_network: RoadNetwork, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same map + same calibration params -> one calibration, shared factor (S4-3)."""
+    calls = _fresh_inflation_cache(monkeypatch)
+    g1 = RNLDPSynthGenerator(fixture_network, epsilon=1.0, n_rows=8, n_cols=8, l_max=8, seed=1)
+    # Differing epsilon/seed must still share: they never enter the calibration.
+    g2 = RNLDPSynthGenerator(fixture_network, epsilon=4.0, n_rows=8, n_cols=8, l_max=8, seed=2)
+    assert calls["n"] == 1
+    assert g1._inflation == g2._inflation
+    assert len(rn_ldp_synth._INFLATION_CACHE) == 1
+
+
+def test_inflation_not_shared_across_params_or_maps(
+    fixture_network: RoadNetwork, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any calibration-relevant input change (l_max, grid, map) recalibrates."""
+    calls = _fresh_inflation_cache(monkeypatch)
+    RNLDPSynthGenerator(fixture_network, n_rows=8, n_cols=8, l_max=8)
+    RNLDPSynthGenerator(fixture_network, n_rows=8, n_cols=8, l_max=6)
+    RNLDPSynthGenerator(fixture_network, n_rows=6, n_cols=8, l_max=8)
+    RNLDPSynthGenerator(_scaled_network(fixture_network), n_rows=8, n_cols=8, l_max=8)
+    assert calls["n"] == 4
+    assert len(rn_ldp_synth._INFLATION_CACHE) == 4
+
+
+def test_network_hash_is_content_based(fixture_network: RoadNetwork) -> None:
+    """Equal content -> equal hash; changed edge lengths -> different hash."""
+    identical = RoadNetwork(
+        graph=fixture_network.graph.copy(),
+        nodes=fixture_network.nodes.copy(),
+        edges=fixture_network.edges.copy(),
+        region=fixture_network.region,
+        crs=fixture_network.crs,
+    )
+    assert rn_ldp_synth._network_hash(identical) == rn_ldp_synth._network_hash(fixture_network)
+    assert rn_ldp_synth._network_hash(_scaled_network(fixture_network)) != (
+        rn_ldp_synth._network_hash(fixture_network)
+    )
+
+
+def test_cached_inflation_equals_independent_computation(
+    fixture_network: RoadNetwork, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cache hit hands out exactly the value an independent calibration produces."""
+    calls = _fresh_inflation_cache(monkeypatch)
+    first = RNLDPSynthGenerator(fixture_network, n_rows=8, n_cols=8, l_max=8)._inflation
+    rn_ldp_synth._INFLATION_CACHE.clear()
+    independent = RNLDPSynthGenerator(fixture_network, n_rows=8, n_cols=8, l_max=8)._inflation
+    assert calls["n"] == 2
+    assert first == independent
+    cached = RNLDPSynthGenerator(fixture_network, n_rows=8, n_cols=8, l_max=8)._inflation
+    assert calls["n"] == 2  # served from the warm cache, no third calibration
+    assert cached == independent
 
 
 def test_constructor_validation(fixture_network: RoadNetwork) -> None:
