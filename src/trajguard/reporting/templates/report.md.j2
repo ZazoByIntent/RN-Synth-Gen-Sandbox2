@@ -4,16 +4,30 @@ Generated {{ generated_at }} from `{{ results_dir }}` — {{ runs|length }} expe
 
 ## Runs
 
-| experiment | pipeline | commit | seed | created | matched | dropped | split | bootstrap | runtime |
+| experiment | pipeline | commit | seeds | created | matched | dropped | split | bootstrap | runtime |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 {% for run in runs %}
-| {{ run.exp_id }} | `{{ run.config_hash }}` | {{ ("`" ~ run.git_commit[:10] ~ "`") if run.git_commit else "–" }} | {{ run.seed }} | {{ run.created_at }} | {{ run.n_matched }} | {{ run.n_dropped }} | {{ run.split_label }} | {{ run.bootstrap_label }} | {{ "%.1f"|format(run.runtime_s) }} s |
+| {{ run.exp_id }} | `{{ run.config_hash }}` | {{ ("`" ~ run.git_commit[:10] ~ "`") if run.git_commit else "–" }} | {{ run.seed_label }} | {{ run.created_at }} | {{ run.n_matched }} | {{ run.n_dropped }} | {{ run.split_label }} | {{ run.bootstrap_label }} | {{ "%.1f"|format(run.runtime_s) }} s |
 {% endfor %}
 
+{% if runs | selectattr("warnings") | list %}
+## Warnings
+
+Metric values suppressed or recorded as NaN because the data cannot support them.
+
+{% for run in runs %}
+{% for w in run.warnings %}
+- `{{ run.exp_id }}`: {{ w }}
+{% endfor %}
+{% endfor %}
+
+{% endif %}
 ## Risk matrix
 
 One row per released arm, one column per attack family. Each cell is the family's
-headline metric at the attacker's largest `known_points` (`@k`), with its bootstrap CI.
+headline metric at the attacker's largest `known_points` (`@k`) with its CI: the
+within-run bootstrap interval for a single run, the Student-t 95% interval across
+seeds for an aggregated repetition experiment.
 Higher means more risk, except metrics named `*_m` (errors in metres), where a lower
 error means a more successful attack.
 

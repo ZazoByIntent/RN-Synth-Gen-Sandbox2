@@ -2,6 +2,7 @@
 
 import csv
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from test_orchestrator import GEOIND_REF, geoind_config, write_config
+from trajguard.datamodel import MetricValue
 from trajguard.experiments.orchestrator import run
 from trajguard.reporting.report import (
     export_tables,
@@ -17,6 +19,7 @@ from trajguard.reporting.report import (
     load_results,
     risk_matrix,
 )
+from trajguard.reporting.results_schema import ResultRow, write_results_csv
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -304,9 +307,8 @@ def test_report_from_real_orchestrator_run(tmp_path: Path, beijing_maps_dir: Pat
 
 
 def test_master_table_merges_runs_and_rejects_mixed_schemas(tmp_path: Path) -> None:
-    from trajguard.datamodel import MetricValue
     from trajguard.reporting.report import merge_results_tables
-    from trajguard.reporting.results_schema import RESULTS_COLUMNS, ResultRow, write_results_csv
+    from trajguard.reporting.results_schema import RESULTS_COLUMNS
 
     def one_run(out: Path, exp_id: str) -> None:
         out.mkdir(parents=True)
@@ -348,3 +350,211 @@ def test_master_table_merges_runs_and_rejects_mixed_schemas(tmp_path: Path) -> N
     (bad / "results.csv").write_text("foo,bar\n1,2\n")
     with pytest.raises(ValueError, match="schema"):
         merge_results_tables(tmp_path / "results", out_dir)
+
+
+# --- seed<N>/ repetition layout (S4-4) --------------------------------------------
+
+
+REID_RAW = "reidentification:raw:k10"
+MIA_ID = "membership_inference:synthetic:markov:order=1"
+
+
+def seed_run_record(
+    exp_id: str, seed: int, metrics: list[dict[str, Any]], config_hash: str = "hash-a"
+) -> dict[str, Any]:
+    record = run_record(exp_id, metrics, config_hash=config_hash)
+    record["seed"] = seed
+    return record
+
+
+def write_seed_run(root: Path, record: dict[str, Any], rows: list[ResultRow]) -> Path:
+    """One seed<N>/ repetition run: run.json plus the matching results.csv."""
+    seed_dir = root / record["exp_id"] / f"seed{record['seed']}"
+    seed_dir.mkdir(parents=True)
+    (seed_dir / "run.json").write_text(json.dumps(record))
+    provenance = {
+        "exp_id": record["exp_id"],
+        "config_hash": record["config_hash"],
+        "git_commit": record["git_commit"],
+        "seed": record["seed"],
+        "split_seed": 1,
+        "max_users": None,
+        "created_at": record["created_at"],
+    }
+    write_results_csv(seed_dir / "results.csv", provenance, rows, run_runtime_s=1.0)
+    return seed_dir
+
+
+def reid_raw_row(value: float) -> ResultRow:
+    mv = MetricValue(f"{REID_RAW}:top1_acc", REID_RAW, "top1_acc", value, None, None, None)
+    return ResultRow(
+        value=mv,
+        family="reidentification",
+        scope="raw",
+        arm_id="",
+        target_ref="raw",
+        known_points=10,
+    )
+
+
+def mia_row(name: str, value: float, n_nonmembers: int = 3) -> ResultRow:
+    mv = MetricValue(f"{MIA_ID}:{name}", MIA_ID, name, value, None, None, None)
+    return ResultRow(
+        value=mv,
+        family="membership_inference",
+        scope="synthetic",
+        arm_id="markov",
+        target_ref="synthetic:markov:order=1",
+        n_members=15,
+        n_nonmembers=n_nonmembers,
+    )
+
+
+def test_load_results_aggregates_seed_layout(tmp_path: Path) -> None:
+    """Three seed runs fold into one RunInfo: mean value + Student-t 95% CI per arm."""
+    root = tmp_path / "results"
+    for seed, value in [(1, 0.4), (2, 0.5), (3, 0.6)]:
+        record = seed_run_record("reid_rep", seed, [metric(REID_RAW, "top1_acc", value)])
+        write_seed_run(root, record, [reid_raw_row(value)])
+    (run_info,) = load_results(root)
+    assert run_info.seeds == (1, 2, 3)
+    assert run_info.seed_label == "1, 2, 3"
+    (row,) = run_info.rows  # one row per (arm, metric), not one per seed
+    assert row.attack == "reidentification" and row.target == "raw" and row.known_points == 10
+    assert row.value == pytest.approx(0.5)
+    half = 4.303 * 0.1 / math.sqrt(3)  # t(df=2) * std(ddof=1) / sqrt(n)
+    assert row.ci_low == pytest.approx(0.5 - half)
+    assert row.ci_high == pytest.approx(0.5 + half)
+
+
+def test_load_results_mixes_flat_and_seed_experiments(tmp_path: Path) -> None:
+    root = write_results(tmp_path, [baseline_record()])
+    for seed, value in [(1, 0.4), (2, 0.6)]:
+        record = seed_run_record("reid_rep", seed, [metric(REID_RAW, "top1_acc", value)])
+        write_seed_run(root, record, [reid_raw_row(value)])
+    runs = {r.exp_id: r for r in load_results(root)}
+    assert set(runs) == {"reid_baseline", "reid_rep"}
+    assert runs["reid_baseline"].seeds == (42,)  # flat runs load unchanged
+    assert runs["reid_rep"].rows[0].value == pytest.approx(0.5)
+
+
+def test_mixed_layouts_in_one_experiment_dir_rejected(tmp_path: Path) -> None:
+    root = write_results(tmp_path, [baseline_record()])
+    record = seed_run_record("reid_baseline", 1, [metric(REID_RAW, "top1_acc", 0.4)])
+    write_seed_run(root, record, [reid_raw_row(0.4)])
+    with pytest.raises(ValueError, match="ambiguous"):
+        load_results(root)
+
+
+def test_seed_run_without_results_csv_rejected(tmp_path: Path) -> None:
+    root = tmp_path / "results"
+    record = seed_run_record("reid_rep", 1, [metric(REID_RAW, "top1_acc", 0.4)])
+    seed_dir = write_seed_run(root, record, [reid_raw_row(0.4)])
+    (seed_dir / "results.csv").unlink()
+    with pytest.raises(ValueError, match="results.csv"):
+        load_results(root)
+
+
+def test_seed_runs_disagreeing_on_provenance_rejected(tmp_path: Path) -> None:
+    root = tmp_path / "results"
+    a = seed_run_record("reid_rep", 1, [metric(REID_RAW, "top1_acc", 0.4)])
+    b = seed_run_record("reid_rep", 2, [metric(REID_RAW, "top1_acc", 0.5)], config_hash="hash-b")
+    write_seed_run(root, a, [reid_raw_row(0.4)])
+    write_seed_run(root, b, [reid_raw_row(0.5)])
+    with pytest.raises(ValueError, match="config_hash"):
+        load_results(root)
+
+
+def test_generate_report_masks_stored_unmeasurable_tpr(tmp_path: Path) -> None:
+    """Retro-mask (S4-2): a stored artifact tpr@fpr survives in results.csv from an old
+    campaign; the report must suppress it with a warning while auc stays intact."""
+    root = tmp_path / "results"
+    for seed, auc in [(1, 0.60), (2, 0.62), (3, 0.61)]:
+        record = seed_run_record(
+            "mia_rep",
+            seed,
+            [metric(MIA_ID, "auc", auc), metric(MIA_ID, "tpr@fpr=0.001", 0.067)],
+        )
+        write_seed_run(root, record, [mia_row("auc", auc), mia_row("tpr@fpr=0.001", 0.067)])
+    out = tmp_path / "reports"
+    text = generate_report(root, out).read_text()
+
+    assert "## Warnings" in text
+    assert "tpr@fpr=0.001 needs >= 1000 non-members, runs have 3" in text
+    with (out / "metrics_long.csv").open() as fh:
+        rows = {r["metric"]: r for r in csv.DictReader(fh)}
+    assert rows["tpr@fpr=0.001"]["value"] == ""  # suppressed, not 0.067
+    assert float(rows["auc"]["value"]) == pytest.approx(0.61)
+    # the MIA headline metric is auc, so the risk matrix keeps a finite cell
+    with (out / "risk_matrix.csv").open() as fh:
+        (matrix_row,) = list(csv.DictReader(fh))
+    assert float(matrix_row["membership_inference:auc"]) == pytest.approx(0.61)
+
+
+def test_flat_run_json_warnings_surface_in_report(tmp_path: Path) -> None:
+    record = baseline_record()
+    record["warnings"] = [f"{MIA_ID}: tpr@fpr=0.1 needs >= 10 non-members, run has 4"]
+    root = write_results(tmp_path, [record])
+    text = generate_report(root, tmp_path / "reports").read_text()
+    assert "## Warnings" in text
+    assert "needs >= 10 non-members, run has 4" in text
+
+
+def test_seeded_experiment_gets_one_tradeoff_plot(tmp_path: Path) -> None:
+    """Aggregation leaves one RunInfo per experiment, so seed runs cannot collide on
+    the tradeoff_<exp_id>.png filename."""
+    eps2 = "protected:geo_indistinguishability:epsilon=2.0"
+
+    def rows_for(value: float) -> list[ResultRow]:
+        reid = MetricValue(
+            f"reidentification:{eps2}:k10:top1_acc",
+            f"reidentification:{eps2}:k10",
+            "top1_acc",
+            value,
+            None,
+            None,
+            None,
+        )
+        util = MetricValue(
+            f"utility:{eps2}:cell_js_divergence",
+            f"utility:{eps2}",
+            "cell_js_divergence",
+            0.4,
+            None,
+            None,
+            None,
+        )
+        return [
+            ResultRow(
+                value=reid,
+                family="reidentification",
+                scope="protected",
+                arm_id="geo_indistinguishability",
+                target_ref=eps2,
+                epsilon=2.0,
+                known_points=10,
+            ),
+            ResultRow(
+                value=util,
+                family="utility",
+                scope="protected",
+                arm_id="geo_indistinguishability",
+                target_ref=eps2,
+                epsilon=2.0,
+            ),
+        ]
+
+    root = tmp_path / "results"
+    for seed, value in [(1, 0.2), (2, 0.3)]:
+        record = seed_run_record(
+            "geoind_rep",
+            seed,
+            [
+                metric(f"reidentification:{eps2}:k10", "top1_acc", value),
+                metric(f"utility:{eps2}", "cell_js_divergence", 0.4),
+            ],
+        )
+        write_seed_run(root, record, rows_for(value))
+    out = tmp_path / "reports"
+    generate_report(root, out)
+    assert [p.name for p in sorted(out.glob("tradeoff_*.png"))] == ["tradeoff_geoind_rep.png"]

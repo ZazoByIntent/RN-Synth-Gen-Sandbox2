@@ -5,7 +5,7 @@ import json
 import math
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,8 +14,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from jinja2 import Environment, PackageLoader
 
+from trajguard.evaluation.roc import tpr_at_fpr_measurable
 from trajguard.reporting.plots import headline_metric
-from trajguard.reporting.results_schema import RESULTS_COLUMNS
+from trajguard.reporting.results_io import aggregate_over_seeds, read_results_csv
+from trajguard.reporting.results_schema import RESULTS_COLUMNS, ResultRow
 from trajguard.reporting.tradeoff import TradeoffPoint, plot_tradeoff
 
 _TRADEOFF_PRIVACY = "top1_acc"
@@ -46,12 +48,16 @@ class MetricRow:
 
 @dataclass(frozen=True, slots=True)
 class RunInfo:
-    """Provenance, arm stats, and parsed metric rows of one experiment run."""
+    """Provenance, arm stats, and parsed metric rows of one experiment.
+
+    A flat run holds one seed; a repetition experiment (seed<N>/ layout) is folded
+    into a single RunInfo whose rows carry across-seed means with Student-t CIs.
+    """
 
     exp_id: str
     config_hash: str
     git_commit: str
-    seed: int
+    seeds: tuple[int, ...]
     created_at: str
     n_matched: int
     n_dropped: int
@@ -61,6 +67,12 @@ class RunInfo:
     bootstrap_ci: float | None
     arms: tuple[tuple[str, dict[str, Any]], ...]
     rows: tuple[MetricRow, ...]
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def seed_label(self) -> str:
+        """The run's seed, or the comma-separated seed list of an aggregated experiment."""
+        return ", ".join(str(s) for s in self.seeds)
 
     @property
     def split_label(self) -> str:
@@ -176,7 +188,7 @@ def _load_run(path: Path) -> RunInfo:
             exp_id=exp_id,
             config_hash=str(data.get("config_hash", "")),
             git_commit=str(data.get("git_commit", "")),
-            seed=int(data["seed"]),
+            seeds=(int(data["seed"]),),
             created_at=str(data.get("created_at", "")),
             n_matched=int(data.get("n_matched", 0)),
             n_dropped=int(data.get("n_dropped", 0)),
@@ -186,20 +198,169 @@ def _load_run(path: Path) -> RunInfo:
             bootstrap_ci=float(boot["ci"]) if "ci" in boot else None,
             arms=arms,
             rows=tuple(_metric_row(exp_id, entry) for entry in data["metrics"]),
+            warnings=tuple(str(w) for w in data.get("warnings", [])),
         )
     except (KeyError, TypeError, ValueError) as err:
         raise ValueError(f"{path}: malformed run.json ({err})") from err
 
 
-def load_results(results_dir: str | Path) -> list[RunInfo]:
-    """Load every results/<exp_id>/run.json; loud when there is nothing to report."""
-    root = Path(results_dir)
-    run_files = sorted(root.glob("*/run.json"))
-    if not run_files:
-        raise FileNotFoundError(
-            f"no run.json found under {root}/*/ — run an experiment first (trajguard run <config>)"
+def _mask_unmeasurable_tpr(rows: list[ResultRow]) -> tuple[list[ResultRow], list[str]]:
+    """Suppress stored tpr@fpr values whose non-member count cannot resolve them (S4-2).
+
+    Runs written before the attack-time guard carry artifact values (e.g. 0.067 from
+    three non-members); the report must not display them. Values the guard already
+    recorded as NaN pass through untouched — the per-run warnings cover those.
+    """
+    masked: list[ResultRow] = []
+    warnings: list[str] = []
+    for row in rows:
+        name = row.value.name
+        if row.family == "membership_inference" and name.startswith("tpr@fpr="):
+            try:
+                fpr = float(name.removeprefix("tpr@fpr="))
+            except ValueError as err:
+                raise ValueError(f"unparseable FPR in metric name {name!r}") from err
+            if (
+                row.n_nonmembers is not None
+                and math.isfinite(row.value.value)
+                and not tpr_at_fpr_measurable(row.n_nonmembers, fpr)
+            ):
+                needed = math.ceil(1.0 / fpr - 1e-9)
+                warnings.append(
+                    f"{row.value.result_id}: {name} needs >= {needed} non-members, "
+                    f"runs have {row.n_nonmembers}; stored value suppressed in this report"
+                )
+                masked.append(
+                    replace(
+                        row,
+                        value=replace(row.value, value=float("nan"), ci_low=None, ci_high=None),
+                    )
+                )
+                continue
+        masked.append(row)
+    return masked, warnings
+
+
+def _aggregated_entry(row: ResultRow) -> dict[str, Any]:
+    """A run.json-style metric entry from an aggregated ResultRow (NaN mean -> None)."""
+    v = row.value
+    return {
+        "result_id": v.result_id,
+        "metric": v.name,
+        "value": v.value if math.isfinite(v.value) else None,
+        "ci_low": v.ci_low,
+        "ci_high": v.ci_high,
+    }
+
+
+def _merge_arms(per_seed: list[RunInfo]) -> tuple[tuple[str, dict[str, Any]], ...]:
+    """Union of arm refs; a stat survives only when identical across seeds, else None."""
+    refs: dict[str, None] = {}
+    for run in per_seed:
+        for ref, _ in run.arms:
+            refs.setdefault(ref, None)
+    merged: list[tuple[str, dict[str, Any]]] = []
+    for ref in refs:
+        arms = [arm for run in per_seed for r, arm in run.arms if r == ref]
+        keys: dict[str, None] = {}
+        for arm in arms:
+            for key in arm:
+                keys.setdefault(key, None)
+        merged.append(
+            (
+                ref,
+                {
+                    key: (
+                        arms[0].get(key)
+                        if all(arm.get(key) == arms[0].get(key) for arm in arms)
+                        else None
+                    )
+                    for key in keys
+                },
+            )
         )
-    return [_load_run(path) for path in run_files]
+    return tuple(sorted(merged, key=lambda kv: _target_order(kv[0])))
+
+
+def _load_seed_runs(exp_dir: Path, run_files: list[Path]) -> RunInfo:
+    """Fold the seed<N>/ repetition runs of one experiment into a single RunInfo.
+
+    Metric values are aggregated with the tested repetition statistics
+    (results_io.aggregate_over_seeds): across-seed mean + Student-t 95% CI, one
+    row per experiment arm. Run-level provenance must agree across seeds.
+    """
+    per_seed = [_load_run(path) for path in run_files]
+    first = per_seed[0]
+    for field_name in ("exp_id", "config_hash", "n_matched", "n_dropped", "split_counts"):
+        values = [getattr(run, field_name) for run in per_seed]
+        if any(v != values[0] for v in values):
+            raise ValueError(
+                f"{exp_dir}: seed runs disagree on {field_name} ({values}) — "
+                "not repetitions of one experiment; move the odd run to its own directory"
+            )
+    records = []
+    for path in run_files:
+        csv_path = path.parent / "results.csv"
+        if not csv_path.exists():
+            raise ValueError(
+                f"{csv_path} is missing — aggregating across seeds reads results.csv "
+                "next to run.json; re-run the experiment with csv in reporting.export"
+            )
+        records.extend(read_results_csv(csv_path))
+    agg_rows, mask_warnings = _mask_unmeasurable_tpr(aggregate_over_seeds(records))
+    warnings: dict[str, None] = {}  # insertion-ordered dedup across seeds
+    for run in per_seed:
+        for w in run.warnings:
+            warnings.setdefault(w, None)
+    for w in mask_warnings:
+        warnings.setdefault(w, None)
+    same_commit = all(run.git_commit == first.git_commit for run in per_seed)
+    return RunInfo(
+        exp_id=first.exp_id,
+        config_hash=first.config_hash,
+        git_commit=first.git_commit if same_commit else "",
+        seeds=tuple(sorted(s for run in per_seed for s in run.seeds)),
+        created_at=min(run.created_at for run in per_seed),
+        n_matched=first.n_matched,
+        n_dropped=first.n_dropped,
+        split_counts=first.split_counts,
+        runtime_s=sum(run.runtime_s for run in per_seed) / len(per_seed),
+        bootstrap_n=first.bootstrap_n,
+        bootstrap_ci=first.bootstrap_ci,
+        arms=_merge_arms(per_seed),
+        rows=tuple(_metric_row(first.exp_id, _aggregated_entry(row)) for row in agg_rows),
+        warnings=tuple(warnings),
+    )
+
+
+def load_results(results_dir: str | Path) -> list[RunInfo]:
+    """Load flat and seed<N>/ repetition runs; loud when there is nothing to report.
+
+    A flat results/<exp_id>/run.json loads as one run; a repetition layout
+    results/<exp_id>/seed<N>/run.json folds into one aggregated RunInfo per
+    experiment. Mixing both layouts inside one experiment directory is ambiguous
+    and rejected.
+    """
+    root = Path(results_dir)
+    runs: list[RunInfo] = []
+    for exp_dir in sorted(p for p in root.glob("*") if p.is_dir()):
+        flat = exp_dir / "run.json"
+        seed_files = sorted(exp_dir.glob("seed*/run.json"))
+        if flat.exists() and seed_files:
+            raise ValueError(
+                f"{exp_dir}: both run.json and seed<N>/run.json present — mixed flat "
+                "and repetition layouts in one experiment directory are ambiguous"
+            )
+        if flat.exists():
+            runs.append(_load_run(flat))
+        elif seed_files:
+            runs.append(_load_seed_runs(exp_dir, seed_files))
+    if not runs:
+        raise FileNotFoundError(
+            f"no run.json found under {root}/*/ or {root}/*/seed<N>/ — "
+            "run an experiment first (trajguard run <config>)"
+        )
+    return runs
 
 
 # --- tables -----------------------------------------------------------------------
