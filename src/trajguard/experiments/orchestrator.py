@@ -32,6 +32,7 @@ from trajguard.datasets.base import DatasetLoader
 from trajguard.datasets.cleaning import CleaningConfig, clean, haversine_m
 from trajguard.datasets.split import split_by_user
 from trajguard.evaluation.metrics import LinkageRate, SampledMetric, TopKAccuracy, evaluate
+from trajguard.evaluation.roc import tpr_at_fpr_measurable
 from trajguard.evaluation.utility import UTILITY_METRICS
 from trajguard.experiments import builtins as _builtins  # registers first-party implementations
 from trajguard.experiments import registry
@@ -1103,18 +1104,21 @@ def _membership_values(
     matched: list[MatchedTrajectory],
     clean_by_id: dict[str, CleanTrajectory],
     gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]],
-) -> list[ResultRow]:
+) -> tuple[list[ResultRow], list[str]]:
     """Run LiRA membership inference against every fitted generator arm (design §6.2).
 
     Per arm: the target generator fits on the train split (its release contract), and
     the attack scores train members against test non-members using same-class shadow
     generators from the arm's factory. AUC and TPR@FPR are score-based point values,
     so the CI columns stay empty by design — the interval across seeds comes from
-    ``trajguard repeat``.
+    ``trajguard repeat``. Returns the rows plus one validity warning per (arm, fpr)
+    operating point the non-members cannot resolve (S4-2); those values are NaN.
     """
     pool, candidates, train_m = _mia_pool(matched, clean_by_id)
     n_members = sum(1 for _, is_member in candidates if is_member)
+    n_nonmembers = len(candidates) - n_members
     rows: list[ResultRow] = []
+    warnings: list[str] = []
     for gspec, make in gen_plans:
         target = make(0)
         target.fit([TrajectoryView(clean=clean_by_id[m.traj_id], matched=m) for m in train_m])
@@ -1125,6 +1129,13 @@ def _membership_values(
         attack.configure(BackgroundKnowledge(known_points=0, distance="dtw", seed=cfg.seed))
         ref = f"synthetic:{gspec.ref}"
         result_id = f"membership_inference:{ref}"
+        for f in spec.fprs:
+            if not tpr_at_fpr_measurable(n_nonmembers, f):
+                needed = math.ceil(1.0 / f - 1e-9)
+                warnings.append(
+                    f"{result_id}: tpr@fpr={f} needs >= {needed} non-members, "
+                    f"run has {n_nonmembers}; value recorded as NaN"
+                )
         result, peak_mb = _run_measured(
             cfg.measure_memory, partial(attack.run, target, (pool, candidates))
         )
@@ -1153,13 +1164,13 @@ def _membership_values(
                 n_shadow=int(attack.n_shadow) if hasattr(attack, "n_shadow") else None,
                 n_pool=len(candidates),
                 n_members=n_members,
-                n_nonmembers=len(candidates) - n_members,
+                n_nonmembers=n_nonmembers,
                 attack_runtime_s=result.runtime_s,
                 peak_memory_mb=peak_mb,
             )
             for name, val in membership_report(result, fprs=spec.fprs).items()
         )
-    return rows
+    return rows, warnings
 
 
 def run(config_path: str | Path) -> list[MetricValue]:
@@ -1291,6 +1302,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     }
     arm_info = _arm_infos(mech_plans)
     all_rows: list[ResultRow] = []
+    run_warnings: list[str] = []
     probe_counts: dict[str, int] = {}
     for spec, attack_cls in plans:
         if spec.attack_type == "reconstruction":
@@ -1306,9 +1318,11 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             )
             continue
         if spec.attack_type == "membership_inference":
-            all_rows.extend(
-                _membership_values(cfg, spec, attack_cls, matched, clean_by_id, gen_plans)
+            mia_rows, mia_warnings = _membership_values(
+                cfg, spec, attack_cls, matched, clean_by_id, gen_plans
             )
+            all_rows.extend(mia_rows)
+            run_warnings.extend(mia_warnings)
             continue
         for ref, pool in pools.items():
             if ref.split(":", 1)[0] not in spec.target_scopes:
@@ -1420,7 +1434,11 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         arms,
         matrix,
         over_budget,
+        run_warnings,
     )
+    if run_warnings:
+        joined = "; ".join(run_warnings)
+        print(f"warning: {len(run_warnings)} metric validity warning(s): {joined}")
     if over_budget:
         worst = ", ".join(f"{o['result_id']} ({o['runtime_s']:.1f} s)" for o in over_budget)
         print(
@@ -1524,6 +1542,7 @@ def _write_results(
     arms: dict[str, dict[str, Any]],
     matrix: _Matrix,
     over_budget: list[dict[str, Any]],
+    warnings: list[str],
 ) -> None:
     """Write the exported formats, results.csv, and run.json under the output directory."""
     values = [r.value for r in rows]
@@ -1581,6 +1600,9 @@ def _write_results(
             "memory_traced": cfg.measure_memory,
             "attacks": over_budget,
         },
+        # Metric validity warnings (S4-2): operating points whose value was
+        # recorded as NaN because the data cannot resolve them.
+        "warnings": warnings,
         "runtime_s": round(runtime_s, 3),
         "metrics": [
             {
