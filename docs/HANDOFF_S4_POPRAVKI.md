@@ -145,7 +145,16 @@ En PR = en poseg; vsaka seja začne v načrtovalnem načinu (pravila `CLAUDE.md`
   avtor iz nje izbere novi prag.
 - **PR 3 — populacija (po diagnostiki):** novi `min_match_score` v konfiguracijah;
   operativna definicija populacije in merilo iz razdelka 2 v dokumentaciji;
-  izvedena diagnostična celica kot dokaz izbire.
+  izvedena diagnostična celica kot dokaz izbire. **Izvedeno 16. avgusta 2026**
+  (veja `claude/s4-pr3-population-threshold`): izbrani prag je **0,05** v vseh
+  petih konfiguracijah — edini naravni prelom porazdelitve (85 % očiščenih sledi
+  se na vozno omrežje sploh ne ujame) in edini kandidatni prag, ki pri
+  `max_users: 20` izpolni merilo iz razdelka 2 (236 sledi, 16/20 uporabnikov,
+  15 nečlanov). Avtorjeva zabeležka ob izbiri: od stopnje 50 naprej bi po
+  projekciji verjetno zadoščal strožji prag 0,5 (~116 nečlanov pri 182); potrdi
+  ga šele meritev na stopnji 50 (`docs/RUNNING.md` §7.4). Definicija populacije
+  in merilo validacije sta zapisana v `docs/RUNNING.md` §6 in §7.4; izvedeni
+  zvezek `notebooks/03_s4_sweep.ipynb` (razdelek 9) je del PR-ja kot dokaz.
 - **Validacijski pogon pri 20** (merilo v razdelku 2) → **stopnja 50** (prvič
   izmeri, kako se podatkovno odvisni del cene MIA skalira, in da napoved proračuna
   za polni obseg) → **stopnja 182** (poročevalski pogon).

@@ -39,7 +39,10 @@ map_matching:
   k_candidates: 8
   radius_m: 50
   gps_error_m: 20
-  min_match_score: 0.6
+  # S4-1 population threshold (was 0.6): driving traces = traces that match the
+  # drive network at all. Measured natural break — 85 % of cleaned u20 traces score
+  # below 0.05; chosen from the diagnostic cell, notebooks/03_s4_sweep.ipynb §9.
+  min_match_score: 0.05
 
 split:
   scheme: by_user
