@@ -302,10 +302,19 @@ uv run trajguard run config/experiments/geolife_reid_baseline.yaml
 ```
 
 Runs the whole pipeline on unprotected data: import → cleaning (speed/length
-filters, resampling) → map-matching (trajectories below match score 0.6 are
-dropped) → one-time user split → reidentification attack, where the attacker knows
-k ∈ {3, 5, 10} points of each target and searches for the nearest matching
-trajectory.
+filters, resampling) → map-matching → one-time user split → reidentification
+attack, where the attacker knows k ∈ {3, 5, 10} points of each target and
+searches for the nearest matching trajectory.
+
+**What population these numbers describe.** The report measures *driving traces*,
+defined operationally: the population is the set of cleaned trajectories that match
+the drive road network with `match_score ≥ 0.05` (`map_matching.min_match_score`);
+everything below is dropped before the split. The boundary is measured, not
+asserted: the diagnostic cell in `notebooks/03_s4_sweep.ipynb` §9 shows the full
+score distribution, and 0.05 is its one natural break — 85 % of cleaned Geolife
+trajectories at the 20-user rung score below it (walking, cycling, subway, or
+outside the bbox) and essentially do not match the drive network at all. See §7.4
+for how this threshold was chosen and when it is expected to change.
 
 **Expected outcome:**
 
@@ -501,6 +510,50 @@ The rules, applied one step at a time (re-measure after each step):
 - **R3 — traceability.** Record every reduction as a comment in the experiment
   YAML (which ladder step, why); the `max_users` and `config_hash` columns in
   `results.csv` keep reduced runs distinguishable on their own.
+
+## 7.4 Validation run and the population threshold (S4-1)
+
+**Population definition.** All Geolife experiments measure driving traces, defined
+operationally as cleaned trajectories with `match_score ≥ min_match_score` against
+the drive network (see §6). The current threshold **0.05** was chosen from the
+measured score distribution (diagnostic cell, `notebooks/03_s4_sweep.ipynb` §9,
+executed 16 Aug 2026 at `max_users: 20`): the distribution has exactly one natural
+break, at ≈ 0.05 — 85 % of cleaned trajectories (1371/1607) score below it and do
+not match the drive network at all, while above it a thin, roughly flat tail runs
+to ~0.85 with no second break. The report presents that distribution alongside the
+results, so the population boundary is a measured quantity, not a claim.
+
+**Validation-run success criterion** (`docs/HANDOFF_S4_POPRAVKI.md` §2). After the
+S4 fix PRs, the campaign is repeated at `max_users: 20` with the same configs and
+seeds as the first run. The run passes when both hold:
+
+1. at least **11 non-members** survive into the membership-inference pool
+   (projected to ≥ 100 at 182 users, which revives the `fpr = 0.01` operating
+   point), and
+2. the reidentification gallery covers at least **15 of 20 users**.
+
+In addition, the `rn_ldp_synth` arm must come in under the 300 s budget (proof of
+the S4-3 fix) and `trajguard report` must produce `report.md` and
+`risk_matrix.csv` (proof of S4-4). At threshold 0.05 the diagnostic cell measures
+236 surviving traces, 16/20 users, 15 non-members — the only threshold in the
+candidate set that meets both criteria at this rung.
+
+**If the criterion fails,** the agreed lever sequence is: first retry at
+`max_users: 50` (the 20-user rung may simply be too small for MIA); only if it
+fails there too, change the MIA split fractions (e.g. a larger `test`), recording
+explicitly in the report that a smaller `train` means a weaker target generator
+and therefore less memorization for the attack to measure. If no reasonable
+threshold keeps enough data, the reserve option from S4-1 opens (filtering by
+Geolife transport-mode labels) — that is a new author decision, not an
+implementation one.
+
+**Expected change at larger rungs.** The author's note (16 Aug 2026): from
+`max_users: 50` up, a stricter threshold of **0.5** would likely suffice — the
+diagnostic projection gives ≈ 116 non-members at 182 users (≥ 100 needed for
+`fpr = 0.01`), and user coverage grows with the pool. This is a projection, not a
+measurement: the 0.2 factor in it is a *user* fraction while the realised
+per-trace test share at 20 users is 8.8 %, so the 50-user rung must confirm it
+before the threshold moves. Until then 0.05 stands in every config.
 
 ## 8. Aggregate risk report
 

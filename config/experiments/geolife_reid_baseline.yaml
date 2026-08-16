@@ -27,7 +27,13 @@ map_matching:
   k_candidates: 8
   radius_m: 50
   gps_error_m: 20
-  min_match_score: 0.6
+  # S4-1 population threshold (was 0.6: 45/1607 survivors, 9/20 users at u20):
+  # driving traces = traces that match the drive network at all. Measured natural
+  # break — 85 % of cleaned u20 traces score below 0.05; chosen from the diagnostic
+  # cell, notebooks/03_s4_sweep.ipynb §9. Expected to rise to ~0.5 from the 50-user
+  # rung up once measured there (non-member projection >= 100 at 182 users for
+  # fpr = 0.01; RUNNING.md §7.4).
+  min_match_score: 0.05
 
 split:
   scheme: by_user
