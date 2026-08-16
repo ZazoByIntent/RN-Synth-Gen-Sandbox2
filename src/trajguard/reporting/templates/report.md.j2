@@ -94,7 +94,7 @@ longer matched the road network (protection by destroying the release).
 | --- | --- | --- | --- | --- | --- | --- |
 {% for run in runs %}
 {% for target, arm in run.arms %}
-| {{ run.exp_id }} | {{ target }} | {{ arm.get("n_pool", "–") }} | {{ arm.get("n_gallery_users", "–") }} | {{ arm.get("n_probes") if arm.get("n_probes") is not none else "–" }} | {{ arm.get("n_rematch_dropped", "–") }} | {{ arm.get("spent_budget") | num }} |
+| {{ run.exp_id }} | {{ target }} | {{ arm.get("n_pool") if arm.get("n_pool") is not none else "–" }} | {{ arm.get("n_gallery_users") if arm.get("n_gallery_users") is not none else "–" }} | {{ arm.get("n_probes") if arm.get("n_probes") is not none else "–" }} | {{ arm.get("n_rematch_dropped") if arm.get("n_rematch_dropped") is not none else "–" }} | {{ arm.get("spent_budget") | num }} |
 {% endfor %}
 {% endfor %}
 
