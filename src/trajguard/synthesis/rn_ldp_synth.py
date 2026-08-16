@@ -14,6 +14,7 @@ edge sequence by stitching SCC-restricted representative edges with shortest
 paths on the real graph — feasibility is structural, not statistical.
 """
 
+import hashlib
 import itertools
 import math
 from collections import deque
@@ -33,6 +34,28 @@ from trajguard.synthesis.base import SyntheticGenerator
 _PROB_FLOOR = 1e-12  # keeps sequence_log_prob finite after clipped-to-zero estimates
 _ENTRY_CHOICES = 3  # nearest zone-entry nodes sampled from during decoding
 _UNREACHABLE = 10**9
+
+# Decode-inflation results shared across generator instances, keyed by
+# (map content hash, n_rows, n_cols, l_max) — exactly the inputs
+# _calibrate_inflation depends on. One float per built map/grid combination.
+_INFLATION_CACHE: dict[tuple[str, int, int, int], float] = {}
+
+
+def _network_hash(network: RoadNetwork) -> str:
+    """Content hash of the map inputs the public structures and decoding depend on."""
+    digest = hashlib.sha256()
+    nodes = network.nodes[["node_id", "x", "y"]].sort_values("node_id")
+    digest.update(nodes.to_numpy(dtype=np.float64).tobytes())
+    edges = network.edges[["edge_id", "u", "v", "length_m"]].sort_values("edge_id")
+    digest.update(edges.to_numpy(dtype=np.float64).tobytes())
+    # The routing graph is a separate on-disk artifact (graphml vs parquet tables),
+    # and Dijkstra decoding runs on it, so hash its weighted edge list too.
+    graph_rows = sorted(
+        (float(u), float(v), float(k), float(d.get("length", 0.0)))
+        for u, v, k, d in network.graph.edges(keys=True, data=True)
+    )
+    digest.update(np.array(graph_rows, dtype=np.float64).tobytes())
+    return digest.hexdigest()[:16]
 
 
 @register("generator", "rn_ldp_synth")
@@ -91,7 +114,17 @@ class RNLDPSynthGenerator(SyntheticGenerator):
         # transitions (entering a zone lands away from the next boundary). The factor
         # is a property of the public structures alone, so it is measured once on
         # public uniform-kernel walks (fixed seed) and costs no privacy budget.
-        self._inflation = self._calibrate_inflation()
+        # It is also deterministic in (map, n_rows, n_cols, l_max) — fixed public
+        # seed, uniform kernels, no private data — so generators sharing those inputs
+        # share one measurement through a process-wide cache instead of re-running
+        # ~300 Dijkstra searches each (HANDOFF S4-3). epsilon, budget_split and the
+        # constructor seed never enter the calibration and stay out of the key.
+        cache_key = (_network_hash(network), n_rows, n_cols, l_max)
+        cached = _INFLATION_CACHE.get(cache_key)
+        if cached is None:
+            cached = self._calibrate_inflation()
+            _INFLATION_CACHE[cache_key] = cached
+        self._inflation = cached
         self.last_decode_truncations = 0
         self._rng = np.random.default_rng(seed)
         self._fitted = False

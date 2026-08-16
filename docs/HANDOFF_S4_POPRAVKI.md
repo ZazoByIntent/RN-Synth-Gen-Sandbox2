@@ -132,6 +132,14 @@ En PR = en poseg; vsaka seja začne v načrtovalnem načinu (pravila `CLAUDE.md`
 - **PR 2 — mehanizem in pravila (neodvisen, takoj):** predpomnjenje umerjanja
   (S4-3) s testom determinističnosti (dva generatorja istega zemljevida delita
   vrednost; različna parametra je ne delita); korak 0 v `docs/RUNNING.md` §7.3.
+  **Izvedeno 16. avgusta 2026** (veja `claude/s4-pr2-inflation-cache`): faktor se
+  predpomni v procesnem predpomnilniku po ključu (vsebinski hash zemljevida —
+  vozlišča, tabela povezav, uteženi seznam povezav grafa — ter `n_rows`,
+  `n_cols`, `l_max`; `epsilon`, `budget_split` in seme v umerjanje ne vstopajo
+  in v ključ ne sodijo). Testi dokazujejo en sam izračun z deljenjem, ločevanje
+  po parametrih in po zemljevidu ter enakost predpomnjene vrednosti neodvisno
+  izračunani; korak 0 je dodan v §7.3, opomba o deljenju v
+  `docs/RN_LDP_SYNTH_DESIGN.md` §7.
 - **Diagnostika praga (avtorjevo okolje, vzporedno s PR 1 in 2):** trajna celica v
   `notebooks/03_s4_sweep.ipynb` (histogram + tabela prag → sledi → uporabniki);
   avtor iz nje izbere novi prag.
