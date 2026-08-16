@@ -40,6 +40,17 @@ def roc_auc(scores: np.ndarray, labels: np.ndarray) -> float:
     return (sum_pos - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
 
 
+def tpr_at_fpr_measurable(n_nonmembers: int, fpr: float) -> bool:
+    """True when the negatives support the operating point: ``n_nonmembers >= 1/fpr``.
+
+    Below that floor no threshold can realise an FPR under the target except the
+    degenerate zero-false-positive point, so any reported number is an artifact
+    (HANDOFF S4-2). The boundary itself is valid; the tolerance absorbs float
+    rounding in ``n * fpr`` (e.g. 10 * 0.1).
+    """
+    return n_nonmembers * fpr >= 1.0 - 1e-9
+
+
 def tpr_at_fpr(scores: np.ndarray, labels: np.ndarray, fpr_target: float) -> float:
     """Highest TPR reachable at FPR <= ``fpr_target`` over all score thresholds.
 

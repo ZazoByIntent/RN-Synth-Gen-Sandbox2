@@ -420,8 +420,36 @@ def test_membership_inference_runs_end_to_end(tmp_path: Path, beijing_maps_dir: 
     rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
     mia_rows = [r for r in rows if r["result_id"].startswith("membership_inference:")]
     assert mia_rows and all(r["ci_low"] == "" and r["ci_high"] == "" for r in mia_rows)
+    # fpr=0.25 sits exactly on the 1/fpr floor with 4 non-members: valid, no warning
+    run_record = json.loads((tmp_path / "out" / "run.json").read_text())
+    assert run_record["warnings"] == []
     # deterministic under the same seeds
     assert [v.value for v in run(write_config(tmp_path, cfg))] == [v.value for v in values]
+
+
+def test_membership_unresolvable_fpr_yields_nan_and_warning(
+    tmp_path: Path, beijing_maps_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """fprs below the 1/n_nonmembers floor: NaN value, run.json warning, console notice."""
+    cfg = mia_config(tmp_path, beijing_maps_dir)
+    cfg["attacks"][0]["fprs"] = [0.25, 0.1]  # 4 non-members: 0.25 is measurable, 0.1 is not
+    values = run(write_config(tmp_path, cfg))
+
+    by_name = {v.name: v for v in values if v.result_id.startswith("membership_inference:")}
+    assert 0.0 <= by_name["tpr@fpr=0.25"].value <= 1.0
+    assert by_name["tpr@fpr=0.1"].value != by_name["tpr@fpr=0.1"].value  # NaN
+    run_record = json.loads((tmp_path / "out" / "run.json").read_text())
+    warnings = run_record["warnings"]
+    assert len(warnings) == 1
+    assert "tpr@fpr=0.1" in warnings[0] and ">= 10 non-members" in warnings[0]
+    assert "run has 4" in warnings[0]
+    # the NaN reaches run.json as null and the CSVs as a blank cell
+    metric_entries = {m["metric"]: m for m in run_record["metrics"]}
+    assert metric_entries["tpr@fpr=0.1"]["value"] is None
+    rows = list(csv.DictReader((tmp_path / "out" / "metrics.csv").open()))
+    blank = [r for r in rows if r["metric"] == "tpr@fpr=0.1"]
+    assert blank and all(r["value"] == "" for r in blank)
+    assert "metric validity warning" in capsys.readouterr().out
 
 
 def test_membership_runs_against_rn_ldp_synth_arm(tmp_path: Path, beijing_maps_dir: Path) -> None:

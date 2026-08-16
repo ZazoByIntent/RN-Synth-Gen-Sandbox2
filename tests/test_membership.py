@@ -1,5 +1,7 @@
 """Tests for the LiRA-lite membership-inference attack."""
 
+import math
+
 import numpy as np
 import pytest
 
@@ -9,8 +11,8 @@ from trajguard.attacks.membership import (
     MembershipScore,
     membership_report,
 )
-from trajguard.datamodel import MatchedTrajectory
-from trajguard.evaluation.roc import roc_auc, tpr_at_fpr
+from trajguard.datamodel import AttackResult, MatchedTrajectory
+from trajguard.evaluation.roc import roc_auc, tpr_at_fpr, tpr_at_fpr_measurable
 from trajguard.experiments import registry
 from trajguard.representation import TrajectoryView
 from trajguard.synthesis.markov import MarkovGenerator
@@ -56,9 +58,47 @@ def test_reports_auc_and_tpr_at_fpr() -> None:
     result = run_attack().run(real_generator(), (UNIVERSE, CANDIDATES))
     report = membership_report(result)
     assert set(report) == {"auc", "tpr@fpr=0.001", "tpr@fpr=0.01"}
-    assert all(0.0 <= v <= 1.0 for v in report.values())
     # members are memorised, non-members floored -> the attack separates them clearly
-    assert report["auc"] >= 0.75
+    assert 0.75 <= report["auc"] <= 1.0
+    # six non-members cannot resolve FPR targets below 1/6 -> NaN, not an artifact (S4-2)
+    assert math.isnan(report["tpr@fpr=0.001"])
+    assert math.isnan(report["tpr@fpr=0.01"])
+    # a point the data does support (1/0.25 = 4 <= 6 non-members) stays finite
+    coarse = membership_report(result, fprs=(0.25,))
+    assert 0.0 <= coarse["tpr@fpr=0.25"] <= 1.0
+
+
+def _scored_result(scored: list[tuple[float, bool]]) -> AttackResult:
+    """An AttackResult carrying hand-made (score, is_member) predictions."""
+    return AttackResult(
+        result_id="membership_inference:synthetic:test",
+        attack_id="membership_inference",
+        exp_id="test",
+        target_data_ref="synthetic:test",
+        predictions=[MembershipScore(score=s, is_member=m) for s, m in scored],
+        scores=None,
+        ground_truth_ref="",
+        runtime_s=0.0,
+    )
+
+
+def test_tpr_at_fpr_measurable_boundary() -> None:
+    # the boundary n_nonmembers == 1/fpr is valid; the guard fires only strictly below
+    assert tpr_at_fpr_measurable(10, 0.1)
+    assert not tpr_at_fpr_measurable(9, 0.1)
+    assert tpr_at_fpr_measurable(1000, 0.001)
+    assert not tpr_at_fpr_measurable(3, 0.001)
+
+
+def test_membership_report_nan_below_fpr_floor_finite_at_boundary() -> None:
+    # 5 members outrank all non-members: TPR at the zero-FP point would be 1.0
+    members = [(10.0 + i, True) for i in range(5)]
+    ten_neg = _scored_result(members + [(float(i), False) for i in range(10)])
+    report = membership_report(ten_neg, fprs=(0.1, 0.01))
+    assert report["tpr@fpr=0.1"] == 1.0  # boundary: exactly 1/0.1 non-members
+    assert math.isnan(report["tpr@fpr=0.01"])  # 10 < 100 -> unresolvable
+    nine_neg = _scored_result(members + [(float(i), False) for i in range(9)])
+    assert math.isnan(membership_report(nine_neg, fprs=(0.1,))["tpr@fpr=0.1"])
 
 
 def test_predictions_carry_ground_truth() -> None:

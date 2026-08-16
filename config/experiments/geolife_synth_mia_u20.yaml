@@ -60,7 +60,9 @@ attacks:
   - type: membership_inference
     target_scope: [synthetic]
     attacker: {n_shadow: 16, subsample: 0.5}
-    fprs: [0.001, 0.01]      # Carlini low-FPR operating points (design §6.2)
+    fprs: [0.001, 0.01, 0.1] # Carlini low-FPR operating points (design §6.2); 0.1 needs
+                             # only 10 non-members (S4-2), the stricter points revive
+                             # once the matched pool grows
 
 metrics:
   privacy: []                # MIA brings its own family metrics (auc, tpr@fpr=...)

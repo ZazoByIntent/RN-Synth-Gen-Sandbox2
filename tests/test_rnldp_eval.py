@@ -1,5 +1,8 @@
 """Smoke tests for the RN-LDP-Synth evidence sweep (tiny parameters, seconds-fast)."""
 
+import json
+import math
+
 import numpy as np
 
 from trajguard.experiments.rnldp_eval import _table, run_eval, seed_population
@@ -17,12 +20,16 @@ def test_run_eval_shape_and_determinism(fixture_network: RoadNetwork) -> None:
     kwargs = {"epsilons": [80.0], "n_shadow": 4, "n_pop": 8, "seed": 1}
     first = run_eval(fixture_network, **kwargs)
     second = run_eval(fixture_network, **kwargs)
-    assert first == second
+    # NaN != NaN, so compare via JSON (NaN serialises identically on both sides)
+    assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
     assert set(first["arms"]) == {"rn_ldp_synth@eps=80", "markov (non-private ceiling)"}
     for arm in first["arms"].values():
         assert set(arm) == {"mia", "utility"}
         assert set(arm["mia"]) == {"auc", "tpr@fpr=0.01", "tpr@fpr=0.1"}
         assert 0.0 <= arm["mia"]["auc"] <= 1.0
+        # 4 non-members resolve neither 0.01 nor 0.1 -> guarded to NaN (S4-2)
+        assert math.isnan(arm["mia"]["tpr@fpr=0.01"])
+        assert math.isnan(arm["mia"]["tpr@fpr=0.1"])
         assert np.isfinite(arm["utility"]["cell_jsd"])
         assert np.isfinite(arm["utility"]["length_w1_m"])
     table = _table(first)

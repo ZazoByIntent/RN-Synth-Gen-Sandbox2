@@ -10,7 +10,7 @@ import numpy as np
 
 from trajguard.attacks.base import Attack, BackgroundKnowledge
 from trajguard.datamodel import AttackResult, MatchedTrajectory
-from trajguard.evaluation.roc import roc_auc, tpr_at_fpr
+from trajguard.evaluation.roc import roc_auc, tpr_at_fpr, tpr_at_fpr_measurable
 from trajguard.experiments.registry import register
 from trajguard.representation import TrajectoryView
 from trajguard.synthesis.markov import MarkovGenerator
@@ -141,12 +141,19 @@ class MembershipInferenceAttack(Attack):
 def membership_report(
     result: AttackResult, fprs: Sequence[float] = (0.001, 0.01)
 ) -> dict[str, float]:
-    """AUC and TPR at each target FPR from a membership attack's embedded ground truth."""
+    """AUC and TPR at each target FPR from a membership attack's embedded ground truth.
+
+    Operating points the non-members cannot resolve (fewer than ``1/fpr`` of them,
+    HANDOFF S4-2) report NaN rather than an artifact of the zero-false-positive point.
+    """
     scores = np.array([p.score for p in result.predictions], dtype=float)
     labels = np.array([1 if p.is_member else 0 for p in result.predictions], dtype=int)
+    n_neg = int((labels == 0).sum())
     report = {"auc": roc_auc(scores, labels)}
     for f in fprs:
-        report[f"tpr@fpr={f}"] = tpr_at_fpr(scores, labels, f)
+        report[f"tpr@fpr={f}"] = (
+            tpr_at_fpr(scores, labels, f) if tpr_at_fpr_measurable(n_neg, f) else float("nan")
+        )
     return report
 
 
