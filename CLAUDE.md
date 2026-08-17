@@ -6,13 +6,15 @@ doctoral project. This file is the constitution for the repo; read it every sess
 ## Status
 
 **All phases P0–P7 are implemented and merged; RN-LDP-Synth has a working v1
-prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). The fixes after the first S4 run
-(S4-1 to S4-4, `docs/HANDOFF.md` §1.10) are merged and validated at
-`dataset.max_users: 20` (17 Aug 2026): all five validation criteria passed —
-measured values in `docs/HANDOFF_S4_POPRAVKI.md` §4. The next step is climbing
-the sample ladder 50 → 182 per `docs/HANDOFF_S4_POPRAVKI.md` §3; note the
-reidentification cost grew with the larger matched pool (~27 min per seed at 20
-users), so budget the larger rungs accordingly.**
+prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). The S4 fixes are validated at 20
+users and the 50-user rung is measured (17 Aug 2026, `docs/HANDOFF.md` §1.11):
+geoind ~62 min/seed, MIA cost data-independent, 33 non-members, gallery 41/50;
+the `k10` reidentification calls exceed the 300 s budget (~470 s, data-dependent,
+quadratic in gallery size). Two author decisions are open before the 182 run:
+the population threshold (measured projection says 0.5 yields only 81 non-members
+at 182 — below the 100 needed for `fpr = 0.01`; 0.4 is the strictest threshold
+that reaches it) and launching rung 182 itself with its projected ~36–44 h geoind
+budget. Do not launch rung 182 without the author's go-ahead.**
 Whoever completes a phase updates this line in the same PR.
 
 ## Doc map (read on demand — do not load everything up front)
