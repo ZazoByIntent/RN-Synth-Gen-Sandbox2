@@ -161,3 +161,49 @@ En PR = en poseg; vsaka seja začne v načrtovalnem načinu (pravila `CLAUDE.md`
 
 Seja, ki zaključi validacijski pogon, vpiše izid v ta dokument, doda povratni
 sklic v `docs/HANDOFF.md` §1.10 in posodobi statusno vrstico v `CLAUDE.md`.
+
+---
+
+## 4. Izid validacijskega pogona (17. avgust 2026)
+
+Pogon je bil izveden po združitvi PR 1–3, pri `max_users: 20`, z istima
+konfiguracijama in semeni kot prvi pogon (`geolife_geoind_reid_u20` s semeni 1–5,
+`geolife_synth_mia_u20` s semeni 1–3). **Vseh pet meril je izpolnjenih; pogon je
+uspešen.**
+
+| # | Merilo | Zahteva | Izmerjeno |
+|---|--------|---------|-----------|
+| 1 | Nečlani v bazenu napada na članstvo | ≥ 11 | **15** v vseh treh semenih in vseh štirih rokah (`n_pool = 105`, `n_members = 90`; prvi pogon: 3) |
+| 2 | Pokritost galerije reidentifikacije | ≥ 15 od 20 uporabnikov | **16 od 20** v vseh petih semenih (veja `raw`; ujetih 238 od 1607 sledi; prvi pogon: 9) |
+| 3 | Klic napada na članstvo proti `rn_ldp_synth` | < 300 s | **19,6–20,2 s** za vseh devet klicev (3 veje ε × 3 semena; prvi pogon: 755–866 s); `over_budget.attacks` prazen v vseh `run.json` |
+| 4 | `trajguard report` | uspe; `report.md` + `risk_matrix.csv`, ena vrstica na roko | uspe: `risk_matrix.csv` ima **9 vrstic** (5 rok geoind + 4 roke generatorjev), razdelek Warnings navaja zamolčane vrednosti (prvi pogon: `FileNotFoundError`) |
+| 5 | Varovalo `tpr@fpr` (S4-2) | točki 0,001 in 0,01 NaN + opozorilo; točka 0,1 izmerjena | točki 0,001/0,01 sta NaN z opozorilom v `run.json` (»needs >= 1000/100 non-members, run has 15«); točka 0,1 izmerjena: markov 0,98–1,00, `rn_ldp_synth` 0,02–0,23 |
+
+Vrednosti so prebrane iz `results/geolife_geoind_reid_u20/seed{1..5}/` in
+`results/geolife_synth_mia_u20/seed{1..3}/` (`results.csv`, `run.json`,
+`metrics.csv`) ter `reports/risk_matrix.csv`; zvezek `notebooks/03_s4_sweep.ipynb`
+je znova izveden nad temi rezultati in vseh 11 slik v `reports/s4_figures/` je
+svežih (izvedeni zvezek je priložen PR-ju kot dokaz). Vsebinski vzorci držijo:
+AUC stropa memorizacije (markov) ostaja 0,99–1,00, `rn_ldp_synth` ostaja blizu
+naključnega ugibanja (AUC 0,38–0,64 čez semena in ε).
+
+Opombe za načrtovanje vzpona (stopnja 50 → 182, razdelek 3):
+
+- **Cena reidentifikacije je zrasla na ~27 minut na seme** (prvi pogon: ~2 minuti),
+  ker je bazen z nižjim pragom zrasel s 45 na 238 sledi in se primerjava z
+  dinamičnim ukrivljanjem časa (DTW) draži približno kvadratično z velikostjo
+  galerije. Celoten geoind pogon pri 20 uporabnikih zdaj traja ~2,5 ure; pri
+  stopnji 50 bo bazen spet večji, kar je treba všteti v proračun pogona.
+- **Cena napada na članstvo je padla z ~42 na ~1,5 minute na seme** — predpomnjenje
+  umerjanja (S4-3) deluje; en proces `repeat` plača umerjanje enkrat za vse veje
+  in semena.
+- Operativna opomba: pogon `repeat` za geoind je bil med izvedbo dvakrat prekinjen
+  od zunaj; semena 1–4 so iz `repeat`, seme 5 iz `trajguard run --seed 5` (razrez
+  ostane pripet prek `split_seed`, glej §7.1 v `docs/RUNNING.md`), skupni
+  `repetitions.csv` pa je bil obnovljen z isto funkcijo `aggregate` iz
+  `trajguard.experiments.repeat`. Vrednosti so identične neprekinjenemu `repeat`.
+
+**Sklep.** Popravki S4-1 do S4-4 so potrjeni pri `max_users: 20`. Naslednji korak
+po razdelku 3: stopnja 50 (prva meritev skaliranja podatkovno odvisnega dela cene
+MIA in reidentifikacije), nato 182. Ob stopnji 50 se po avtorjevi zabeležki iz
+PR 3 preveri tudi, ali bi strožji prag 0,5 zadoščal (`docs/RUNNING.md` §7.4).

@@ -6,13 +6,13 @@ doctoral project. This file is the constitution for the repo; read it every sess
 ## Status
 
 **All phases P0–P7 are implemented and merged; RN-LDP-Synth has a working v1
-prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). The first S4 parameter-sweep run is
-done and partially successful (15–16 Aug 2026): the whole pipeline runs end to end
-on real Geolife at `dataset.max_users: 20` and the analysis notebook draws every
-planned figure, but the run exposed four open points — S4-1 to S4-4 in
-`docs/HANDOFF.md` §1.10. Settle those before running any further sweeps: the
-numbers this campaign produced do not yet carry statistical weight, and one of the
-four is an author's decision the others depend on.**
+prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). The fixes after the first S4 run
+(S4-1 to S4-4, `docs/HANDOFF.md` §1.10) are merged and validated at
+`dataset.max_users: 20` (17 Aug 2026): all five validation criteria passed —
+measured values in `docs/HANDOFF_S4_POPRAVKI.md` §4. The next step is climbing
+the sample ladder 50 → 182 per `docs/HANDOFF_S4_POPRAVKI.md` §3; note the
+reidentification cost grew with the larger matched pool (~27 min per seed at 20
+users), so budget the larger rungs accordingly.**
 Whoever completes a phase updates this line in the same PR.
 
 ## Doc map (read on demand — do not load everything up front)

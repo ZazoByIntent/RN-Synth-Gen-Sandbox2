@@ -350,6 +350,14 @@ pa je pri 0,585 / 0,556 / 0,578 za ε = 0,5 / 2 / 8, torej blizu naključnega ug
 vrednosti so ob upoštevanju S4-2 uporabne kvečjemu kot znak, da merilna veriga teče, ne kot
 rezultat.
 
+**[izvedba, 17. avgust 2026]** Vrzeli S4-1 do S4-4 so obravnavane: odločitve, razrez na tri
+PR-je in njihova izvedba so v `docs/HANDOFF_S4_POPRAVKI.md` (razdelka 1 in 3), opažanje S4-5
+je pokrito z odstavkom v `docs/RUNNING.md` §7.1. Validacijski pogon pri `max_users: 20` z
+istimi konfiguracijami in semeni kot zgoraj je **uspel — vseh pet meril je izpolnjenih**
+(nečlani 15 ≥ 11, galerija 16/20 ≥ 15/20, `rn_ldp_synth` ~20 s < 300 s, `trajguard report`
+izdela poročilo z eno vrstico na roko, varovalo `tpr@fpr` deluje). Izmerjene vrednosti in
+opombe za načrtovanje vzpona so v `docs/HANDOFF_S4_POPRAVKI.md`, razdelek 4.
+
 ---
 
 ## 2. Predlagano zaporedje — recenziraj, preden ga sprejmeš
