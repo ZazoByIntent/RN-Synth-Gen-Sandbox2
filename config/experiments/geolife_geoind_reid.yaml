@@ -1,6 +1,13 @@
 # Geo-indistinguishability vs reidentification on Geolife (design §8, P5).
 # Real Geolife needs a Microsoft licence; drop the .plt tree at dataset.path to run.
 #
+# This is the REPORTING config: the full 182-user rung of the design §6.4 sample
+# ladder, run after the 20- and 50-user measurement rungs (HANDOFF §1.11). It
+# carries two author decisions of 17 Aug 2026, both grounded in the 50-rung
+# measurement: population threshold 0.3 (see the map_matching comment) and
+# attack budget 1200 s (see the metrics comment). The u20/u50 configs stay at
+# threshold 0.05 / budget 300 s — they are the measured record of those rungs.
+#
 # epsilon is the geo-ind level per unit_m=100 m (mechanism default), so the grid
 # {0.1, 1, 10} spans mean planar-Laplace displacements of 2 km / 200 m / 20 m.
 # At epsilon=0.1 expect few or no trajectories to survive re-matching: the arm
@@ -23,8 +30,9 @@ dataset:
   id: geolife
   path: data/raw/geolife
   native_region: beijing
-  # max_users: 50            # optional sample size (design §6.4: 20/50/100/182); keeps
-  #                          # all trajectories of a split_seed-drawn user subset
+  max_users: 182             # full-scale reporting rung, stated explicitly: the
+                             # max_users column in results.csv and the per-rung
+                             # split in notebooks/03_s4_sweep.ipynb rely on it
 
 cleaning:
   max_speed_kmh: 200
@@ -37,13 +45,14 @@ map_matching:
   k_candidates: 8
   radius_m: 50
   gps_error_m: 20
-  # S4-1 population threshold (was 0.6: 45/1607 survivors, 9/20 users at u20):
-  # driving traces = traces that match the drive network at all. Measured natural
-  # break — 85 % of cleaned u20 traces score below 0.05; chosen from the diagnostic
-  # cell, notebooks/03_s4_sweep.ipynb §9. Expected to rise to ~0.5 from the 50-user
-  # rung up once measured there (non-member projection >= 100 at 182 users for
-  # fpr = 0.01; RUNNING.md §7.4).
-  min_match_score: 0.05
+  # S4-1 population threshold, reporting value (R3; author decision, 17 Aug 2026,
+  # from the 50-rung measurement, HANDOFF §1.11 / notebooks/03_s4_sweep.ipynb §9):
+  # the earlier note "0.5 should suffice from the 50-user rung up" did NOT survive
+  # measurement — 0.5 projects only 81 non-members at 182 users (< 100 needed for
+  # fpr = 0.01), 0.4 reaches 100 exactly, 0.3 reaches it with margin (projected
+  # 118 non-members, 33/50 users covered at the 50 rung). 0.05 remains the
+  # measured record of the u20/u50 rungs (their configs are unchanged).
+  min_match_score: 0.3
 
 split:
   scheme: by_user
@@ -77,10 +86,15 @@ metrics:
   utility: [cell_js_divergence, length_dist_error]
   utility_grid: {n_rows: 20, n_cols: 20}
   bootstrap: {n: 1000, ci: 0.95}
-  # memory: false            # peak-memory tracing (peak_memory_mb) is on by default;
-  #                          # turn it off for timing-critical runs — it slows attacks
-  # attack_time_budget_s: 300 # per-invocation runtime budget (report §6.6, X = 300 s);
-  #                          # over-budget attacks are flagged in run.json, RUNNING.md §7.3
+  memory: false              # R0 (RUNNING.md §7.3): peak-memory tracing roughly
+                             # doubles attack time; budget verdicts need untraced
+                             # runs. peak_memory_mb stays empty in this campaign.
+  # Budget raised 300 -> 1200 s for the 182 rung (R3; author decision, 17 Aug 2026,
+  # from the 50-rung measurement, HANDOFF §1.11): at threshold 0.3 the projected
+  # gallery is ~590 traces and the dearest call (reidentification k10, DTW roughly
+  # quadratic in gallery size) ~750 s — over the old budget, under this one.
+  # 300 s (author decision, 5 Aug 2026) remains the budget of the u20/u50 rungs.
+  attack_time_budget_s: 1200
 
 reporting:
   export: [csv]
