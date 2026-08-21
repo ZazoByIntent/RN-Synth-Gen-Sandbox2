@@ -431,6 +431,70 @@ kontrolne točke proračuna, semena 2–5 skupaj); skupni `repetitions.csv` čez
 semen je obnovljen z isto funkcijo `aggregate` iz `trajguard.experiments.repeat` kot
 pri validacijskem pogonu.
 
+### 1.12 Poročevalski pogon pri 182 uporabnikih (18.–21. avgust 2026)
+
+Polni obseg po lestvici iz `docs/HANDOFF_S4_POPRAVKI.md` §3, s konfiguracijama
+`geolife_geoind_reid` in `geolife_synth_mia` (brez pripone stopnje), ki nosita obe
+avtorjevi odločitvi z dne 17. avgusta 2026: prag populacije `min_match_score: 0.3`
+in proračun `attack_time_budget_s: 1200`; poleg tega izrecni `dataset.max_users: 182`
+in `metrics.memory: false` (R0). Geoind semena 1–5, MIA semena 1–3, `split_seed` 42.
+Vse vrednosti so iz `results/geolife_geoind_reid/seed{1..5}/` in
+`results/geolife_synth_mia/seed{1..3}/` (`run.json`, `results.csv`, obnovljeni
+`repetitions.csv`) ter izvedenega zvezka `notebooks/03_s4_sweep.ipynb`.
+
+**Izmerjeni časi — projekcija iz §1.11 je bila ~9-krat prenizka.** Hladno čiščenje +
+ujemanje: ~57 minut (znotraj semena 1). Geoind: **13,2 ure na toplo seme**
+(47 428–47 606 s; seme 1 s hladnim delom 50 272 s), celotna kampanja geoind
+**66,7 ure** (projekcija: ~8–9 ur). Vzrok razhajanja sta oba faktorja projekcije:
+očiščenih sledi pri 182 je 17 313 (linearna projekcija s stopnje 50 je dala 11 805)
+in preživetje praga 0,3 je 10,2 % (pri 50 izmerjeno 5,0 %), zato je galerija 1770
+sledi namesto projiciranih ~590. MIA: **101–161 s na seme** (skupaj 6,1 min) —
+cena ostaja podatkovno neodvisna, `over_budget` prazen, najdražji klic 28,7 s.
+
+**Proračun 1200 s.** V vseh petih geoind semenih je istih **7 klicev** nad
+proračunom (`memory_traced: false` povsod): `k10` raw/none ~12 000–12 255 s,
+`k5` raw/none ~6 000–6 160 s, `k3` raw/none ~3 610–3 680 s ter `k10` roke ε = 10
+1 318–1 499 s. Korak 0 iz `docs/RUNNING.md` §7.3 je bil opravljen na kontrolni
+točki po semenu 1 (cena je podatkovno odvisna; eksponent glede na velikost galerije
+~2,4 čez stopnje 50 → 182); ker naslednja koraka lestvice spreminjata zasnovo, je
+pogon stal, avtor pa je 18. avgusta 2026 odločil, da semena 2–5 tečejo naprej s
+temi prekoračitvami (pravilo R1 — zagoni stojijo, prekoračitve so zabeležene v
+`run.json` in v tem razdelku).
+
+**Zdravje vzorca.** `n_matched` 1770 od 17 313 očiščenih (razrez čez očiščene:
+train 9665, test 2302, shadow 3355, attack 1991). Galerija reidentifikacije pokrije
+**114 od 182 uporabnikov** (raw in `protected:none`); roka ε = 10 obdrži 445 sledi
+(74 uporabnikov), roki ε = 1 in ε = 0,1 izgubita vse sledi pri ponovnem ujemanju
+(znani vzorec »zaščita z uničenjem izdaje«). Bazen napada na članstvo: 1105
+kandidatov = 809 članov + **296 nečlanov** — merilo ≥ 100 je izpolnjeno z rezervo in
+**točka `tpr@fpr = 0.01` je prvič izmerjena**; točka 0,001 ostaja `NaN` po varovalu
+S4-2 (potrebnih 1000 nečlanov), kar vsak MIA `run.json` in razdelek Warnings v
+`reports/report.md` pravilno izpišeta.
+
+**Izid `tpr@fpr = 0.01`** (`repetitions.csv`, povprečje čez 3 semena): `markov`
+0,027 ob stropu AUC 0,776 [0,730; 0,822]; `rn_ldp_synth` 0,011 / 0,020 / 0,012 za
+ε = 0,5 / 2 / 8 ob AUC 0,513 / 0,517 / 0,472 — mehanizem ostaja pri naključnem
+ugibanju tudi na strogi operativni točki. Strop `markov` je pri 182 spet višji kot
+pri 50 (0,776 proti 0,542; pri 20 ~1,0) — potrjuje opozorilo iz §1.11, da je treba
+strop memorizacije interpretirati na stopnji, na kateri se poroča.
+
+**Diagnostika §9 nad bazenom 182** (izmerjena meja populacije pri pragu 0,3;
+slika `match_score_diagnostic_u182.png`): prag 0,3 → 1769 sledi / 114 uporabnikov /
+296 nečlanov; 0,4 → 1485/102/243; 0,5 → 1213/98/167; 0,6 → 971/82/104;
+0,7 → 663/68/62. Nečlanov je torej bistveno več, kot so napovedovale projekcije s
+stopnje 50 (pri 0,5: izmerjeno 167 proti projekciji 81) — tudi strožji pragi do 0,6
+bi ohranili točko 0,01, vendar po skalirni oceni noben ne spravi klica `k10` pod
+1200 s.
+
+**Posebnosti.** (1) Diagnostika §9 šteje 1769 sledi, orkestrator 1770 — ena sled na
+meji praga, ker si zvezek zaradi absolutnih poti zgradi svoj predpomnilniški vnos
+(§1.11, op. 2); na števila eksperimenta ne vpliva. (2) Pri roki ε = 0,1 imata
+`poi_inference` napaki manj končnih ponovitev (n = 1 oz. 3 od 5) — izrojena roka,
+šum raztopi postanke. (3) `trajguard report`: `risk_matrix.csv` 27 vrstic (9 rok ×
+3 stopnje), `results_master.csv` 1314 vrstic. (4) `repetitions.csv` za geoind je
+obnovljen čez semena 1–5 z `aggregate` (78 vrstic, 76 z n = 5), ker je bil repeat
+zagnan v dveh delih kot pri stopnji 50.
+
 ---
 
 ## 2. Predlagano zaporedje — recenziraj, preden ga sprejmeš
