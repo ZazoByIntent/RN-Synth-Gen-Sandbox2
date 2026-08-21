@@ -6,15 +6,13 @@ doctoral project. This file is the constitution for the repo; read it every sess
 ## Status
 
 **All phases P0–P7 are implemented and merged; RN-LDP-Synth has a working v1
-prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). The S4 fixes are validated at 20
-users and the 50-user rung is measured (17 Aug 2026, `docs/HANDOFF.md` §1.11):
-geoind ~62 min/seed, MIA cost data-independent, 33 non-members, gallery 41/50;
-the `k10` reidentification calls exceed the 300 s budget (~470 s, data-dependent,
-quadratic in gallery size). Two author decisions are open before the 182 run:
-the population threshold (measured projection says 0.5 yields only 81 non-members
-at 182 — below the 100 needed for `fpr = 0.01`; 0.4 is the strictest threshold
-that reaches it) and launching rung 182 itself with its projected ~36–44 h geoind
-budget. Do not launch rung 182 without the author's go-ahead.**
+prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). The S4 campaign is measured on all
+rungs of the sample ladder (20 / 50 / 182); the report reads from the 182-user
+reporting run (18–21 Aug 2026, `docs/HANDOFF.md` §1.12): threshold 0.3, budget
+1200 s, geoind ~13.2 h/seed (66.7 h total, seven reidentification calls per seed
+over budget — accepted by the author, R1), MIA minutes, 296 non-members, gallery
+114/182, `tpr@fpr = 0.01` measured for the first time (0.001 stays NaN by the
+S4-2 guard). The u20/u50 configs remain the measured record at threshold 0.05.**
 Whoever completes a phase updates this line in the same PR.
 
 ## Doc map (read on demand — do not load everything up front)
