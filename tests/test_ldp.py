@@ -84,6 +84,20 @@ def test_oue_estimate_recovers_true_distribution() -> None:
     assert np.abs(est / n - true).sum() < 0.15
 
 
+def test_oue_estimate_unclipped_keeps_negatives() -> None:
+    """clip=False returns the raw (sum - n*q)/(p - q) estimate; the default clips it at 0."""
+    n = 100
+    q = 1.0 / (math.exp(EPS) + 1.0)
+    sums = np.array([60.0, n * q, 0.0])  # above, exactly at, and below the noise floor
+    raw = oue_estimate(sums, n, EPS, clip=False)
+    expected = (sums - n * q) / (0.5 - q)
+    assert np.allclose(raw, expected)
+    assert raw[0] > 0 and raw[1] == pytest.approx(0.0) and raw[2] < 0
+    clipped = oue_estimate(sums, n, EPS)
+    assert np.allclose(clipped, np.clip(expected, 0.0, None))
+    assert clipped[2] == 0.0
+
+
 def test_perturbation_is_deterministic_in_seed() -> None:
     a = [grr_perturb(1, 4, EPS, np.random.default_rng(7)) for _ in range(20)]
     b = [grr_perturb(1, 4, EPS, np.random.default_rng(7)) for _ in range(20)]
