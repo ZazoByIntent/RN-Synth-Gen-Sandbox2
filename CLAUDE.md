@@ -14,8 +14,10 @@ list of open items: `docs/HANDOFF.md`. Protection-mechanism breadth per
 baseline candidate) and measured at the 20-user rung on 2 Sep 2026 (rows in
 `docs/HANDOFF.md` §2.3); its validation against the authors' code follows
 `docs/NACRT_LDPTRACE_VALIDACIJA.md`: PR A (the paper's nine utility metrics,
-`evaluation/ldptrace_metrics.py`) is done, PR B (cells input mode) and PR C (the Porto
-comparison run) are open; ZM-2 … ZM-4 are open.**
+`evaluation/ldptrace_metrics.py`) is done (PR #33); PR B1 (cells representation and
+inputs) has an approved plan and handoff in that document's §10 but no code yet; PR B2
+(orchestrator cells mode) and PR C (the Porto comparison run) are open; ZM-2 … ZM-4 are
+open.**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.
 
