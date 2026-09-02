@@ -148,7 +148,8 @@ načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
   100–800 položaji je še viden; nad ≈ 709 `exp` prekorači obseg.
 - Izmerjene vrstice pri stopnji 20 (tri semena): `docs/HANDOFF.md` §2.3. Dekodiranje
   celic v odseke in roka `ldptrace` v `experiments/rnldp_eval.py` ostajata odprta
-  (ločen PR, glej D-1.2).
+  (ločen PR, glej D-1.2). Validacija porta proti izvirni kodi (metrike članka, način
+  surovih koordinat, Porto) ima lasten načrt: `docs/NACRT_LDPTRACE_VALIDACIJA.md`.
 
 ### 2.1 Kaj mehanizem počne (Du et al., PVLDB 2023; koda `zealscott/LDPTrace`)
 

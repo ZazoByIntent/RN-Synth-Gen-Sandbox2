@@ -12,7 +12,8 @@ prototype. The S4 campaign is measured on all three rungs of the sample ladder
 list of open items: `docs/HANDOFF.md`. Protection-mechanism breadth per
 `docs/NACRT_MEHANIZMI.md`: ZM-1 LDPTrace is implemented (generator `ldptrace`,
 baseline candidate) and measured at the 20-user rung on 2 Sep 2026 (rows in
-`docs/HANDOFF.md` §2.3); ZM-2 … ZM-4 are open.**
+`docs/HANDOFF.md` §2.3); its validation against the authors' code is planned in
+`docs/NACRT_LDPTRACE_VALIDACIJA.md` (not started); ZM-2 … ZM-4 are open.**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.
 
@@ -39,6 +40,11 @@ question (a section, not the file). For a typical coding task this file plus
   baselines, ZM-4 PrivTrace, with design decisions, files to touch, tests, and the
   session prompt. **Read only the section for the step you are implementing, or when
   the user mentions a ZM label.**
+- `docs/NACRT_LDPTRACE_VALIDACIJA.md` (Slovenian) — plan and handoff for validating the
+  `ldptrace` port against the authors' code: the paper's utility metrics, a raw-coordinate
+  grid input mode (`dataset.representation: cells`), the Porto comparison run, and the
+  session prompt. **Read in full only when implementing that validation or when the user
+  mentions LDPTrace metrics, cells mode, or Porto.**
 - `docs/REZULTATI_SHEMA.md` (Slovenian) — the `results.csv` column schema and its
   consumers. **Read only when touching `results.csv` columns or
   `reporting/results_schema.py`, `results_io.py`, `report.py`, `plots.py`, or
