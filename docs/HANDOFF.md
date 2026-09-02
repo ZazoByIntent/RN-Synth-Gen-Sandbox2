@@ -282,6 +282,11 @@ commiti so v `arhiv/HANDOFF_2026-08-21.md`.
   (najbližja RN-LDP-Synth, zato najkoristnejša primerjava).
 - **LDPTrace** prednostno: brez njega se razdelek 7.3 poročila primerja samo proti
   nezasebnemu Markovu. Točkovni LDP in LDPTrace gradita na `privacy/ldp.py` (GRR, OUE).
+- **Načrt izvedbe (2. september 2026):** `docs/NACRT_MEHANIZMI.md`. Izbrani so štirje
+  koraki, vsak ena seja in en PR: ZM-1 LDPTrace, ZM-2 točkovni LDP, ZM-3 naivna trojica
+  (prostorsko zaokroževanje, časovno redčenje, Gaussov šum), ZM-4 PrivTrace. Odločitve,
+  datoteke, testi in prompti za seje so v tistem dokumentu. Nabor baseline-ov za članek
+  (odločitev D5 v projektu »Izbirni predmeti«) ostaja odprt; ti mehanizmi so kandidati.
 
 ### 2.4 Val 5 — horizont B (2. letnik)
 

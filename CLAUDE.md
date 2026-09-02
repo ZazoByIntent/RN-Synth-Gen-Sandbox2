@@ -9,7 +9,9 @@ doctoral project. This file is the constitution for the repo; read it every sess
 prototype. The S4 campaign is measured on all three rungs of the sample ladder
 (20 / 50 / 182 users); the report reads from the 182-user reporting run of
 18–21 Aug 2026 (threshold 0.3, budget 1200 s). Measured values per rung and the
-list of open items: `docs/HANDOFF.md`.** Whoever changes the project state (a new
+list of open items: `docs/HANDOFF.md`. Next planned work: protection-mechanism
+breadth per `docs/NACRT_MEHANIZMI.md` (ZM-1 … ZM-4, nothing implemented yet).**
+Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.
 
 ## Doc map — read on demand, never all at once
@@ -30,6 +32,11 @@ question (a section, not the file). For a typical coding task this file plus
   (20/50/182) and the list of open items. **Read when planning the next piece of
   work, when the report needs a measured number, or when the user mentions S4, a
   rung, or a label such as S4-2, A3, M2.**
+- `docs/NACRT_MEHANIZMI.md` (Slovenian) — implementation plan for the next protection
+  mechanisms, one section per step: ZM-1 LDPTrace, ZM-2 point LDP, ZM-3 naive
+  baselines, ZM-4 PrivTrace, with design decisions, files to touch, tests, and the
+  session prompt. **Read only the section for the step you are implementing, or when
+  the user mentions a ZM label.**
 - `docs/REZULTATI_SHEMA.md` (Slovenian) — the `results.csv` column schema and its
   consumers. **Read only when touching `results.csv` columns or
   `reporting/results_schema.py`, `results_io.py`, `report.py`, `plots.py`, or

@@ -13,6 +13,9 @@ dist/
 # Experiment outputs
 results/
 
+# Poročila za izbirne predmete
+porocila/
+
 # Generated reports (regenerable via `trajguard report`)
 reports/
 
