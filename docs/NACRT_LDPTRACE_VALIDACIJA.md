@@ -1,7 +1,8 @@
 # Načrt: validacija generatorja `ldptrace` proti izvirni kodi
 
 Stanje ob zapisu: 2. september 2026, veja `claude/zm1-ldptrace` (PR #32 na `main`,
-čaka na združitev). Ta dokument je predaja za eno do tri implementacijske seje, ki
+čaka na združitev). **Napredek:** PR A (metrike) izveden 2. septembra 2026 na veji
+`claude/ldptrace-metrics`; dejanske odločitve so pri D-V.7. PR B in PR C sta odprta. Ta dokument je predaja za eno do tri implementacijske seje, ki
 uvedejo (a) metrike uporabnosti iz članka LDPTrace, (b) način branja surovih koordinat
 na mreži kot alternativo ujetim zaporedjem odsekov, izbirljiv v konfiguraciji, in
 (c) primerjalni pogon izvirne kode in najinega porta nad istimi podatki. Seja prebere
@@ -149,6 +150,38 @@ Prebral podagent 2. septembra 2026; seja jih ne preverja znova, razen kjer piše
   `experiment.py`/`utils.py`); kjer izvirnik meri geometrijo (dolžina, premer) nad
   točkami, se meri nad središči celic verige, kar velja enako za obe strani primerjave.
   Obstoječi `evaluation/utility.py` (JSD celic, W1 dolžin iz S4) se **ne** spreminja.
+
+  **Dejanske odločitve PR A (2. september 2026, potrjene v seji):**
+  1. Geometrija **nad točkami, ne nad središči celic**: `length_error`, `diameter_error`
+     in `point_query_avre` sprejmejo zaporedja točk `(x, y)`; `sample_points(grid, chains,
+     rng)` ponovi izvirnikov `trajectory_grid2points` (ena enakomerna točka v celici,
+     veriga z eno celico da dve točki). Izvirnik meri dolžino in premer nad surovimi GPS
+     točkami (realno) in nad vzorčenimi točkami (sintetično), poizvedbe nad vzorčenimi
+     točkami na obeh straneh; `evaluate(real, syn, grid, rng, real_raw_points=…,
+     syn_points=…)` uporabi isto delitev. V PR C se realna stran hrani s surovimi točkami
+     iz `.dat`, sintetična z izvirnikovimi shranjenimi točkami oziroma s `sample_points`
+     nad verigami porta, da so vsi trije stolpci tabele računani enako.
+  2. `pattern_f1` (ne `pattern_f1_error`) vrne F1 = |presek top-k| / k, ker izvirnik pod
+     oznako »Pattern F1 error« izpiše sam F1; `coverage_kendall_tau` in `pattern_f1` sta
+     višje-je-bolje, ostalih sedem so napake.
+  3. JSD z naravnim logaritmom (največ ln 2), glajenje 1e-8 samo v razmerju, brez korena
+     — dobesedno `utils.jensen_shannon_distance`.
+  4. Izenačenja pri top-k se razbijejo deterministično (podpora padajoče, nato indeks
+     celice oziroma vzorec naraščajoče); izvirnik razbija po vrstnem redu vstavljanja po
+     semenskem premešanju baze, česar ni mogoče ponoviti. Vrednosti so enake, kadar na
+     meji top-k ni izenačenja.
+  5. Zaščiti pred deljenjem z nič: F1 pri praznem preseku 0, histogram brez mase `nan`.
+  6. Mreža v PR C se zgradi z izvirnikovim odmikom bbox za 1e-6 na vsaki strani, da se
+     izvirnikove shranjene točke preslikajo v iste celice; indeksiranje celic (naše
+     vrstično po y, izvirnikovo `i·n + j` po x) na nobeno vrednost ne vpliva, razen pri
+     izenačenjih.
+  7. Kendallov tau po izvirniku pri enakih populacijah doseže 1 le brez izenačenj v
+     realnih štetjih (preskočeni pari ostanejo v imenovalcu); test to dokumentira.
+  8. Populacijske metrike potrebujejo populacijsko velikost: pri 20 poteh na mreži 10 × 10
+     so napake velike tudi pri ε = 600 (20 parov začetek–konec med 10.000 predali). Test
+     fixtura zato uporabi 200 poti na mreži 6 × 6 in trdi, da sinteza porta premaga
+     naključne sprehode enake dolžine (gostota 0,01 proti 0,14, Kendall 0,73 proti 0,3–0,4,
+     F1 vzorcev 0,6 proti 0,15); vrednosti so v docstringu testa.
 - **D-V.8 Ogrodje** `src/trajguard/experiments/ldptrace_eval.py` (vzorec
   `rnldp_eval.py`, CLI `python -m trajguard.experiments.ldptrace_eval`): vhod `.dat`
   + `Grid` (iz `porto_stats.json` ali argumentov), za vsak ε in seme prilagodi
@@ -176,7 +209,10 @@ Vsak PR je samostojno združljiv; seja začne v plan mode pri vsakem.
 **PR A — metrike (`claude/ldptrace-metrics`).** Novo:
 `src/trajguard/evaluation/ldptrace_metrics.py`, `tests/test_ldptrace_metrics.py`.
 Spremenjeno: `docs/CODEBASE_STRUCTURE.md` (odstavek `evaluation/`). Brez sprememb
-orkestratorja, brez podatkov.
+orkestratorja, brez podatkov. *Izvedeno 2. septembra 2026*; dejansko spremenjeno še:
+`CLAUDE.md` (vrstica stanja) in ta dokument (stanje, D-V.7). Veja je odcepljena od
+`claude/zm1-ldptrace`, ker dva dokumentacijska commita (ta načrt, docstring o štetju
+poročil) nista bila na `main`; PR A ju prinese.
 
 **PR B — način surovih koordinat (`claude/cells-mode`).** Novo:
 `src/trajguard/datasets/ldptrace_dat.py`, `scripts/porto_to_ldptrace_dat.py`,
