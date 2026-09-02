@@ -138,7 +138,9 @@ načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
   surovo nepristransko oceno; privzeto vedenje je nespremenjeno).
 - Statistika za MIA je **brez člena dolžine** in brez uteži α/β (D-1.3).
 - Nepristranska ocena OUE deli z **dejanskim številom seštetih poročil** na domeno (pri
-  prehodih skupno število poročil prehodov, ne število poti).
+  prehodih skupno število poročil prehodov, ne število poti). To **ni odstopanje**:
+  preverjeno 2. septembra 2026 v izvirni kodi (`ldp.py`, `OUEServer.aggregate` poveča
+  števec `n` ob vsakem poročilu), ki dela enako.
 - Pri stopnji 20 je konfiguriran **samo** 12 × 12 (D-1.4) z ε ∈ {0,5, 2, 8}; roka
   6 × 6 ni dodana.
 - Test uporabnosti pri »absurdno velikem ε« uporablja ε = 600, ne 80: ε se deli na
