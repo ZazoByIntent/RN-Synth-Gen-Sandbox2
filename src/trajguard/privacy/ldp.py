@@ -64,9 +64,7 @@ def oue_perturb(value: int, size: int, epsilon: float, rng: np.random.Generator)
     return bits
 
 
-def oue_estimate(
-    bit_sums: np.ndarray, n: int, epsilon: float, *, clip: bool = True
-) -> np.ndarray:
+def oue_estimate(bit_sums: np.ndarray, n: int, epsilon: float, *, clip: bool = True) -> np.ndarray:
     """Unbiased per-position frequency estimates from ``n`` summed OUE vectors.
 
     Clipped at 0 by default; ``clip=False`` returns the raw unbiased estimate with
