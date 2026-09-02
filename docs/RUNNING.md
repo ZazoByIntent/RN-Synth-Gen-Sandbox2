@@ -488,6 +488,25 @@ same-class shadows sharing that ε. Read those rows against the markov ceiling:
 a working privacy mechanism pulls `auc` toward 0.5 and the low-FPR TPR toward
 zero as ε shrinks.
 
+**Mechanism-breadth sibling config (`docs/NACRT_MEHANIZMI.md` §1.4, §2):**
+
+```sh
+uv run trajguard repeat config/experiments/geolife_mech_mia_u20.yaml --seeds 1 2 3
+```
+
+The S4 configs above are frozen, so new generator arms live in
+`geolife_mech_mia_u20.yaml`: the same 20-user population, split, attack and
+300 s budget, with the arms `markov`, `rn_ldp_synth` at ε = 2 (anchors) and the
+LDPTrace baseline candidate `ldptrace` at ε ∈ {0.5, 2.0, 8.0}. Expected outcome:
+`results/geolife_mech_mia_u20/seed{1,2,3}/` plus `repetitions.csv` with one
+`membership_inference:synthetic:ldptrace:epsilon=…` row set per ε (`auc`,
+`tpr@fpr=0.1`; the 0.001 and 0.01 points are NaN at this rung, S4-2). The
+`ldptrace` arms are cheap (a few seconds per seed): the generator only sums
+Optimized-Unary-Encoding bit vectors over a 12×12 grid, no Dijkstra calibration.
+For both `rn_ldp_synth` and `ldptrace` ε is spent per trajectory (per device),
+not per point, so these rows are not comparable with the geo-indistinguishability
+ε of §7. Measured rows: `docs/HANDOFF.md` §2.3.
+
 ## 7.3 Computational budget and scope reduction (report §6.6)
 
 Every attack invocation has a runtime budget, configurable as

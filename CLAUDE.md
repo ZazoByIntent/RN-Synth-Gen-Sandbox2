@@ -9,8 +9,10 @@ doctoral project. This file is the constitution for the repo; read it every sess
 prototype. The S4 campaign is measured on all three rungs of the sample ladder
 (20 / 50 / 182 users); the report reads from the 182-user reporting run of
 18–21 Aug 2026 (threshold 0.3, budget 1200 s). Measured values per rung and the
-list of open items: `docs/HANDOFF.md`. Next planned work: protection-mechanism
-breadth per `docs/NACRT_MEHANIZMI.md` (ZM-1 … ZM-4, nothing implemented yet).**
+list of open items: `docs/HANDOFF.md`. Protection-mechanism breadth per
+`docs/NACRT_MEHANIZMI.md`: ZM-1 LDPTrace is implemented (generator `ldptrace`,
+baseline candidate) and measured at the 20-user rung on 2 Sep 2026 (rows in
+`docs/HANDOFF.md` §2.3); ZM-2 … ZM-4 are open.**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.
 

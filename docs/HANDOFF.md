@@ -288,6 +288,45 @@ commiti so v `arhiv/HANDOFF_2026-08-21.md`.
   datoteke, testi in prompti za seje so v tistem dokumentu. Nabor baseline-ov za članek
   (odločitev D5 v projektu »Izbirni predmeti«) ostaja odprt; ti mehanizmi so kandidati.
 
+**ZM-1 LDPTrace — zaključen (2. september 2026, veja `claude/zm1-ldptrace`).** Generator
+`ldptrace` (`src/trajguard/synthesis/ldptrace.py`; dejanske odločitve v
+`docs/NACRT_MEHANIZMI.md` §2, uvodni odstavek). Izmerjeno pri stopnji 20 s konfiguracijo
+`config/experiments/geolife_mech_mia_u20.yaml` (sestrska datoteka zamrznjene S4
+konfiguracije; ista populacija, razrez in napad), ukaz
+`uv run trajguard repeat config/experiments/geolife_mech_mia_u20.yaml --seeds 1 2 3`,
+commit kode `a3c79c7`. Bazen napada: 90 članov, 15 nečlanov (`n_pool = 105`), enako kot v
+1.2. Vrednosti iz `results/geolife_mech_mia_u20/repetitions.csv` (povprečje in Studentov
+95-odstotni interval čez tri semena; rezultati ostajajo lokalni, `results/` ni v gitu):
+
+| Roka | AUC | `tpr@fpr = 0,1` | Čas napada na seme |
+|------|-----|------------------|--------------------|
+| `markov` (strop memorizacije) | 0,996 [0,985; 1,007] | 0,989 [0,961; 1,016] | 0,1–0,4 s |
+| `rn_ldp_synth` ε = 2 (sidro S4) | 0,572 [0,376; 0,768] | 0,107 [−0,169; 0,384] | 21,0–21,2 s |
+| `ldptrace` ε = 0,5 | 0,432 [0,345; 0,518] | 0,063 [0,006; 0,120] | 9,4–9,6 s |
+| `ldptrace` ε = 2 | 0,484 [0,409; 0,559] | 0,107 [0,065; 0,150] | 9,4–9,7 s |
+| `ldptrace` ε = 8 | 0,528 [0,439; 0,616] | 0,156 [0,018; 0,294] | 9,4–9,6 s |
+
+Branje: vsi trije intervali AUC za `ldptrace` vsebujejo 0,5, torej napad na članstvo pri
+stopnji 20 ne zazna memorizacije; povprečje raste z ε (0,43 → 0,48 → 0,53), kar je
+pričakovana smer. Točki `tpr@fpr` 0,001 in 0,01 sta NaN z opozorilom v `run.json`
+(varovalo S4-2, 15 nečlanov), `over_budget.attacks` je prazen v vseh treh semenih.
+Sidro `rn_ldp_synth` ε = 2 se ujema z vrednostjo iz S4 (1.2: AUC 0,572 [0,376; 0,768]).
+
+Opombi k mehanizmu pri tej velikosti vzorca (n = 90 učnih poti, verige dolge 1–18
+celic, mediana 3, na mreži 12 × 12):
+
+- **Meja dolžine L_k je nestabilna**, ker histogram dolžin nad 144 predalih pri
+  proračunu ε/10 prevladuje šum: L_k po semenih 1/2/3 je 1/24/38 pri ε = 0,5, 1/26/32
+  pri ε = 2 in 60/70/77 pri ε = 8 (prava največja dolžina je 18). Pri L_k = 1 naprava v
+  drugem krogu pošlje samo začetek in konec (nič prehodov), sinteza da enocelične poti,
+  statistika MIA pa ostane definirana. To je pravilo izvirne kode pri vzorcu, ki je
+  daleč pod obsegom članka (tisoči uporabnikov), ne napaka izvedbe; pri stopnjah 50 in
+  182 je pričakovati stabilnejši L_k.
+- Roka je **poceni**: ~9,5 s na seme za 17 prilagajanj (16 senčnih modelov + tarča),
+  brez umerjanja z Dijkstro, zato so kopije konfiguracije za u50 in 182 računsko
+  neproblematične. Odprto (ločen PR): dekodiranje celic v odseke in roka `ldptrace` v
+  `experiments/rnldp_eval.py`.
+
 ### 2.4 Val 5 — horizont B (2. letnik)
 
 A1 polni klasifikator lastnosti (Geolife nima demografskih oznak), M4 ujemanje
