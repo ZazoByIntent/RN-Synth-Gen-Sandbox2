@@ -358,6 +358,79 @@ istimi konfiguracijami in semeni kot zgoraj je **uspel — vseh pet meril je izp
 izdela poročilo z eno vrstico na roko, varovalo `tpr@fpr` deluje). Izmerjene vrednosti in
 opombe za načrtovanje vzpona so v `docs/HANDOFF_S4_POPRAVKI.md`, razdelek 4.
 
+### 1.11 Prva izmeritev stopnje 50 (17. avgust 2026)
+
+Prvi pogon stopnje `max_users: 50` po lestvici iz `docs/HANDOFF_S4_POPRAVKI.md` §3
+(konfiguraciji `geolife_geoind_reid_u50` in `geolife_synth_mia_u50`, kopiji u20 z edino
+spremembo `max_users`; geoind semena 1–5, MIA semena 1–3, prag ujemanja nespremenjeno
+0,05). Namen stopnje je bil meriti, ne odločati: skaliranje podatkovno odvisnega dela
+cene za napoved proračuna pri 182 in preveritev avtorjeve zabeležke o strožjem pragu
+0,5. Vse vrednosti so iz `results/geolife_geoind_reid_u50/seed{1..5}/` in
+`results/geolife_synth_mia_u50/seed{1..3}/` (`run.json`, `results.csv`) ter izvedenega
+zvezka `notebooks/03_s4_sweep.ipynb` (razdelek 9, tabela za stopnjo 50).
+
+**Izmerjeni časi.** Hladno čiščenje + ujemanje pri 50 uporabnikih: **12,3 minute**
+(enkraten strošek stopnje). Geoind: **~62–63 minut na seme** na toplem predpomnilniku
+(`run_runtime_s` 3725–3808 s; seme 1 s hladnim ujemanjem 4422 s); pri 20 je bilo
+~27 minut. Napad na članstvo: **~74–115 s na seme**, praktično enako kot pri 20
+(114/72/72 s) — **cena MIA je na teh obsegih podatkovno neodvisna**, prevladuje
+konstrukcija generatorjev, ne velikost bazena. Celotna kampanja stopnje 50: ~6,5 ure.
+
+**Prekoračitev proračuna 300 s.** V vseh petih semenih sta ista dva klica nad
+proračunom: `reidentification:raw:k10` in `reidentification:protected:none:k10`
+(467–475 s); `over_budget.attacks` v `run.json` ima zato 10 vnosov, vsi ostali klici
+so pod 240 s, MIA brez prekoračitev (najdražji klic 20,8 s). Korak 0 iz
+`docs/RUNNING.md` §7.3 je opravljen: cena **je** podatkovno odvisna — z galerijo
+238 → 465 sledi je čas klica zrasel s 134 na ~471 s, eksponent ≈ 1,9, torej praktično
+kvadratično z velikostjo galerije (DTW). Lestvica krčenja torej velja, njena naslednja
+koraka (nižji `max_users` ali opustitev `k10`) pa spreminjata zasnovo eksperimenta —
+po pravilu R1 pogon stoji, ukrep je avtorjeva odločitev in ni bil izveden.
+
+**Zdravje vzorca (primerjava z 20).** `n_matched` 465 (prej 238); galerija
+reidentifikacije pokrije 41 od 50 uporabnikov (prej 16 od 20); bazen napada na
+članstvo 163 kandidatov, od tega **33 nečlanov** (prej 15) in 130 članov — točka
+`tpr@fpr = 0.1` je izmerjena, točki 0,01 in 0,001 sta po varovalu S4-2 še `NaN`
+(potrebnih 100 oz. 1000 nečlanov).
+
+**Meritev za prag 0,5 — projekcija iz §7.4 se NE potrdi.** Diagnostična celica §9 nad
+bazenom stopnje 50 (3243 očiščenih sledi): pri pragu 0,5 preživi 111 sledi, 30 od 50
+uporabnikov, **8 nečlanov**, projekcija pri 182 pa **81 nečlanov** — pod mejo 100 za
+oživitev točke `fpr = 0.01` (zabeležka iz PR 3 je predvidevala ~116). Po izmerjeni
+tabeli je najstrožji prag, ki mejo 100 ravno doseže, **0,4** (137 sledi, 30
+uporabnikov, 10 nečlanov, projekcija 100); prag 0,3 da projekcijo 118. Odločitev o
+morebitni zamenjavi praga je avtorjeva in ni sprejeta; 0,05 ostaja v vseh
+konfiguracijah.
+
+**Projekcija proračuna za stopnjo 182** (preživetje ujemanja 14,3 % je čez stopnji
+stabilno; očiščenih sledi pri 182 ≈ 11 800, galerija ≈ 1690): klic `k10`
+≈ 5300–6250 s (~90–104 min); vsota napadov na seme ≈ 20 500–26 400 s; z režijo
+(zaščita, ponovno ujemanje) **~7–9 ur na seme, pet semen ~36–44 ur**, plus ~30–45 min
+hladnega ujemanja; MIA ostane pri minutah. Nad proračunom 300 s bi bili pri 182 poleg
+`k10` zanesljivo tudi klici `k5` (~2700–3200 s) in `k3` (~1600–1900 s) rok `raw` in
+`protected:none`, verjetno pa tudi roka ε = 10 (`k10` 94,5 s pri 50 → ~1000 s). Tudi
+ob morebitnem strožjem pragu 0,5 bi bil `k10` pri 182 tik nad proračunom (galerija
+~404 sledi → ~360 s).
+
+**Vsebinska opazka za poročilo.** Strop memorizacije `markov` je pri 50 uporabnikih
+padel: AUC 0,542 [0,46; 0,62] čez tri semena (pri 20: 0,996–1,000); `rn_ldp_synth`
+ostaja pri naključnem ugibanju (AUC 0,47–0,50, `tpr@fpr=0.1` 0,09–0,13). Verjetna
+razlaga je, da večji učni nabor pomeni manj memorizacije na posamezno sled — ob
+pisanju poročila je treba to preveriti in strop interpretirati na stopnji, na kateri
+se poroča, ne prenašati vrednosti 1,0 z manjše stopnje.
+
+**Operativne opombe.** (1) Zvezek `03_s4_sweep.ipynb` zdaj riše slike razdelkov 4–7
+ločeno po stopnjah v podmapi `reports/s4_figures/u20/` in `u50/`, ker funkcije v
+`reporting/plots.py` združujejo po rokah ne glede na `exp_id` in bi se stopnje sicer
+tiho zmešale v isto sliko; diagnostika §9 teče za obe stopnji (stopnja 50 nad bazenom
+praga 0,05 — brez novega hladnega ujemanja, tabela za prage ≥ 0,05 je popolna).
+(2) Ključ predpomnilnika bazena (`_version_hash`) vsebuje `str(dataset_path)`; zvezek
+poti spremeni v absolutne, zato si diagnostika gradi svoj vnos v `data/processed`
+tudi ob vsebinsko enakem cevovodu — enkraten strošek ~12 min na stopnjo, ne napaka.
+(3) `trajguard repeat` je bil za geoind zagnan v dveh delih (seme 1 posebej zaradi
+kontrolne točke proračuna, semena 2–5 skupaj); skupni `repetitions.csv` čez vseh pet
+semen je obnovljen z isto funkcijo `aggregate` iz `trajguard.experiments.repeat` kot
+pri validacijskem pogonu.
+
 ---
 
 ## 2. Predlagano zaporedje — recenziraj, preden ga sprejmeš
