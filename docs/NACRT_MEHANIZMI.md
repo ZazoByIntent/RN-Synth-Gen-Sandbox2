@@ -14,12 +14,12 @@ geo-ind), sklepanje o domu/delu, sklepanje o članstvu (LiRA) nad generatorji.
 **Izbor (avtor, 2. september 2026).** Iz nabora v zasnovi §7 in `HANDOFF.md` §2.3 ter iz
 zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) so izbrani:
 
-| Korak | Mehanizem | Vmesnik | Garancija | Javna koda | Obseg |
-| --- | --- | --- | --- | --- | --- |
-| ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji |
-| ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen |
-| ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen |
-| ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik |
+| Korak | Mehanizem | Vmesnik | Garancija | Javna koda | Obseg | Stanje |
+| --- | --- | --- | --- | --- | --- | --- |
+| ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, veja `claude/zm1-ldptrace`) |
+| ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | odprt |
+| ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | odprt |
+| ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | odprt |
 
 Vrstni red je hkrati prioriteta: LDPTrace je edini celovit sintetizator pod lokalno DP in
 edina primerjava, ki jo poglavje 7.3 poročila zares potrebuje; točkovni LDP je poceni
@@ -125,7 +125,28 @@ stolpcev (`arm_id` in `params` zadostujeta).
 
 ---
 
-## 2. ZM-1 LDPTrace kot generator (`synthesis/ldptrace.py`, registrsko ime `ldptrace`)
+## 2. ZM-1 LDPTrace kot generator (`synthesis/ldptrace.py`, registrsko ime `ldptrace`) — ZAKLJUČEN
+
+**Izvedeno 2. septembra 2026** (veja `claude/zm1-ldptrace`). Dejanske odločitve, kjer je
+načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
+
+- D-1.5: poročilo konca nosi **pravo zadnjo celico** (članek), tudi ko so poročila
+  prehodov odrezana pri L_k; odstopanje od javne kode je zapisano v docstringu modula.
+- L_k se računa nad **neodrezano** oceno OUE natanko po pravilu izvirne kode (negativne
+  vrednosti ostanejo v vsoti in v tekoči vsoti; rezerva L_k = N²). Zato je
+  `oue_estimate` v `privacy/ldp.py` dobil ključno besedo `clip` (`clip=False` vrne
+  surovo nepristransko oceno; privzeto vedenje je nespremenjeno).
+- Statistika za MIA je **brez člena dolžine** in brez uteži α/β (D-1.3).
+- Nepristranska ocena OUE deli z **dejanskim številom seštetih poročil** na domeno (pri
+  prehodih skupno število poročil prehodov, ne število poti).
+- Pri stopnji 20 je konfiguriran **samo** 12 × 12 (D-1.4) z ε ∈ {0,5, 2, 8}; roka
+  6 × 6 ni dodana.
+- Test uporabnosti pri »absurdno velikem ε« uporablja ε = 600, ne 80: ε se deli na
+  L_k + 1 ≈ 12–20 poročil, zato pri ε = 80 na poročilo ostane le ≈ 5 in šum OUE nad
+  100–800 položaji je še viden; nad ≈ 709 `exp` prekorači obseg.
+- Izmerjene vrstice pri stopnji 20 (tri semena): `docs/HANDOFF.md` §2.3. Dekodiranje
+  celic v odseke in roka `ldptrace` v `experiments/rnldp_eval.py` ostajata odprta
+  (ločen PR, glej D-1.2).
 
 ### 2.1 Kaj mehanizem počne (Du et al., PVLDB 2023; koda `zealscott/LDPTrace`)
 
@@ -215,7 +236,7 @@ konstruktorja.
 
 ```sh
 uv run ruff check . && uv run mypy src && uv run pytest -q
-uv run trajguard run config/experiments/geolife_mech_mia_u20.yaml      # realni Geolife + maps/beijing
+uv run trajguard repeat config/experiments/geolife_mech_mia_u20.yaml --seeds 1 2 3   # realni Geolife + maps/beijing
 ```
 
 Pričakovano: vrstice `membership_inference:synthetic:ldptrace:epsilon=…` z `auc` in

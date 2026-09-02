@@ -1,0 +1,78 @@
+# Protection-mechanism breadth, generator branch (docs/NACRT_MEHANIZMI.md §1.4, §2):
+# membership inference against synthetic generators at the 20-user rung, with the
+# new LDPTrace arms next to two anchors from the S4 campaign.
+#
+# Why a sibling file: the S4 configs (geolife_synth_mia*.yaml) are the frozen,
+# measured record of the sample ladder and must not change. This file copies the
+# u20 population, split, attack and budget settings verbatim (same cleaning,
+# matching and split -> the cached raw pool is shared) and only swaps the arms.
+#
+# Arms: `markov` (non-private memorization ceiling), `rn_ldp_synth` at ε = 2 (anchor
+# from S4), `ldptrace` at ε ∈ {0.5, 2.0, 8.0} — the same ε grid as rn_ldp_synth in S4,
+# for comparability; the LDPTrace paper uses {0.5, 1, 1.5}.
+#
+# ε unit: for both `rn_ldp_synth` and `ldptrace`, ε is spent PER TRAJECTORY (per
+# device release; sequential composition over one device's reports). It is NOT
+# comparable with geo-indistinguishability's per-point ε in the reid configs.
+# LDPTrace is a baseline candidate (decision D5 in project Izbirni predmeti is open).
+experiment:
+  id: geolife_mech_mia_u20
+  seed: 42                   # run seed: shadow subsets, generator fit noise
+  split_seed: 42             # population seed: user subsample + split; pinned across seeds
+  output_dir: results/geolife_mech_mia_u20
+
+map:
+  source: osm
+  region: beijing            # must equal the Geolife native region (orchestrator enforces)
+  bbox: [116.20, 39.75, 116.55, 40.05]
+  crs: EPSG:32650
+
+dataset:
+  id: geolife
+  path: data/raw/geolife
+  native_region: beijing
+  max_users: 20              # design §6.4 sample ladder: 20/50/100/182
+
+cleaning:
+  max_speed_kmh: 200
+  min_points: 20
+  min_length_m: 500
+  resample_s: 5
+
+map_matching:
+  matcher: leuven
+  k_candidates: 8
+  radius_m: 50
+  gps_error_m: 20
+  min_match_score: 0.05      # S4-1 population threshold, as in geolife_synth_mia_u20.yaml
+
+split:
+  scheme: by_user
+  fractions: {train: 0.5, test: 0.2, shadow: 0.2, attack: 0.1}
+
+privacy_mechanisms: []       # no protected arms here: MIA targets the fitted generators
+
+synthetic_generators:
+  - id: markov               # non-private baseline (memorizes the train split)
+    params: {order: 1}
+  - id: rn_ldp_synth         # S4 anchor at ε = 2 (docs/RN_LDP_SYNTH_DESIGN.md)
+    params: {epsilon: 2.0}
+  - id: ldptrace             # ZM-1 (docs/NACRT_MEHANIZMI.md §2): grid 12x12, quantile 0.9,
+    params: {epsilon: [0.5, 2.0, 8.0]}   # length_share 0.1, alpha 0.3, beta 0.2 (defaults);
+                                         # same-class shadows share the arm's epsilon
+
+attacks:
+  - type: membership_inference
+    target_scope: [synthetic]
+    attacker: {n_shadow: 16, subsample: 0.5}
+    fprs: [0.001, 0.01, 0.1] # 0.1 needs only 10 non-members (S4-2); the stricter
+                             # points give NaN at this rung and revive with the pool
+
+metrics:
+  privacy: []                # MIA brings its own family metrics (auc, tpr@fpr=...)
+  bootstrap: {n: 1000, ci: 0.95}   # unused by MIA rows: score-based, CI across seeds
+  memory: false              # untraced runs, as in the S4 u20 config (R0)
+  attack_time_budget_s: 300  # report §6.6, X = 300 s per attack invocation
+
+reporting:
+  export: [csv]

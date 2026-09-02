@@ -153,7 +153,7 @@ orchestrator cannot find it, the missing import in `builtins.py` is the reason.
 
 Currently registered names (grep for `@register` to refresh this list):
 `osm` (map source); `geolife` (dataset); `leuven` (matcher); `none`,
-`geo_indistinguishability` (mechanisms); `markov`, `rn_ldp_synth`
+`geo_indistinguishability` (mechanisms); `markov`, `rn_ldp_synth`, `ldptrace`
 (generators); `reidentification`, `membership_inference`, `reconstruction`,
 `poi_inference` (attacks); `top_k_accuracy`, `linkage_rate` (metrics).
 
@@ -193,14 +193,21 @@ In pipeline order, with the reason each package exists:
   more noise and more privacy); `ldp.py` holds the local-differential-privacy
   randomizers (GRR and OUE — coin-flipping schemes that let a server learn
   population statistics without trusting any individual report) used by the
-  RN-LDP-Synth generator.
+  RN-LDP-Synth and LDPTrace generators.
 - **`synthesis/`** — the generators. `markov.py` learns "after road segment A
   comes segment B x% of the time" and generates new trajectories; it is the
-  non-private ceiling the private generator is compared against. 
+  non-private ceiling the private generators are compared against.
   `rn_ldp_synth.py` is the project's own contribution: it collects only
   privacy-randomized reports from (simulated) devices and synthesizes a
   population of road-network-valid trajectories from the aggregates — see
   `docs/RN_LDP_SYNTH_DESIGN.md` for the full design and privacy proof.
+  `ldptrace.py` is the first external baseline candidate (LDPTrace, Du et al.
+  2023): the same simulated-device idea, but over a plain grid of cells rather
+  than the road network — each device reports its trajectory length, start cell,
+  cell-to-cell transitions and end cell with the same OUE randomizer, and the
+  collector synthesizes cell walks from the aggregates. Its output is a cell
+  sequence, not road segments; the module docstring lists where it deviates
+  from the authors' public code and why.
 - **`attacks/`** — the four adversary families, one file each:
   `reidentification.py` ("whose trajectory is this?"), `membership.py` ("was
   this person's data used for training?"), `reconstruction.py` ("can the

@@ -64,10 +64,16 @@ def oue_perturb(value: int, size: int, epsilon: float, rng: np.random.Generator)
     return bits
 
 
-def oue_estimate(bit_sums: np.ndarray, n: int, epsilon: float) -> np.ndarray:
-    """Unbiased per-position frequency estimates from ``n`` summed OUE vectors, clipped at 0."""
+def oue_estimate(bit_sums: np.ndarray, n: int, epsilon: float, *, clip: bool = True) -> np.ndarray:
+    """Unbiased per-position frequency estimates from ``n`` summed OUE vectors.
+
+    Clipped at 0 by default; ``clip=False`` returns the raw unbiased estimate with
+    its negative entries (LDPTrace's length-quantile rule needs the unclipped total).
+    """
     _check_epsilon(epsilon)
     q = 1.0 / (math.exp(epsilon) + 1.0)
     est: np.ndarray = (np.asarray(bit_sums, dtype=float) - n * q) / (0.5 - q)
+    if not clip:
+        return est
     clipped: np.ndarray = np.clip(est, 0.0, None)
     return clipped

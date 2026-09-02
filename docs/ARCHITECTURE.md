@@ -207,6 +207,9 @@ k-anonymity, diffusion generators (Diff-RNTraj/ControlTraj), full attribute
 inference with a classifier, federated approaches. `RNLDPSynth` has a working v1
 prototype (registered as `rn_ldp_synth`; design in `docs/RN_LDP_SYNTH_DESIGN.md`);
 further RN-LDP-Synth development happens only on explicit request, and the benchmark
-must keep running on baseline mechanisms without it. Everything else attaches later
-through the existing ABCs without touching the core — that is the point of the
-interfaces.
+must keep running on baseline mechanisms without it. The first external baseline
+candidate is in: `LDPTraceGenerator` (registered as `ldptrace`, plan in
+`docs/NACRT_MEHANIZMI.md` §2) synthesizes grid-cell walks under per-trajectory
+ε-LDP and emits cell indices, not edge sequences — decoding cells back to roads is a
+separate, later step. Everything else attaches later through the existing ABCs
+without touching the core — that is the point of the interfaces.
