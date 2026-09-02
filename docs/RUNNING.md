@@ -308,13 +308,23 @@ searches for the nearest matching trajectory.
 
 **What population these numbers describe.** The report measures *driving traces*,
 defined operationally: the population is the set of cleaned trajectories that match
-the drive road network with `match_score ≥ 0.05` (`map_matching.min_match_score`);
-everything below is dropped before the split. The boundary is measured, not
-asserted: the diagnostic cell in `notebooks/03_s4_sweep.ipynb` §9 shows the full
-score distribution, and 0.05 is its one natural break — 85 % of cleaned Geolife
-trajectories at the 20-user rung score below it (walking, cycling, subway, or
-outside the bbox) and essentially do not match the drive network at all. See §7.4
-for how this threshold was chosen and when it is expected to change.
+the drive road network with `match_score ≥ min_match_score`
+(`map_matching.min_match_score`); everything below is dropped before the split.
+The threshold has two values, both measured, not asserted:
+
+- **0.3 — the reporting population** (author decision, 17 Aug 2026, from the
+  50-rung measurement, HANDOFF §1.11): the strictest-with-margin threshold whose
+  projected non-member count at 182 users (118) clears the 100 needed to revive
+  the `tpr@fpr = 0.01` operating point. The full-scale configs
+  (`geolife_geoind_reid`, `geolife_synth_mia`) use it.
+- **0.05 — the measurement-rung population** (u20/u50 configs, unchanged): the one
+  natural break of the score distribution — 85 % of cleaned Geolife trajectories
+  at the 20-user rung score below it (walking, cycling, subway, or outside the
+  bbox) and essentially do not match the drive network at all.
+
+The diagnostic cell in `notebooks/03_s4_sweep.ipynb` §9 shows the score
+distribution and the threshold table per rung. See §7.4 for the history of how
+these thresholds were chosen.
 
 **Expected outcome:**
 
@@ -469,8 +479,13 @@ zero as ε shrinks.
 
 ## 7.3 Computational budget and scope reduction (report §6.6)
 
-Every attack invocation has a runtime budget of **X = 300 seconds** (the author's
-decision, 5 Aug 2026), configurable as `metrics.attack_time_budget_s`. The
+Every attack invocation has a runtime budget, configurable as
+`metrics.attack_time_budget_s`: **X = 300 seconds** at the 20/50 measurement
+rungs (the author's decision, 5 Aug 2026) and **X = 1200 seconds** for the
+182-user reporting run (the author's decision, 17 Aug 2026, from the 50-rung
+measurement, HANDOFF §1.11: at threshold 0.3 the projected gallery is ~590
+traces and the dearest call — reidentification k10, DTW roughly quadratic in
+gallery size — lands at ~750 s, over the old budget and under the new one). The
 orchestrator compares each invocation's `attack_runtime_s` against it and, when
 exceeded, prints a console warning and records the offenders in `run.json` under
 `over_budget` (`budget_s`, `memory_traced`, and the worst-first `attacks` list).
@@ -515,13 +530,15 @@ The rules, applied one step at a time (re-measure after each step):
 
 **Population definition.** All Geolife experiments measure driving traces, defined
 operationally as cleaned trajectories with `match_score ≥ min_match_score` against
-the drive network (see §6). The current threshold **0.05** was chosen from the
-measured score distribution (diagnostic cell, `notebooks/03_s4_sweep.ipynb` §9,
+the drive network (see §6). The measurement-rung threshold **0.05** was chosen from
+the measured score distribution (diagnostic cell, `notebooks/03_s4_sweep.ipynb` §9,
 executed 16 Aug 2026 at `max_users: 20`): the distribution has exactly one natural
 break, at ≈ 0.05 — 85 % of cleaned trajectories (1371/1607) score below it and do
 not match the drive network at all, while above it a thin, roughly flat tail runs
-to ~0.85 with no second break. The report presents that distribution alongside the
-results, so the population boundary is a measured quantity, not a claim.
+to ~0.85 with no second break. The reporting threshold **0.3** was then chosen
+from the 50-rung measurement (see the last paragraph of this section). The report
+presents the distribution alongside the results, so the population boundary is a
+measured quantity, not a claim.
 
 **Validation-run success criterion** (`docs/HANDOFF_S4_POPRAVKI.md` §2). After the
 S4 fix PRs, the campaign is repeated at `max_users: 20` with the same configs and
@@ -547,13 +564,17 @@ threshold keeps enough data, the reserve option from S4-1 opens (filtering by
 Geolife transport-mode labels) — that is a new author decision, not an
 implementation one.
 
-**Expected change at larger rungs.** The author's note (16 Aug 2026): from
-`max_users: 50` up, a stricter threshold of **0.5** would likely suffice — the
-diagnostic projection gives ≈ 116 non-members at 182 users (≥ 100 needed for
-`fpr = 0.01`), and user coverage grows with the pool. This is a projection, not a
-measurement: the 0.2 factor in it is a *user* fraction while the realised
-per-trace test share at 20 users is 8.8 %, so the 50-user rung must confirm it
-before the threshold moves. Until then 0.05 stands in every config.
+**The reporting threshold, measured at the 50 rung.** The author's note of
+16 Aug 2026 projected that a stricter threshold of **0.5** would suffice from
+`max_users: 50` up (≈ 116 non-members at 182 users). The 50-rung measurement
+(17 Aug 2026, diagnostic cell §9 over the rung's 3243 cleaned traces; HANDOFF
+§1.11) did **not** confirm it: at 0.5 only 111 traces and 8 non-members survive,
+projecting **81** non-members at 182 — below the 100 needed for `fpr = 0.01`.
+By the measured table, 0.4 is the strictest threshold that reaches 100 exactly;
+**0.3** reaches it with margin (162 traces, 33/50 users, 12 non-members,
+projection 118). The author's decision (17 Aug 2026): the 182-user reporting
+configs use **0.3**; the u20/u50 configs stay at 0.05 as the measured record of
+those rungs.
 
 ## 8. Aggregate risk report
 
