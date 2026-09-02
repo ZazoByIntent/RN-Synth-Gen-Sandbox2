@@ -6,37 +6,50 @@ doctoral project. This file is the constitution for the repo; read it every sess
 ## Status
 
 **All phases P0–P7 are implemented and merged; RN-LDP-Synth has a working v1
-prototype (see `docs/RN_LDP_SYNTH_DESIGN.md`). The S4 campaign is measured on all
-rungs of the sample ladder (20 / 50 / 182); the report reads from the 182-user
-reporting run (18–21 Aug 2026, `docs/HANDOFF.md` §1.12): threshold 0.3, budget
-1200 s, geoind ~13.2 h/seed (66.7 h total, seven reidentification calls per seed
-over budget — accepted by the author, R1), MIA minutes, 296 non-members, gallery
-114/182, `tpr@fpr = 0.01` measured for the first time (0.001 stays NaN by the
-S4-2 guard). The u20/u50 configs remain the measured record at threshold 0.05.**
-Whoever completes a phase updates this line in the same PR.
+prototype. The S4 campaign is measured on all three rungs of the sample ladder
+(20 / 50 / 182 users); the report reads from the 182-user reporting run of
+18–21 Aug 2026 (threshold 0.3, budget 1200 s). Measured values per rung and the
+list of open items: `docs/HANDOFF.md`.** Whoever changes the project state (a new
+run, a closed item, a new component) updates this line in the same PR.
 
-## Doc map (read on demand — do not load everything up front)
+## Doc map — read on demand, never all at once
 
-- `docs/ARCHITECTURE.md` — English quick reference: the seven ABCs and registry,
-  datamodel, data flow, map/dataset consistency table, repo layout, config shape.
-  Read this before writing any code.
-- `docs/IMPLEMENTATION_PLAN.md` — phases P0→P7 with scope and definition of done.
-  Read only the current phase (see Status above).
-- `docs/Tehnicna_zasnova_eksperimentalno_okolje.md` — full design rationale
-  (Slovenian, ~550 lines). Open a specific section only when the two files above
-  leave a question open. On conflict, the design doc beats ARCHITECTURE.md (then
-  fix ARCHITECTURE.md in the same PR); the golden rules below beat both.
-- `docs/PROMPTS.md` — per-phase prompts the maintainer pastes into fresh sessions.
-  Not standing instructions — act on them only when pasted.
-- `docs/RUNNING.md` — setup and every runnable entry point (tests, map builds,
-  sanity notebook, experiments, report, RN-LDP-Synth sweep) with expected outputs
-  and troubleshooting. Read when running things or diagnosing a run.
-- `docs/CODEBASE_PHASE_GUIDE.md` — plain-language walkthrough of the whole codebase;
-  `docs/CODEBASE_STRUCTURE.md` — layout and design decisions for new developers;
-  `docs/RN_LDP_SYNTH_DESIGN.md` — design of the RN-LDP-Synth v1 mechanism.
+Every session reads this file. Open a document below **only when its trigger
+applies to the task at hand**, and open the smallest part that answers the
+question (a section, not the file). For a typical coding task this file plus
+`docs/ARCHITECTURE.md` is enough context.
 
-For a typical task, this file + ARCHITECTURE.md + the current phase of the plan is
-enough context.
+- `docs/ARCHITECTURE.md` (English) — the seven ABCs and registry, datamodel, data
+  flow, map/dataset consistency table, repo layout, config shape.
+  **Read before writing any code.**
+- `docs/RUNNING.md` (English, ~690 lines) — every runnable entry point with expected
+  output and troubleshooting; table of contents at the top. **Read only the section
+  for the command you are running or diagnosing** (find it by its § number), never
+  the whole file.
+- `docs/HANDOFF.md` (Slovenian) — measured record of the S4 campaign per rung
+  (20/50/182) and the list of open items. **Read when planning the next piece of
+  work, when the report needs a measured number, or when the user mentions S4, a
+  rung, or a label such as S4-2, A3, M2.**
+- `docs/REZULTATI_SHEMA.md` (Slovenian) — the `results.csv` column schema and its
+  consumers. **Read only when touching `results.csv` columns or
+  `reporting/results_schema.py`, `results_io.py`, `report.py`, `plots.py`, or
+  notebook 03.** A test pins this doc to the code; the file must stay where it is.
+- `docs/RN_LDP_SYNTH_DESIGN.md` (English) — design, privacy proof and fixture-scale
+  evidence of RN-LDP-Synth. **Read only when working on `synthesis/rn_ldp_synth.py`
+  or `privacy/ldp.py`, or when interpreting `rn_ldp_synth` results.**
+- `docs/CODEBASE_STRUCTURE.md` (English) — the reasoning behind the layout and the
+  design decisions, written for a new developer. **Read only when asked to explain
+  the design, onboard someone, or justify why something is built the way it is.**
+  Not needed for ordinary coding.
+- `docs/Tehnicna_zasnova_eksperimentalno_okolje.md` (Slovenian, ~550 lines) — the
+  original design document. **Open one section by its § number only when
+  ARCHITECTURE.md leaves a question open.** On conflict the design doc beats
+  ARCHITECTURE.md (fix ARCHITECTURE.md in the same PR); the golden rules below beat
+  both.
+- `arhiv/` — closed documents (phase plan and prompts P0–P7, the historical
+  phase-by-phase codebase guide, the full HANDOFF history, the S4 fix plan);
+  `arhiv/README.md` lists them. **Never read unless the user explicitly asks for
+  history.** Nothing in there is a standing instruction.
 
 ## Golden rules
 

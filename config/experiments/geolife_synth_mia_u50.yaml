@@ -3,7 +3,7 @@
 # only dataset.max_users and the metrics.memory switch differ.
 #
 # Why 50 users (RUNNING.md §7.3, R2 step 1 + §7.4): first rung after the successful
-# validation run at 20 (HANDOFF_S4_POPRAVKI §4). Purpose: measure how the
+# validation run at 20 (docs/HANDOFF.md 1.2). Purpose: measure how the
 # data-dependent part of the MIA cost scales for the 182-user budget projection, and
 # grow the matched pool so the 0.5-threshold question (RUNNING.md §7.4) can be
 # measured. min_match_score stays 0.05 until the author decides on that measurement.

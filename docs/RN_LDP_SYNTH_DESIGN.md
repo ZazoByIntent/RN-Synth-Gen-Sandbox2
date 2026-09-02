@@ -199,11 +199,13 @@ budget conservation, not a claimed-first technique.
 
 ## 10. Limitations
 
-1. **Attack evaluation is fixture-scale only (so far).** Honest LiRA now runs against this generator
-   (same-class shadows via the shadow factory; §12) at the 20-trajectory fixture scale — single seed,
-   coarse TPR granularity, no cross-seed error bars. Larger-scale MIA (Geolife-sized populations) and
-   re-identification against synthetic pools (needs orchestrator `target_scope: synthetic` wiring)
-   remain open.
+1. **Attack evaluation beyond the fixture is the S4 campaign.** Honest LiRA runs against this generator
+   both at the 20-trajectory fixture scale (same-class shadows via the shadow factory; §12 — single
+   seed, coarse TPR granularity) and, through the orchestrator (`config/experiments/geolife_synth_mia*`),
+   on real Geolife at 20 / 50 / 182 users with three seeds; the measured record is `docs/HANDOFF.md` §1
+   (at 182 users the `tpr@fpr = 0.01` point is measurable, 0.001 is not). Re-identification against
+   synthetic pools is deliberately not run: synthetic paths belong to no real person, so memorization
+   is the question and LiRA answers it.
 2. **Zone granularity is a bias-variance knob.** Coarse grids lose spatial detail; fine grids blow up |Z|
    and |F| and hence GRR/OUE variance. Defaults (12×12) are untuned; tuning must use public data only.
 3. **Decode truncations.** Zones unreachable from the current decode position truncate walks (0 on the
@@ -221,10 +223,11 @@ budget conservation, not a claimed-first technique.
 ## 11. Integration and evaluation in trajguard
 
 - **ABC/registration:** `SyntheticGenerator` subclass registered as `("generator", "rn_ldp_synth")`,
-  imported in `experiments/builtins.py`. Constructor takes the `RoadNetwork` explicitly; the orchestrator
-  run loop does not instantiate generators today (synthetic target scope is a later phase), so tests and
-  scripts construct it directly. Future orchestrator wiring needs a network-injection path (e.g. via
-  `_net_provider`) since the mechanism convention `cls(**yaml_params, seed=...)` has no `RoadNetwork` slot.
+  imported in `experiments/builtins.py`. Constructor takes the `RoadNetwork` explicitly; when the
+  generator is named under `synthetic_generators` in an experiment YAML, the orchestrator injects the
+  network and the seed by inspecting the constructor signature (`_generator_ctor` in
+  `experiments/orchestrator.py`) and passes the YAML params through unchanged. Tests and `rnldp_eval`
+  construct it directly.
 - **Datamodel:** consumes `TrajectoryView.as_segments()` (train split only, enforced); produces frozen
   `SyntheticTrajectory` records with edge-tuple payloads, `trained_on_split="train"`, `params_hash` over
   all constructor params + generate seed.
@@ -238,8 +241,8 @@ budget conservation, not a claimed-first technique.
   (`evaluation.utility.unpaired_cell_js_divergence` / `unpaired_length_w1`; the paired dispatch-table
   variants assume a raw↔released bijection population synthesis doesn't have); privacy via the empirical
   randomizer ratio test (in-tree) and LiRA with same-class shadows
-  (`MembershipInferenceAttack(shadow_factory=...)`); re-identification once synthetic pools enter the
-  run loop. First measured numbers: §12.
+  (`MembershipInferenceAttack(shadow_factory=...)`); re-identification against synthetic pools is not
+  planned (§10.1). Fixture-scale numbers: §12; campaign-scale numbers: `docs/HANDOFF.md` §1.
 
 ## 12. Measured evidence (fixture scale)
 

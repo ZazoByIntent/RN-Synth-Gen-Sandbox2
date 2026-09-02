@@ -2,7 +2,7 @@
 # Real Geolife needs a Microsoft licence; drop the .plt tree at dataset.path to run.
 #
 # This is the REPORTING config: the full 182-user rung of the design §6.4 sample
-# ladder, run after the 20- and 50-user measurement rungs (HANDOFF §1.11). It
+# ladder, run after the 20- and 50-user measurement rungs (docs/HANDOFF.md 1.3). It
 # carries two author decisions of 17 Aug 2026, both grounded in the 50-rung
 # measurement: population threshold 0.3 (see the map_matching comment) and
 # attack budget 1200 s (see the metrics comment). The u20/u50 configs stay at
@@ -47,7 +47,7 @@ map_matching:
   radius_m: 50
   gps_error_m: 20
   # S4-1 population threshold, reporting value (R3; author decision, 17 Aug 2026,
-  # from the 50-rung measurement, HANDOFF §1.11 / notebooks/03_s4_sweep.ipynb §9):
+  # from the 50-rung measurement, docs/HANDOFF.md 1.3 / notebooks/03_s4_sweep.ipynb §9):
   # the earlier note "0.5 should suffice from the 50-user rung up" did NOT survive
   # measurement — 0.5 projects only 81 non-members at 182 users (< 100 needed for
   # fpr = 0.01), 0.4 reaches 100 exactly, 0.3 reaches it with margin (projected
@@ -84,7 +84,7 @@ metrics:
                              # doubles attack time; budget verdicts need untraced
                              # runs. peak_memory_mb stays empty in this campaign.
   # Budget raised 300 -> 1200 s for the 182 rung (R3; author decision, 17 Aug 2026,
-  # from the 50-rung measurement, HANDOFF §1.11) — decided for the campaign as a
+  # from the 50-rung measurement, docs/HANDOFF.md 1.3) — decided for the campaign as a
   # whole; MIA itself measured ~74-115 s per seed at u50, data-independent.
   # 300 s (author decision, 5 Aug 2026) remains the budget of the u20/u50 rungs.
   attack_time_budget_s: 1200

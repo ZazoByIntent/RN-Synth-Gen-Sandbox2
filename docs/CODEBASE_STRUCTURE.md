@@ -3,9 +3,10 @@
 > A tour for a developer joining the project. It explains the folder structure,
 > the three architectural ideas everything hangs on, and the design decisions
 > behind them — the "why", not just the "what". It describes the codebase as it
-> is **today**; for the commit-by-commit history read
-> `docs/CODEBASE_PHASE_GUIDE.md`, for a terse API reference read
-> `docs/ARCHITECTURE.md`, and for runnable commands read `docs/RUNNING.md`.
+> is **today** (last checked against the code on 2 Sep 2026); for a terse API
+> reference read `docs/ARCHITECTURE.md`, for runnable commands read
+> `docs/RUNNING.md`. The archived `arhiv/CODEBASE_PHASE_GUIDE.md` tells the
+> phase-by-phase history up to July 2026 (later modules are missing there).
 
 ## 1. What this project is, in one paragraph
 
@@ -53,9 +54,10 @@ on the belt (datamodel), or the warehouse (data folders and caches).
 ```
 trajguard/
 ├── src/trajguard/     # all the code (one package per pipeline station — §5)
-├── tests/             # pytest suite + committed fixtures; offline, runs in ~20 s
+├── tests/             # pytest suite + committed fixtures; offline, runs in about a minute
 ├── config/            # experiment definitions (YAML) + the map-region catalogue
-├── docs/              # design docs and guides (this file among them)
+├── docs/              # live design docs and guides (this file among them)
+├── arhiv/             # closed documents kept for history — sessions do not read them
 ├── data/
 │   ├── raw/           # original datasets — IMMUTABLE, the pipeline never writes here
 │   ├── interim/       # cleaned trajectories        ┐
@@ -220,15 +222,21 @@ In pipeline order, with the reason each package exists:
 - **`experiments/`** — the conveyor belt: `registry.py` (§4.3),
   `builtins.py` (the import hub), `orchestrator.py` (reads a YAML config,
   validates it loudly, enforces the safety rules, runs the pipeline, caches,
-  and writes results with full provenance), `cli.py` (the `trajguard run` /
-  `trajguard report` commands), and `rnldp_eval.py` (the standalone
-  RN-LDP-Synth evidence sweep, runnable offline on the committed fixtures).
-- **`reporting/`** — `tradeoff.py` draws the privacy-versus-utility plot;
-  `report.py` aggregates every `results/*/run.json` into tidy tables, a risk
-  matrix (mechanisms × attack families), and a rendered Markdown report. Kept
-  separate from `evaluation/` because it consumes finished result files, never
-  live pipeline objects — you can regenerate every report without rerunning a
-  single experiment.
+  and writes results with full provenance), `repeat.py` (the `trajguard repeat`
+  command: the same config once per seed, aggregated to `repetitions.csv` with
+  an across-seed confidence interval), `cli.py` (the `trajguard run` / `repeat`
+  / `report` commands), and `rnldp_eval.py` (the standalone RN-LDP-Synth
+  evidence sweep, runnable offline on the committed fixtures).
+- **`reporting/`** — `results_schema.py` is the unified results table
+  (`results.csv`, `docs/REZULTATI_SHEMA.md`) as code; `results_io.py` reads it
+  back and aggregates repetitions across seeds; `plots.py` draws the per-run
+  report figures from those rows and owns the family → headline-metric
+  mapping; `tradeoff.py` draws the privacy-versus-utility plot; `report.py`
+  aggregates every run (single runs and `seed<N>/` repetitions) into tidy
+  tables, a risk matrix (mechanisms × attack families), and a rendered Markdown
+  report. Kept separate from `evaluation/` because it consumes finished result
+  files, never live pipeline objects — you can regenerate every report without
+  rerunning a single experiment.
 
 ## 6. The design decisions, and what each one buys
 
@@ -279,7 +287,7 @@ config validation and in its up-front rejection of attacks it cannot drive.
 a small real road network (committed once, built with the real code) and
 format-faithful fake Geolife files with *planted defects* that the cleaning
 tests assert on. Tests never touch the network and never read `data/`. This
-is what makes the ~180-test suite finish in about 20 seconds, which in turn
+is what makes the 250-test suite finish in about a minute, which in turn
 is what makes "every change ships with a passing test" a rule people actually
 follow.
 
@@ -307,34 +315,54 @@ order (all inside `experiments/orchestrator.py` unless noted):
    Each protected release is re-matched onto the roads (the attacker sees
    noisy data processed the way a real adversary would process it) and cached
    under `data/protected/<hash>/`.
-4. **Attack and score.** The re-identification attack runs per arm and per
-   attacker-knowledge level, with the probe population held fixed on the raw
-   pool so all arms share the same denominator; metrics get bootstrap
-   confidence intervals; utility metrics compare each noisy release with the
-   raw one.
+4. **Attack and score.** Every configured attack family runs per arm:
+   re-identification per attacker-knowledge level, with the probe population
+   held fixed on the raw pool so all arms share the same denominator;
+   reconstruction and POI inference per protected arm; membership inference
+   (LiRA) per fitted generator arm from the `synthetic_generators` section,
+   with same-class shadow generators trained on the shadow split. Metrics get
+   bootstrap confidence intervals (the score-based membership metrics get
+   theirs from repetitions instead); utility metrics compare each noisy
+   release with the raw one.
 5. **Write with provenance.** The run directory under `results/` receives
-   `metrics.csv`, `matrix.csv`, `tradeoff.png`, and `run.json` — the last one
-   recording the configuration fingerprint, code version, seed, and how many
-   trajectories survived each stage (your first stop when numbers look odd).
+   `metrics.csv`, `results.csv` (the unified results table), `matrix.csv`, the
+   configured plots (`tradeoff*.png` and the four report figures), and
+   `run.json` — the last one recording the configuration fingerprint, code
+   version, seed, how many trajectories survived each stage, and which attack
+   calls exceeded the runtime budget (your first stop when numbers look odd).
 
 `uv run trajguard report` then aggregates every accumulated `run.json` into
 `reports/report.md` with the risk matrix and per-attack tables.
 
 ## 8. Honest seams: what is deliberately not wired up
 
-Two seams exist on purpose, and the code announces them instead of hiding them:
+All four attack families and both generators run inside `trajguard run` today
+(`_ORCHESTRATOR_ATTACKS` in `orchestrator.py` lists the families the loop can
+drive, and rejects anything else up front). The remaining seams exist on
+purpose, and the code announces them instead of hiding them:
 
-- **The orchestrator's run loop drives only re-identification** (see
-  `_ORCHESTRATOR_ATTACKS` in `orchestrator.py`). The membership,
-  reconstruction, and attribute attacks are fully implemented and tested, but
-  they need inputs the loop does not yet supply (a fitted generator, the noise
-  parameters, clean GPS points), so a config naming them is rejected up front
-  rather than crashing mid-pipeline. They join the set as they are wired in.
-- **RN-LDP-Synth is evaluated through its own harness**
-  (`python -m trajguard.experiments.rnldp_eval`), not through `trajguard run`,
-  because the run loop does not yet instantiate generators or attack synthetic
-  pools. Its measured evidence so far is fixture-scale only — see
-  `docs/RN_LDP_SYNTH_DESIGN.md` §10–§12 for the numbers and their caveats.
+- **Two trajectory views are documented hooks, not implementations.**
+  `as_graph_path()` and `as_poi_visits()` in `representation/views.py` raise
+  `NotImplementedError`; the top-k POI metric that would need the latter also
+  needs a fixture layer of points of interest that the repository does not have.
+- **Re-identification never targets synthetic pools.** Its `target_scope` is
+  `{raw, protected}` by design: synthetic trajectories belong to no real
+  person, so the meaningful privacy question for synthesis is memorization,
+  which the membership attack answers.
+- **Synthetic releases are not cached and no utility metric runs over
+  synthesis inside `trajguard run`.** LiRA queries the fitted generator for a
+  path's likelihood, not for samples, so `data/synthetic/` stays empty; the
+  standalone harness `python -m trajguard.experiments.rnldp_eval` covers
+  synthesis utility at fixture scale.
+- **`trajguard report` draws only the re-identification trade-off plot per
+  run.** The four planned report figures (`reporting/plots.py`) are drawn per
+  run by the orchestrator and across rungs by notebook 03, not by the report
+  command.
+- **Notebooks are not executed by CI** (which runs `ruff`, `mypy`, `pytest`
+  only), so their saved outputs can go stale silently; re-run them by hand
+  after changes that alter outputs (`RUNNING.md` §3).
+
+The list of open items with their status lives in `docs/HANDOFF.md` §2.
 
 ## 9. Recipe: adding a new component
 
@@ -363,11 +391,12 @@ one of the seams in §8, and that wiring is its own, separate task).
 - `CLAUDE.md` — the golden rules, in force for every change.
 - `docs/ARCHITECTURE.md` — compact reference: ABC signatures, entity fields,
   config keys, region table.
-- `docs/CODEBASE_PHASE_GUIDE.md` — the same codebase explained historically,
-  phase by phase, file by file.
 - `docs/RUNNING.md` — every runnable command with expected output and
   troubleshooting.
+- `docs/HANDOFF.md` — the measured record of the S4 campaign and the open items.
 - `docs/RN_LDP_SYNTH_DESIGN.md` — design, privacy proof, and first measured
   results of the RN-LDP-Synth generator.
+- `arhiv/CODEBASE_PHASE_GUIDE.md` — the codebase explained historically, phase
+  by phase, file by file, as of July 2026 (archived; later modules are missing).
 - `docs/Tehnicna_zasnova_eksperimentalno_okolje.md` — the original design
   document (Slovenian); it wins over `ARCHITECTURE.md` on conflicts.

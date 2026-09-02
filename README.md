@@ -3,7 +3,10 @@
 Trajectory privacy attack & protection benchmark (doctoral research project).
 
 - Full design: `docs/Tehnicna_zasnova_eksperimentalno_okolje.md`
-- Phased implementation plan: `docs/IMPLEMENTATION_PLAN.md`
+- Architecture quick reference: `docs/ARCHITECTURE.md`
+- How to run everything: `docs/RUNNING.md`
+- Project state and open items: `docs/HANDOFF.md`
+- Doc map with "read when" rules: `CLAUDE.md`; closed documents: `arhiv/`
 
 ## Setup
 

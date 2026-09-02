@@ -5,6 +5,15 @@ do when something goes wrong. All commands are run from the repository root. Eve
 command and error message in this guide was executed and captured on a clean clone
 of `main` (July 2026); numbers marked "fixture" come from the committed test data.
 
+**Sections — jump to the one you need, do not read the whole file:** §0 setup ·
+§1 tests and lint · §2 one-time inputs (map build, Geolife) · §3 notebooks 01 / 02 /
+03 · §4 visual recipes (map, one trajectory before/after) · §5 fixture smoke test ·
+§6 baseline reidentification and the population threshold · §7 geo-ind grid,
+reconstruction, POI inference · §7.1 repetitions across seeds · §7.2 membership
+inference · §7.3 runtime budget and scope reduction · §7.4 validation run and the
+threshold history · §8 `trajguard report` · §9 RN-LDP-Synth evidence sweep ·
+§10 caching · §11 troubleshooting.
+
 ## 0. One-time setup
 
 You need Python 3.11+ and [uv](https://docs.astral.sh/uv/), the Python package
@@ -25,7 +34,7 @@ anything manually.
 uv run pytest
 ```
 
-**Expected outcome:** `177 passed` in roughly 20 seconds. The suite runs entirely on
+**Expected outcome:** `250 passed` in about a minute (September 2026). The suite runs entirely on
 small fixture files committed under `tests/fixtures/` — no internet, no dataset, no
 built map required. If this is green, your environment is set up correctly.
 
@@ -154,8 +163,9 @@ aggregates repetitions of the same experiment across seeds via
 `trajguard.reporting.results_io` (mean + Student-t 95% CI, the §7.1 across-seed
 kind — never mixed with within-run bootstrap intervals), draws the four planned
 report figures into `reports/s4_figures/` and inline, and lists every attack
-invocation that exceeded the 300 s budget together with the §7.3 reduction
-ladder. It is strictly a reader: it never launches experiments and never writes
+invocation that exceeded the attack time budget (300 s at the 20/50 rungs,
+1200 s at 182; §7.3) together with the §7.3 reduction ladder. It is strictly a
+reader: it never launches experiments and never writes
 under `results/`.
 
 Run experiments first (§6–§7.2), then execute the notebook headlessly, or open
@@ -269,8 +279,9 @@ and set `TRAJ_ID` to one of your own — trajectory ids have the form
 `geolife/<user folder>/<plt filename without extension>`, and the printed
 "available ids" line shows the first few so you can copy one. Matching a long
 trajectory against the full network takes noticeably longer than the fixture run.
-A low score (below the 0.6 threshold used by experiments) with sparse blue dots far
-from any road means the trajectory would be dropped in a real run.
+A low score (below the experiment's `min_match_score` — 0.05 at the measurement
+rungs, 0.3 for the reporting run, see §6) with sparse blue dots far from any road
+means the trajectory would be dropped in a real run.
 
 ## 5. Smoke test: the full experiment pipeline on fixture data
 
@@ -313,7 +324,7 @@ the drive road network with `match_score ≥ min_match_score`
 The threshold has two values, both measured, not asserted:
 
 - **0.3 — the reporting population** (author decision, 17 Aug 2026, from the
-  50-rung measurement, HANDOFF §1.11): the strictest-with-margin threshold whose
+  50-rung measurement, `docs/HANDOFF.md` 1.3): the strictest-with-margin threshold whose
   projected non-member count at 182 users (118) clears the 100 needed to revive
   the `tpr@fpr = 0.01` operating point. The full-scale configs
   (`geolife_geoind_reid`, `geolife_synth_mia`) use it.
@@ -445,7 +456,7 @@ The run seed only redraws the mechanism noise and the shadow subsets; the
 attacker's known points are evenly spaced (`_evenly_spaced` in
 `attacks/reidentification.py`), not sampled. An arm without noise therefore has
 no source of randomness left, and a degenerate interval is the correct answer,
-not a missing one (first S4 campaign, HANDOFF S4-5).
+not a missing one (first S4 campaign, S4-5 in `docs/HANDOFF.md` 1.1).
 
 ## 7.2 Experiment: membership inference against synthetic generators
 
@@ -483,7 +494,7 @@ Every attack invocation has a runtime budget, configurable as
 `metrics.attack_time_budget_s`: **X = 300 seconds** at the 20/50 measurement
 rungs (the author's decision, 5 Aug 2026) and **X = 1200 seconds** for the
 182-user reporting run (the author's decision, 17 Aug 2026, from the 50-rung
-measurement, HANDOFF §1.11: at threshold 0.3 the projected gallery is ~590
+measurement, `docs/HANDOFF.md` 1.3: at threshold 0.3 the projected gallery is ~590
 traces and the dearest call — reidentification k10, DTW roughly quadratic in
 gallery size — lands at ~750 s, over the old budget and under the new one). The
 orchestrator compares each invocation's `attack_runtime_s` against it and, when
@@ -508,7 +519,7 @@ The rules, applied one step at a time (re-measure after each step):
      `dataset.max_users` (or one cheap re-run at a lower step). If `max_users`
      does not move the cost, the cause sits in how the mechanism or attack is
      built, the fix belongs there, and the ladder below does not apply to it.
-     First known counterexample: HANDOFF S4-3 — the `rn_ldp_synth` constructor
+     First known counterexample: S4-3 (`docs/HANDOFF.md` 1.1) — the `rn_ldp_synth` constructor
      calibrated its decode-inflation factor from the map and config alone
      (~65 s per generator, 17 generators per MIA arm), so no `max_users` step
      could touch the cost; the fix was caching the calibration result across
@@ -540,7 +551,8 @@ from the 50-rung measurement (see the last paragraph of this section). The repor
 presents the distribution alongside the results, so the population boundary is a
 measured quantity, not a claim.
 
-**Validation-run success criterion** (`docs/HANDOFF_S4_POPRAVKI.md` §2). After the
+**Validation-run success criterion** (`arhiv/HANDOFF_S4_POPRAVKI.md` §2; measured
+outcome in `docs/HANDOFF.md` 1.2). After the
 S4 fix PRs, the campaign is repeated at `max_users: 20` with the same configs and
 seeds as the first run. The run passes when both hold:
 
@@ -567,8 +579,8 @@ implementation one.
 **The reporting threshold, measured at the 50 rung.** The author's note of
 16 Aug 2026 projected that a stricter threshold of **0.5** would suffice from
 `max_users: 50` up (≈ 116 non-members at 182 users). The 50-rung measurement
-(17 Aug 2026, diagnostic cell §9 over the rung's 3243 cleaned traces; HANDOFF
-§1.11) did **not** confirm it: at 0.5 only 111 traces and 8 non-members survive,
+(17 Aug 2026, diagnostic cell §9 over the rung's 3243 cleaned traces;
+`docs/HANDOFF.md` 1.3) did **not** confirm it: at 0.5 only 111 traces and 8 non-members survive,
 projecting **81** non-members at 182 — below the 100 needed for `fpr = 0.01`.
 By the measured table, 0.4 is the strictest threshold that reaches 100 exactly;
 **0.3** reaches it with margin (162 traces, 33/50 users, 12 non-members,
@@ -594,7 +606,7 @@ within-run bootstrap interval for a single run, the across-seed interval for a
 repetition experiment. The raw per-seed rows always remain available in
 `results_master.csv`.
 
-The report also enforces the `tpr@fpr` validity rule (HANDOFF S4-2): the
+The report also enforces the `tpr@fpr` validity rule (S4-2, `docs/HANDOFF.md` 1.1): the
 operating point needs at least `1/fpr` non-members (the boundary counts as
 valid). New runs already record NaN plus a `run.json` warning for unresolvable
 points; stored values from older runs are suppressed at report time. Suppressed
