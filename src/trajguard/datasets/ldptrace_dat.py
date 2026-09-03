@@ -21,15 +21,24 @@ Both halves serve the validation of the ``ldptrace`` port against the authors' c
   bbox of the kept points, ``grid_bbox`` widened by ``1e-6`` on each side (the
   reference's ``dataset_stats`` rule, so both sides share one grid) and the counts per
   drop reason. ``scripts/porto_to_ldptrace_dat.py`` is the command-line wrapper.
+
+Memory: the full Porto file has ~80 M points, and a Python tuple per point needs
+~100 bytes, so the conversion keeps each trajectory as a compact ``float64`` array
+(16 bytes per point) and writes the pickle stream opcode by opcode instead of
+materialising the list of tuples; ``pickle.load`` reads back the plain
+``list[list[tuple[float, float]]]`` all the same.
 """
 
 import csv
 import json
 import lzma
 import pickle
+import struct
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from trajguard.datamodel import RawTrajectory
 from trajguard.datasets.base import DatasetLoader
@@ -38,11 +47,15 @@ from trajguard.experiments.registry import register
 BBox = tuple[float, float, float, float]  # (min_lon, min_lat, max_lon, max_lat), as Grid
 Polyline = list[tuple[float, float]]  # (lon, lat) pairs — the reference's (x, y)
 
-PORTO_CENTRE_BBOX: BBox = (-8.69, 41.13, -8.55, 41.19)
+# Central Porto, ~3.4 km × 3.3 km: keeps ~21 % of the Kaggle trips, i.e. the order of the
+# paper's 361,591 "central areas" trajectories (measured share on the first 300 k rows;
+# the plan's first proposal −8.69…−8.55 × 41.13…41.19 kept 81 %).
+PORTO_CENTRE_BBOX: BBox = (-8.64, 41.14, -8.60, 41.17)
 GRID_MARGIN = 1e-6  # reference dataset_stats: grid bbox = bbox of the points ± 1e-6
 DROP_REASONS = ("missing_data", "too_short", "outside_bbox")
 _CSV_FIELD_LIMIT = 2**31 - 1  # long Porto polylines exceed csv's 128 kB default
 _REQUIRED_COLUMNS = ("TRIP_ID", "MISSING_DATA", "POLYLINE")
+_PICKLE_BATCH = 1000  # items per APPENDS opcode, as the standard pickler batches them
 
 
 @register("dataset", "ldptrace_dat")
@@ -124,7 +137,7 @@ def _parse_points(line: str, path: Path, lineno: int) -> Polyline:
     return points
 
 
-def write_dat(path: str | Path, trajs: Iterable[Sequence[tuple[float, float]]]) -> int:
+def write_dat(path: str | Path, trajs: Iterable[Iterable[Sequence[float]]]) -> int:
     """Write ``(lon, lat)`` polylines as ``#<i>:`` / ``>0: x,y;...;`` records; returns the count."""
     n = 0
     with Path(path).open("w", encoding="utf-8", newline="\n") as fh:
@@ -135,11 +148,48 @@ def write_dat(path: str | Path, trajs: Iterable[Sequence[tuple[float, float]]]) 
     return n
 
 
-def write_reference_xz(path: str | Path, trajs: Iterable[Sequence[tuple[float, float]]]) -> None:
-    """Pickle the polylines inside an ``lzma`` container, the form the reference code loads."""
-    payload = [[(float(x), float(y)) for x, y in poly] for poly in trajs]
+def write_reference_xz(path: str | Path, trajs: Iterable[Iterable[Sequence[float]]]) -> None:
+    """Pickle the polylines inside an ``lzma`` container, the form the reference code loads.
+
+    The stream is written opcode by opcode (protocol 2: ``EMPTY_LIST``/``MARK``/
+    ``APPENDS`` for the lists, ``BINFLOAT`` + ``TUPLE2`` for the points) so millions of
+    points never exist as tuples at once; ``pickle.load`` returns exactly the
+    ``list[list[tuple[float, float]]]`` that ``pickle.dump`` of that list would give.
+    """
     with lzma.open(path, "wb") as fh:
-        pickle.dump(payload, fh)
+        fh.write(pickle.PROTO + bytes([2]) + pickle.EMPTY_LIST)
+        for batch in _batched(trajs, _PICKLE_BATCH):
+            fh.write(pickle.MARK)
+            for poly in batch:
+                fh.write(pickle.EMPTY_LIST)
+                for points in _batched(poly, _PICKLE_BATCH):
+                    fh.write(pickle.MARK)
+                    fh.write(b"".join(_pickled_pair(x, y) for x, y in points))
+                    fh.write(pickle.APPENDS)
+            fh.write(pickle.APPENDS)
+        fh.write(pickle.STOP)
+
+
+def _pickled_pair(x: float, y: float) -> bytes:
+    return (
+        pickle.BINFLOAT
+        + struct.pack(">d", float(x))
+        + pickle.BINFLOAT
+        + struct.pack(">d", float(y))
+        + pickle.TUPLE2
+    )
+
+
+def _batched(items: Iterable[Any], size: int) -> Iterator[list[Any]]:
+    """Consecutive chunks of at most ``size`` items (``itertools.batched`` is 3.12+)."""
+    batch: list[Any] = []
+    for item in items:
+        batch.append(item)
+        if len(batch) == size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 # -- Porto (Kaggle train.csv) -----------------------------------------------------------
@@ -190,22 +240,22 @@ def convert_porto(
         raise ValueError(f"max_trajectories must be >= 1, got {max_trajectories}")
     _reject_raw_dir(out_dir)
 
-    kept: list[Polyline] = []
+    kept: list[np.ndarray] = []  # one (n, 2) float64 array per trajectory
     dropped = dict.fromkeys(DROP_REASONS, 0)
     n_read = n_points = 0
-    min_x = min_y = float("inf")
-    max_x = max_y = float("-inf")
+    lo = np.array([np.inf, np.inf])
+    hi = np.array([-np.inf, -np.inf])
     for _trip_id, missing, poly in iter_porto_polylines(csv_path):
         n_read += 1
         reason = drop_reason(missing, poly, bbox)
         if reason is not None:
             dropped[reason] += 1
             continue
-        kept.append(poly)
-        n_points += len(poly)
-        for x, y in poly:
-            min_x, max_x = min(min_x, x), max(max_x, x)
-            min_y, max_y = min(min_y, y), max(max_y, y)
+        arr = np.asarray(poly, dtype=np.float64)
+        kept.append(arr)
+        n_points += len(arr)
+        lo = np.minimum(lo, arr.min(axis=0))
+        hi = np.maximum(hi, arr.max(axis=0))
         if max_trajectories is not None and len(kept) >= max_trajectories:
             break
     if not kept:
@@ -214,6 +264,8 @@ def convert_porto(
     out_dir.mkdir(parents=True, exist_ok=True)
     write_dat(out_dir / "porto.dat", kept)
     write_reference_xz(out_dir / "porto.xz", kept)
+    min_x, min_y = (float(v) for v in lo)
+    max_x, max_y = (float(v) for v in hi)
     stats: dict[str, Any] = {
         "source": str(csv_path),
         "bbox_filter": list(bbox),

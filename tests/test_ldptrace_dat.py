@@ -5,9 +5,11 @@ import lzma
 import pickle
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from trajguard.datasets.ldptrace_dat import (
+    _PICKLE_BATCH,
     GRID_MARGIN,
     PORTO_CENTRE_BBOX,
     LDPTraceDatLoader,
@@ -15,6 +17,7 @@ from trajguard.datasets.ldptrace_dat import (
     drop_reason,
     read_dat,
     write_dat,
+    write_reference_xz,
 )
 from trajguard.experiments import registry
 
@@ -33,10 +36,10 @@ EXPECTED_TINY: dict[str, list[tuple[float, float]]] = {
 # The three kept rows of train_tiny.csv, see fixtures/porto_csv/README.md
 KEPT_PORTO: list[list[tuple[float, float]]] = [
     [(-8.618643, 41.141412), (-8.618499, 41.141376), (-8.620326, 41.14251)],
-    [(-8.639847, 41.159826), (-8.640351, 41.159871)],
+    [(-8.629847, 41.159826), (-8.630351, 41.159871)],
     [(-8.612964, 41.140359), (-8.613378, 41.14035), (-8.614215, 41.140278), (-8.614773, 41.140368)],
 ]
-KEPT_PORTO_BBOX = [-8.640351, 41.140278, -8.612964, 41.159871]
+KEPT_PORTO_BBOX = [-8.630351, 41.140278, -8.612964, 41.159871]
 
 
 # -- loader -------------------------------------------------------------------------------
@@ -122,7 +125,7 @@ def test_drop_reason_rules() -> None:
     assert drop_reason(False, [*inside, (-8.7, 41.15)], bbox) == "outside_bbox"
     assert drop_reason(False, [*inside, (-8.6, 41.2)], bbox) == "outside_bbox"
     # border points count as inside
-    assert drop_reason(False, [(-8.69, 41.13), (-8.55, 41.19)], bbox) is None
+    assert drop_reason(False, [(-8.64, 41.14), (-8.60, 41.17)], bbox) is None
 
 
 def test_convert_porto_on_tiny_csv(tmp_path: Path) -> None:
@@ -157,6 +160,22 @@ def test_convert_porto_on_tiny_csv(tmp_path: Path) -> None:
         db = pickle.load(fh)
     assert db == KEPT_PORTO
     assert all(isinstance(p, tuple) for traj in db for p in traj)
+
+
+def test_write_reference_xz_streams_the_same_pickle_as_pickle_dump(tmp_path: Path) -> None:
+    """Opcode-streamed pickle == pickle.dump of the list, across APPENDS batch boundaries."""
+    long_poly = [(float(i), float(-i)) for i in range(2 * _PICKLE_BATCH + 7)]
+    db = [[(0.5, 1.5), (2.5, 3.5)]] * (_PICKLE_BATCH + 3) + [long_poly, [(9.0, 9.0), (8.0, 8.0)]]
+    path = tmp_path / "db.xz"
+    write_reference_xz(path, db)
+    with lzma.open(path, "rb") as fh:
+        loaded = pickle.load(fh)
+    assert loaded == db
+    assert all(type(p) is tuple and type(p[0]) is float for traj in loaded for p in traj)
+    # numpy arrays (what convert_porto keeps) serialise to the same plain structure
+    write_reference_xz(path, [np.asarray(traj) for traj in db])
+    with lzma.open(path, "rb") as fh:
+        assert pickle.load(fh) == db
 
 
 def test_convert_porto_max_trajectories_stops_early(tmp_path: Path) -> None:
