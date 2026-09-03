@@ -343,9 +343,44 @@ celic, mediana 3, na mreži 12 × 12):
   točki), 1.307.144 (zunaj bbox); bbox točk lon −8,64 … −8,600004, lat 41,140008 …
   41,169996, `grid_bbox` = ± 1e-6; 371 s. Izhod `data/interim/porto/` (245 MB `.dat`,
   48 MB `.xz`, `porto_stats.json`) ni v gitu. Prvotno predlagani bbox (−8,69 … −8,55 ×
-  41,13 … 41,19) bi obdržal 81 % poti. B2 (orkestrator, način `cells`) ima potrjen načrt
-  in predajo s promptom v tistem dokumentu §11 (koda še ni napisana); PR C sledi;
-  tabela z devetimi metrikami × tremi ε pride sem v PR C.
+  41,13 … 41,19) bi obdržal 81 % poti. **B2 je izveden** (3. september 2026, veja
+  `claude/cells-mode-orchestrator`, skladana na PR #34): orkestrator pozna
+  `dataset.representation: cells` (mreža iz `dataset.grid`, brez zemljevida in ujemanja,
+  samo napad na članstvo), konfiguracija `config/experiments/porto_cells_mia.yaml`, testi
+  `tests/test_cells_mode.py`; današnja pot `segments` je nespremenjena (isti hash
+  predpomnilnika, zlati izpis pred in po spremembi enak). PR C sledi; tabela z devetimi
+  metrikami × tremi ε pride sem v PR C.
+
+**Porto, napad na članstvo v načinu celic (izmerjeno 3. septembra 2026, commit `829e69f`).**
+Ukaza `uv run trajguard run config/experiments/porto_cells_mia.yaml` in
+`uv run trajguard repeat config/experiments/porto_cells_mia.yaml --seeds 1 2 3`;
+`max_users: 2000` (= 2.000 poti, vsaka pot je svoj uporabnik), mreža 6 × 6 nad
+`grid_bbox`, čiščenje izklopljeno, `n_shadow: 16`, `subsample: 0,5`. Bazen napada: 1.000
+članov, 400 nečlanov (`n_pool = 1400`), 400 senčnih, 200 v razrezu `attack`. Prvi zagon
+58 s (od tega ~57 s branje in čiščenje vseh 367.008 poti, preden `max_users` izbere 2.000;
+predpomnilnik `data/processed/17a5b3fba2ac1341`: `clean.parquet` 511 kB, `chains.parquet`
+41 kB za 2.000 poti); vsak nadaljnji zagon ~3 s na seme, napad 0,3 s (`markov`) oziroma
+0,7 s (`ldptrace`) na roko; ponovitve čez tri semena 11 s. Vrednosti iz
+`results/porto_cells_mia/repetitions.csv` (povprečje in Studentov 95-odstotni interval
+čez semena 1, 2, 3; `tpr@fpr = 0,001` je NaN, ker potrebuje 1.000 nečlanov, S4-2):
+
+| Roka | AUC | `tpr@fpr = 0,1` | `tpr@fpr = 0,01` |
+|------|-----|------------------|-------------------|
+| `markov` (strop memorizacije) | 0,582 [0,558; 0,607] | 0,166 [0,116; 0,216] | 0,028 [−0,022; 0,078] |
+| `ldptrace` ε = 0,5 | 0,511 [0,471; 0,551] | 0,096 [0,042; 0,149] | 0,016 [−0,010; 0,042] |
+| `ldptrace` ε = 1 | 0,498 [0,450; 0,547] | 0,100 [0,081; 0,119] | 0,022 [0,013; 0,031] |
+| `ldptrace` ε = 1,5 | 0,496 [0,458; 0,535] | 0,110 [0,085; 0,136] | 0,017 [0,013; 0,021] |
+
+Branje: na mreži 6 × 6 so verige kratke (učne: 1–25 celic, mediana 5) in si jih poti
+delijo, zato je tudi strop memorizacije nizek (AUC 0,58); vsi trije intervali AUC za
+`ldptrace` vsebujejo 0,5 in se z ε ne ločijo. Pogon z enim semenom (42) da AUC 0,589
+(`markov`) in 0,514 / 0,525 / 0,522 (`ldptrace` ε = 0,5 / 1 / 1,5). **Meja dolžine L_k je
+nestabilna tudi pri n = 1.000** (histogram dolžin nad 36 predali pri proračunu ε/10): L_k
+po semenih 42/1/2/3 je 1/4/1/1 pri ε = 0,5, 1/5/1/1 pri ε = 1 in 1/7/2/7 pri ε = 1,5
+(prava največja dolžina je 25; pri L_k = 1 naprava poroča samo začetek in konec). Članek
+dela z ~360.000 potmi; celotna populacija je dosegljiva z brisanjem ključa `max_users`
+(predpomnilnik vsebuje samo izbranih 2.000 poti, prvi zagon spet prebere datoteko).
+Primerjava z izvirno kodo nad istim vhodom je PR C.
 
 ### 2.4 Val 5 — horizont B (2. letnik)
 
@@ -373,6 +408,15 @@ federativni pristopi, diffusion generatorji. Vse se priključi prek obstoječih 
   perturbacija se ocenjuje z reidentifikacijo, sinteza s sklepanjem o članstvu.
 - **Strop memorizacije `markov`** je odvisen od stopnje (AUC ~1,0 pri 20, 0,54 pri 50,
   0,78 pri 182); v poročilu ga interpretiraj na stopnji, na kateri se poroča.
+- **Ujemanje na zemljevid ni ponovljivo med procesi** (ugotovljeno 3. septembra 2026 pri
+  zlatem izpisu za PR B2): nad fixturom `geolife_onroad` pot `006/20081206080000` enkrat
+  dobi zadnji rob 387, enkrat ne (ocena ujemanja enaka, 0,9092), odvisno od naključnega
+  semena zgoščevanja Pythona (`PYTHONHASHSEED`); s fiksnim semenom je izpis ponovljiv in
+  stara in nova koda dasta isto. Vzrok je izenačenje kandidatov v knjižnici
+  `leuvenmapmatching`, ne v najini kodi. Predpomnilnik bazena zagotavlja ponovljivost
+  vseh zagonov nad enkrat izračunanim bazenom; dva sveža izračuna pa lahko pri
+  izenačenjih odstopata za rob. Odprto: preveriti pri pravih podatkih in po potrebi
+  fiksirati `PYTHONHASHSEED` v `RUNNING.md` ali v CLI.
 
 ---
 

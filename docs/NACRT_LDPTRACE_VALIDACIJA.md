@@ -3,8 +3,10 @@
 Stanje ob zapisu: 2. september 2026, veja `claude/zm1-ldptrace` (PR #32 na `main`,
 čaka na združitev). **Napredek (2. september 2026, zvečer):** PR A (metrike) izveden
 kot PR #33 na veji `claude/ldptrace-metrics` (odprt, čaka na združitev); dejanske
-odločitve so pri D-V.7. PR B je razrezan na B1 in B2; **načrt B1 je potrjen, izvedba se
-ni začela** — predaja s promptom za novo sejo je v §10. PR B2 in PR C sta odprta. Ta dokument je predaja za eno do tri implementacijske seje, ki
+odločitve so pri D-V.7. PR B je razrezan na B1 in B2; **B1 je izveden** (3. september
+2026, veja `claude/cells-mode`, PR #34; predaja v §10) in **B2 je izveden** (3. september
+2026, veja `claude/cells-mode-orchestrator`, skladana na PR #34; dejanske odločitve in
+izmerjeni pogon Porta v §11.4 in §11.5). PR C je odprt. Ta dokument je predaja za eno do tri implementacijske seje, ki
 uvedejo (a) metrike uporabnosti iz članka LDPTrace, (b) način branja surovih koordinat
 na mreži kot alternativo ujetim zaporedjem odsekov, izbirljiv v konfiguraciji, in
 (c) primerjalni pogon izvirne kode in najinega porta nad istimi podatki. Seja prebere
@@ -248,7 +250,11 @@ nova `_cell_pool`; veja v `run_experiment`; `_generator_ctor`; `_mia_pool`),
 če oboje ne gre v en pregleden PR. **Odločeno 2. septembra 2026: razrez B1 + B2** (veja
 B1 `claude/cells-mode` na `claude/ldptrace-metrics`, B2 se sklada na B1); potrjeni načrt
 B1 in skica B2 sta v §10. *B1 izveden 3. septembra 2026* (dejanske datoteke in
-odstopanja v §10.4, številke Porta v §2 in §10.6); B2 je odprt.
+odstopanja v §10.4, številke Porta v §2 in §10.6). *B2 izveden 3. septembra 2026* (veja
+`claude/cells-mode-orchestrator`, skladana na PR #34): `experiments/orchestrator.py`,
+`config/experiments/porto_cells_mia.yaml`, `tests/test_cells_mode.py`, `docs/ARCHITECTURE.md`,
+`docs/RUNNING.md` (§9.2, §10), `docs/HANDOFF.md` §2.3, `CLAUDE.md`; dejanske odločitve in
+odstopanja v §11.4, izmerjeni pogon Porta v §11.5.
 
 **PR C — validacijski pogon (`claude/ldptrace-validation`).** Novo:
 `src/trajguard/experiments/ldptrace_eval.py`, `tests/test_ldptrace_eval.py` (na
@@ -883,6 +889,23 @@ skladnosti), ta dokument (§4 PR B2 izveden, §11.4 dejanske odločitve, §11.5 
 (`_version_hash` in `results.csv` konfiguracije `mia_config` nad fixturom v načinu
 `segments`) in se po spremembi primerja — razlika mora biti prazna.
 
+**Dejanske odločitve in odstopanja (3. september 2026, izvedeno).** Načrt je izveden po
+zgornjem opisu; odstopanja: (1) `_built_map_timestamp` vrne `""`, ko zemljevida ni
+(`RunConfig.has_map`); (2) `_target_pools` se kliče tudi v načinu `cells` (s praznim
+seznamom in praznim rezultatom), posebne veje za blok koristnosti ni; (3) `_write_results`
+dobi seznam elementov bazena (`Sequence[MatchedTrajectory | CellChain]`) za `n_matched`,
+`representation` gre v `run.json` neposredno iz konfiguracije, `results.csv` je brez
+novega stolpca; (4) `dataset.grid` v načinu `segments` je zavrnjen (tiha neuporaba bi
+zavajala), `map_matching` v načinu `cells` je dovoljen in brez učinka; (5) `_generator_ctor`
+dobi še `ref` za sporočila; (6) test konec-do-konca ostane pri mreži 6 × 6 (AUC `markov`
+> 0,5 drži), dodan je test, da blok `map` v načinu `cells` prestane T1, zemljevid pa se
+nikoli ne zgradi (neobstoječa mapa). Zlati izpis današnje poti: pri fiksnem
+`PYTHONHASHSEED` sta `_version_hash` (`beb19b20eead49ae`) in `results.csv` konfiguracije
+`mia_config` pred in po spremembi enaka, tako z obstoječim kot s praznim predpomnilnikom;
+brez fiksnega semena zgoščevanja se ujemanje ene poti fixtura med procesi razlikuje za
+zadnji rob (obstoječa lastnost ujemalnika, zapisana v `HANDOFF.md` §2.5). Testi: 333
+(316 + 17 novih), ~54 s.
+
 ### 11.5 Pravi pogon Porta (v B2, po prehodu testov)
 
 `uv run trajguard run config/experiments/porto_cells_mia.yaml` (prvi zagon prebere in očisti
@@ -891,7 +914,13 @@ vseh 367.008 poti v predpomnilnik, nato napad nad 2.000 potmi), nato
 čas prvega branja in napada na seme, `l_k` roke `ldptrace` po ε (iz izpisa ali `run.json`,
 če ga B2 doda), tabelo AUC in `tpr@fpr = 0,1` (povprečje in interval čez tri semena) za
 `markov` in `ldptrace` ε ∈ {0,5, 1, 1,5} v `HANDOFF.md` §2.3 in `RUNNING.md` §9.2.
-*(Izmerjeno: še ni.)*
+*(Izmerjeno 3. septembra 2026, commit `829e69f`: prvi zagon 58 s — ~57 s branje in
+čiščenje 367.008 poti, napad 0,3 s `markov` / 0,7 s `ldptrace` na roko; ponovitve 11 s za
+tri semena, ~3 s na seme. Bazen 1.000 članov / 400 nečlanov. AUC čez semena 1–3: `markov`
+0,582 [0,558; 0,607]; `ldptrace` ε = 0,5 / 1 / 1,5: 0,511 [0,471; 0,551] / 0,498 [0,450;
+0,547] / 0,496 [0,458; 0,535]; `tpr@fpr = 0,1`: 0,166 / 0,096 / 0,100 / 0,110. L_k po
+semenih 42/1/2/3: 1/4/1/1, 1/5/1/1, 1/7/2/7 — nestabilen tudi pri n = 1.000. Celotna
+tabela in branje v `docs/HANDOFF.md` §2.3, ukaz in izpis v `docs/RUNNING.md` §9.2.)*
 
 ### 11.6 Prompt za sejo B2 (kopiraj v celoti)
 
