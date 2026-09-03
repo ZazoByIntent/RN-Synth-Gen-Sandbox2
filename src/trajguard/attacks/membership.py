@@ -9,7 +9,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from trajguard.attacks.base import Attack, BackgroundKnowledge
-from trajguard.datamodel import AttackResult, MatchedTrajectory
+from trajguard.datamodel import AttackResult
 from trajguard.evaluation.roc import roc_auc, tpr_at_fpr, tpr_at_fpr_measurable
 from trajguard.experiments.registry import register
 from trajguard.representation import TrajectoryView
@@ -20,7 +20,13 @@ _MIN_SD = 1e-6  # floor on the shadow-score std so the likelihood ratio stays fi
 
 
 class ShadowGenerator(Protocol):
-    """What LiRA needs from a shadow generator: fit on views, score edge sequences."""
+    """What LiRA needs from a shadow generator: fit on views, score integer sequences.
+
+    Sequences are opaque engine symbols — matched edge ids in the segments
+    representation, grid-cell indices in the cells representation; shadow training
+    views carry them as ``TrajectoryView(sequence=...)`` and generators read
+    ``as_sequence()``.
+    """
 
     def fit(self, train: Sequence[TrajectoryView]) -> None: ...
 
@@ -180,15 +186,6 @@ def _log_normal_pdf(x: float, mu: float, sd: float) -> float:
     return -0.5 * math.log(2.0 * math.pi * sd * sd) - (x - mu) ** 2 / (2.0 * sd * sd)
 
 
-def _seq_view(edge_seq: EdgeSeq) -> TrajectoryView:
-    """Wrap a bare edge sequence in a matched-only view so a generator can fit on it."""
-    matched = MatchedTrajectory(
-        traj_id="",
-        user_id="",
-        map_id="",
-        edge_seq=edge_seq,
-        matched_points=(),
-        match_score=1.0,
-        frac_matched=1.0,
-    )
-    return TrajectoryView(matched=matched)
+def _seq_view(seq: EdgeSeq) -> TrajectoryView:
+    """Wrap a bare integer sequence in a sequence-only view so a generator can fit on it."""
+    return TrajectoryView(sequence=tuple(seq))

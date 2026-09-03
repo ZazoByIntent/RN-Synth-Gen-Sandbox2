@@ -1,5 +1,6 @@
 """Tests for TrajectoryView/Grid adapters and the NoProtection baseline."""
 
+import itertools
 from pathlib import Path
 
 import pytest
@@ -109,3 +110,77 @@ def test_no_protection_identity(fixture_clean: CleanTrajectory) -> None:
     # params_hash is deterministic and parameter-sensitive
     assert protected.params_hash == mech.apply(view).params_hash
     assert mech.apply(view, foo=1).params_hash != protected.params_hash
+
+
+# -- Grid.adjacent / Grid.chain (cells representation) ----------------------------------
+
+GRID6 = Grid(bbox=(0.0, 0.0, 6.0, 6.0), n_rows=6, n_cols=6)  # cell = row * 6 + col
+
+
+def test_grid_adjacent_is_chebyshev_distance_one() -> None:
+    n = GRID6.n_cols
+    assert GRID6.adjacent(0, 1)
+    assert GRID6.adjacent(0, n)
+    assert GRID6.adjacent(0, n + 1)
+    assert GRID6.adjacent(n + 1, 0)
+    assert not GRID6.adjacent(0, 0)
+    assert not GRID6.adjacent(0, 2)
+    assert not GRID6.adjacent(5, 6)  # end of row 0 and start of row 1 are not neighbours
+
+
+def test_grid_chain_collapses_duplicates_and_keeps_adjacent_steps() -> None:
+    assert GRID6.chain([0, 0, 1, 1, 1, 8, 8]) == [0, 1, 8]
+    assert GRID6.chain([5, 10, 15, 20]) == [5, 10, 15, 20]
+    assert GRID6.chain([14]) == [14]
+    assert GRID6.chain([]) == []
+
+
+def test_grid_chain_inserts_the_reference_king_walk() -> None:
+    """Diagonal first, then straight: (0,0) -> (3,1) via (1,1), (2,1); (2,2) -> (0,0) via (1,1)."""
+    n = GRID6.n_cols
+    assert GRID6.chain([0, 3 * n + 1]) == [0, n + 1, 2 * n + 1, 3 * n + 1]
+    assert GRID6.chain([2 * n + 2, 0]) == [2 * n + 2, n + 1, 0]
+    assert GRID6.chain([0, n + 3]) == [0, n + 1, n + 2, n + 3]  # fixture tiny.dat, id 1
+    assert GRID6.chain([0, 3]) == [0, 1, 2, 3]
+    assert GRID6.chain([35, 0]) == [35, 28, 21, 14, 7, 0]
+
+
+def test_grid_chain_is_idempotent_and_8_connected() -> None:
+    once = GRID6.chain([0, 9, 9, 35, 2])
+    assert once == [0, 7, 8, 9, 16, 23, 29, 35, 28, 21, 14, 8, 2]
+    assert GRID6.chain(once) == once
+    for a, b in itertools.pairwise(once):
+        assert GRID6.adjacent(a, b)
+
+
+def test_grid_chain_rejects_out_of_range_cells() -> None:
+    with pytest.raises(ValueError, match="outside"):
+        GRID6.chain([0, 36])
+    with pytest.raises(ValueError, match="outside"):
+        GRID6.chain([-1])
+
+
+# -- sequence-only views ------------------------------------------------------------------
+
+
+def test_sequence_only_view(fixture_clean: CleanTrajectory) -> None:
+    view = TrajectoryView(sequence=(4, 2, 7))
+    assert view.as_sequence() == (4, 2, 7)
+    assert view.traj_id == ""
+    assert view.user_id == ""
+    assert view.split is None
+    assert view.map_id == ""
+    with pytest.raises(ValueError, match="requires a matched"):
+        view.as_segments()  # as_segments never falls back to the bare sequence
+    with pytest.raises(ValueError, match="requires a clean"):
+        view.as_gps()
+
+
+def test_as_sequence_falls_back_to_matched(fixture_clean: CleanTrajectory) -> None:
+    matched = make_matched(fixture_clean.traj_id)
+    assert TrajectoryView(clean=fixture_clean, matched=matched).as_sequence() == (3, 1, 4)
+    assert TrajectoryView(matched=matched).as_sequence() == matched.edge_seq
+    with pytest.raises(ValueError, match="requires a bare sequence or a matched"):
+        TrajectoryView(clean=fixture_clean).as_sequence()
+    # An explicit sequence wins over the matched form.
+    assert TrajectoryView(matched=matched, sequence=(9,)).as_sequence() == (9,)

@@ -268,7 +268,7 @@ class RNLDPSynthGenerator(SyntheticGenerator):
         map_ids: set[str] = set()
         n = 0
         for view in train:
-            zseq = self.zone_sequence(view.as_segments())
+            zseq = self.zone_sequence(view.as_sequence())
             if not zseq:
                 raise ValueError("cannot encode an empty trajectory")
             map_ids.add(view.map_id)

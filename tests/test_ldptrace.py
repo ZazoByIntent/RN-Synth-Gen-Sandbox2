@@ -2,19 +2,25 @@
 
 import itertools
 import math
+from pathlib import Path
 
 import networkx as nx
 import numpy as np
 import pytest
 
 from trajguard.datamodel import CleanTrajectory, MatchedTrajectory
+from trajguard.datasets.ldptrace_dat import LDPTraceDatLoader
 from trajguard.experiments import registry
 from trajguard.maps.base import RoadNetwork
-from trajguard.representation import TrajectoryView
+from trajguard.representation import Grid, TrajectoryView
 from trajguard.synthesis.ldptrace import LDPTraceGenerator, _quantile_length
 
 MAP_ID = "osm_beijing_fixture"
 _HUGE_EPS = 600.0  # per-report budget ≈ 30 after the L_k + 1 split: OUE noise vanishes
+TINY_DAT = Path(__file__).parent / "fixtures" / "ldptrace_dat" / "tiny.dat"
+TINY_GRID = Grid(bbox=(0.0, 0.0, 6.0, 6.0), n_rows=6, n_cols=6)
+# Expected chains of tiny.dat on TINY_GRID (fixtures/ldptrace_dat/README.md).
+TINY_CHAINS = [[0, 1, 8], [0, 7, 8, 9], [14], [28, 35], [5, 10, 15, 20]]
 
 
 def _view(edge_seq: tuple[int, ...], split: str = "train", tid: str = "t") -> TrajectoryView:
@@ -103,13 +109,20 @@ def test_cell_sequences_are_8_connected_without_duplicates(
 
 
 def test_king_walk_interpolates_non_adjacent_cells(gen: LDPTraceGenerator) -> None:
-    """Diagonal first, then straight: (0,0) -> (3,1) passes (1,1), (2,1); adjacent -> nothing."""
+    """Diagonal first, then straight: (0,0) -> (3,1) passes (1,1), (2,1); adjacent -> nothing.
+
+    The walk lives in ``Grid.chain`` (shared with the cells representation); the
+    generator's grid spans the projected node bbox of the network.
+    """
     n = gen.n_cols
-    assert gen._king_walk(0, 3 * n + 1) == [1 * n + 1, 2 * n + 1]
-    assert gen._king_walk(0, 1 * n + 1) == []
-    assert gen._king_walk(2 * n + 2, 0) == [1 * n + 1]
+    chain = gen.grid.chain
+    assert chain([0, 3 * n + 1]) == [0, 1 * n + 1, 2 * n + 1, 3 * n + 1]
+    assert chain([0, 1 * n + 1]) == [0, 1 * n + 1]
+    assert chain([2 * n + 2, 0]) == [2 * n + 2, 1 * n + 1, 0]
     # Same cell twice: no intermediate cells.
-    assert gen._king_walk(5, 5) == []
+    assert chain([5, 5]) == [5]
+    assert gen.bbox is None  # network mode
+    assert gen.grid.bbox == (gen._x0, gen._y0, gen._x1, gen._y1)
 
 
 def test_generate_end_to_end(gen: LDPTraceGenerator) -> None:
@@ -289,3 +302,104 @@ def test_constructor_validation(fixture_network: RoadNetwork) -> None:
         LDPTraceGenerator(fixture_network, length_share=1.0)
     with pytest.raises(ValueError, match="alpha"):
         LDPTraceGenerator(fixture_network, beta=-0.1)
+    # Exactly one of network / bbox.
+    with pytest.raises(ValueError, match="exactly one"):
+        LDPTraceGenerator()
+    with pytest.raises(ValueError, match="exactly one"):
+        LDPTraceGenerator(fixture_network, bbox=(0.0, 0.0, 6.0, 6.0))
+    with pytest.raises(ValueError, match="bbox"):
+        LDPTraceGenerator(bbox=(6.0, 0.0, 0.0, 6.0))
+    with pytest.raises(ValueError, match="bbox"):
+        LDPTraceGenerator(bbox=(0.0, 0.0, 6.0))  # type: ignore[arg-type]
+
+
+# -- bbox mode (cells representation) -----------------------------------------------------
+
+
+def _cell_views() -> list[TrajectoryView]:
+    """tiny.dat in the cells representation: one cell per point, wrapped as bare sequences."""
+    views: list[TrajectoryView] = []
+    for raw in LDPTraceDatLoader(TINY_DAT).iter_trajectories():
+        cells = tuple(TINY_GRID.cell_of(lat, lon) for lat, lon, _ in raw.points)
+        views.append(TrajectoryView(sequence=cells))
+    return views
+
+
+def test_bbox_mode_chains_match_fixture_readme() -> None:
+    g = LDPTraceGenerator(bbox=TINY_GRID.bbox, n_rows=6, n_cols=6)
+    assert g.grid == TINY_GRID
+    assert g.bbox == (0.0, 0.0, 6.0, 6.0)
+    assert g._params["bbox"] == [0.0, 0.0, 6.0, 6.0]
+    assert [g.cell_sequence(v.as_sequence()) for v in _cell_views()] == TINY_CHAINS
+    with pytest.raises(ValueError, match="outside"):
+        g.cell_sequence((0, 36))
+
+
+def test_bbox_mode_fit_generate_score() -> None:
+    """fit + generate + sequence_log_prob over the five tiny.dat chains, ε = 600."""
+    views = _cell_views()
+    g = LDPTraceGenerator(bbox=(0.0, 0.0, 6.0, 6.0), epsilon=_HUGE_EPS, n_rows=6, n_cols=6, seed=3)
+    assert g.spent_budget() is None
+    g.fit(views)
+    assert g.spent_budget() == pytest.approx(_HUGE_EPS)
+    assert 1 <= g.l_k <= g.n_cells
+    syn = g.generate(15, seed=4)
+    assert len(syn) == 15
+    for s in syn:
+        assert s.generator_id == "ldptrace"
+        assert s.map_id == ""  # no map in bbox mode
+        assert 1 <= len(s.payload) <= g.n_cells
+        for a, b in itertools.pairwise(s.payload):
+            assert _adjacent(a, b, g.n_cols)
+    for v in views:
+        assert math.isfinite(g.sequence_log_prob(v.as_sequence()))
+    # Seen start cells dominate the synthetic starts once the OUE noise is negligible.
+    train_starts = {c[0] for c in TINY_CHAINS}
+    assert sum(s.payload[0] in train_starts for s in syn) / len(syn) >= 0.8
+    # Scoring a chain with a transition the reports never contained scores lower per cell.
+    seen = g.sequence_log_prob((5, 10, 15, 20)) / 4
+    unseen = g.sequence_log_prob((35, 34, 33, 32)) / 4
+    assert seen > unseen
+
+
+def test_bbox_mode_deterministic_in_seeds() -> None:
+    views = _cell_views()
+    outs = []
+    for _ in range(2):
+        g = LDPTraceGenerator(bbox=(0.0, 0.0, 6.0, 6.0), epsilon=1.0, n_rows=6, n_cols=6, seed=7)
+        g.fit(views)
+        outs.append(
+            (
+                [s.payload for s in g.generate(6, seed=1)],
+                g.l_k,
+                [g.sequence_log_prob(v.as_sequence()) for v in views],
+            )
+        )
+    assert outs[0] == outs[1]
+
+
+def test_network_and_bbox_modes_agree_on_the_same_route(
+    gen: LDPTraceGenerator, train_views: list[TrajectoryView]
+) -> None:
+    """Endpoint cells of a route, fed to a bbox generator on the same grid, chain identically."""
+    twin = LDPTraceGenerator(bbox=gen.grid.bbox, n_rows=gen.n_rows, n_cols=gen.n_cols)
+    for view in train_views:
+        edges = view.as_segments()
+        endpoint_cells = [c for eid in edges for c in gen._edge_cells[int(eid)]]
+        assert twin.cell_sequence(endpoint_cells) == gen.cell_sequence(edges)
+
+
+def test_network_mode_fits_on_bare_sequence_views(
+    fixture_network: RoadNetwork, train_views: list[TrajectoryView]
+) -> None:
+    """Shadow models of the membership attack train on TrajectoryView(sequence=...) views."""
+    bare = [TrajectoryView(sequence=v.as_segments()) for v in train_views]
+    g_bare = LDPTraceGenerator(fixture_network, epsilon=2.0, n_rows=10, n_cols=10, seed=11)
+    g_bare.fit(bare)
+    g_full = LDPTraceGenerator(fixture_network, epsilon=2.0, n_rows=10, n_cols=10, seed=11)
+    g_full.fit(train_views)
+    assert [s.payload for s in g_bare.generate(5, seed=1)] == [
+        s.payload for s in g_full.generate(5, seed=1)
+    ]
+    assert g_bare.generate(1, seed=1)[0].map_id == ""  # bare views carry no map
+    assert g_full.generate(1, seed=1)[0].map_id == MAP_ID
