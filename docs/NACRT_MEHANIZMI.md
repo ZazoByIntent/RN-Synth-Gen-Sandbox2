@@ -86,11 +86,23 @@ Preberi `src/trajguard/experiments/orchestrator.py`, funkciji `_protected_pool` 
   (`attacks/membership.py`, protokol `ShadowGenerator`) poleg tega zahteva
   `sequence_log_prob(edge_seq) -> float`, ki mora biti **končen za vsako zaporedje
   odsekov** (spodnja meja verjetnosti, vzorec `_PROB_FLOOR = 1e-12` v
-  `rn_ldp_synth.py`). Kandidati so zaporedja `edge_id`, zato generator, ki dela nad
-  celicami mreže, potrebuje preslikavo odsek → celica.
+  `rn_ldp_synth.py`). Kandidati so zaporedja celih števil v predstavitvi pogona, ki jih
+  generator bere z `as_sequence()` (od PR B1 validacije LDPTrace, 3. september 2026):
+  `edge_id` v načinu `segments`, indeksi celic v načinu `cells`
+  (`dataset.representation`, `docs/NACRT_LDPTRACE_VALIDACIJA.md` §11). Generator, ki dela
+  nad celicami mreže, zato v načinu `segments` potrebuje preslikavo odsek → celica
+  (`ldptrace._build_edge_cells`), v načinu `cells` pa dobi verige celic neposredno.
 - Orkestrator konstruktor kliče **po podpisu** (`_generator_ctor`): če ima parameter
   `network`, dobi `RoadNetwork`; če ima `seed`, dobi `cfg.seed + odmik` (0 tarča,
   1000 + k senčni model k). Isti razred z istimi parametri služi kot senčni model.
+  V načinu `cells` (PR B2, 3. september 2026) `network` ni vbrizgan: podpis dobi `bbox`,
+  `n_rows` in `n_cols` mreže iz `dataset.grid` (nasprotujoča vrednost v konfiguraciji je
+  napaka), generator, ki `network` zahteva in `bbox` ne sprejme, je zavrnjen pred
+  cevovodom (danes `rn_ldp_synth`). Nov generator naj po vzoru `ldptrace` sprejme
+  `network=None, bbox=None` (natanko enega), če naj teče tudi nad Portom v načinu celic.
+- Zaščite (`PrivacyMechanism`, koraka ZM-2 in ZM-3) tečejo samo na poti odsekov: način
+  `cells` neprazen `privacy_mechanisms` zavrne pred cevovodom, ker se zaščitena izdaja
+  ponovno ujema na zemljevid, ki ga tam ni.
 - `spent_budget()` ni del ABC, a ga `rn_ldp_synth` ima (ε na napravo po `fit`);
   posnemaj zaradi enotnega poročanja.
 - `payload` sintetične poti ni tipiziran (»odvisno od pogleda«); `markov` in
@@ -444,6 +456,14 @@ mediana/povprečje iz surovih podatkov brez šuma) in jih popravil.
   float, float] = (0.2, 0.4, 0.4), theta2: float = 5.0, max_len: int = 200, seed: int =
   0)`; `spent_budget()` vrne ε (na pot, centralno) po `fit`. Docstring izrecno pove
   »trusted curator, trajectory-level DP; baseline candidate (D5 open)«.
+- **Opomba po PR B2 (3. september 2026).** Orkestrator ima tudi način celic
+  (`dataset.representation: cells`, `docs/NACRT_LDPTRACE_VALIDACIJA.md` §11), v katerem
+  generator dobi mrežo (`bbox`, `n_rows`, `n_cols`) namesto omrežja in bere verige celic
+  prek `as_sequence()` (§1.3). Konstruktor iz D-4.5 samo z `network` bi bil tam zavrnjen;
+  če naj PrivTrace teče tudi nad Portom (primerjava z LDPTrace na isti mreži 6 × 6, isti
+  vhod kot v `config/experiments/porto_cells_mia.yaml`), naj po vzoru `ldptrace` sprejme
+  `network=None, bbox=None` (natanko enega) in v načinu `bbox` vzame verige kot vhod.
+  Odločitev za sejo ZM-4; D-4.4 (celice iz vozlišč odsekov) velja za način `network`.
 
 ### 5.3 Datoteke
 

@@ -1,6 +1,6 @@
 # Predaja dela: stanje kampanje S4 in odprte postavke
 
-**Različica:** 2. september 2026 (skrajšana). Celotna zgodovina predaje — analiza vrzeli
+**Različica:** 3. september 2026 (skrajšana). Celotna zgodovina predaje — analiza vrzeli
 z dne 4. avgusta 2026, recenzija, dnevnik izvedbe valov 0–2 in prvotni zapisi kampanje —
 je v `arhiv/HANDOFF_2026-08-21.md`; načrt in izid popravkov S4-1 do S4-4 v
 `arhiv/HANDOFF_S4_POPRAVKI.md`. Ta datoteka hrani samo tisto, kar prihodnja seja
@@ -344,7 +344,8 @@ celic, mediana 3, na mreži 12 × 12):
   41,169996, `grid_bbox` = ± 1e-6; 371 s. Izhod `data/interim/porto/` (245 MB `.dat`,
   48 MB `.xz`, `porto_stats.json`) ni v gitu. Prvotno predlagani bbox (−8,69 … −8,55 ×
   41,13 … 41,19) bi obdržal 81 % poti. **B2 je izveden** (3. september 2026, veja
-  `claude/cells-mode-orchestrator`, skladana na PR #34): orkestrator pozna
+  `claude/cells-mode-orchestrator`, PR #35, skladana na PR #34; vrstni red združevanja
+  #33 → #34 → #35): orkestrator pozna
   `dataset.representation: cells` (mreža iz `dataset.grid`, brez zemljevida in ujemanja,
   samo napad na članstvo), konfiguracija `config/experiments/porto_cells_mia.yaml`, testi
   `tests/test_cells_mode.py`; današnja pot `segments` je nespremenjena (isti hash
@@ -377,10 +378,15 @@ delijo, zato je tudi strop memorizacije nizek (AUC 0,58); vsi trije intervali AU
 (`markov`) in 0,514 / 0,525 / 0,522 (`ldptrace` ε = 0,5 / 1 / 1,5). **Meja dolžine L_k je
 nestabilna tudi pri n = 1.000** (histogram dolžin nad 36 predali pri proračunu ε/10): L_k
 po semenih 42/1/2/3 je 1/4/1/1 pri ε = 0,5, 1/5/1/1 pri ε = 1 in 1/7/2/7 pri ε = 1,5
-(prava največja dolžina je 25; pri L_k = 1 naprava poroča samo začetek in konec). Članek
-dela z ~360.000 potmi; celotna populacija je dosegljiva z brisanjem ključa `max_users`
+(prava največja dolžina je 25; pri L_k = 1 naprava poroča samo začetek in konec). L_k ni
+zapisan v `run.json`: vrednosti so iz ponovne prilagoditve ciljnega generatorja
+(`LDPTraceGenerator(bbox=grid_bbox, n_rows=6, n_cols=6, epsilon=ε, seed=seme pogona)`)
+nad učnimi verigami iz predpomnilnika v vrstnem redu datoteke, kar natanko reproducira
+generator orkestratorja (`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.2). Članek dela z
+~360.000 potmi; celotna populacija je dosegljiva z brisanjem ključa `max_users`
 (predpomnilnik vsebuje samo izbranih 2.000 poti, prvi zagon spet prebere datoteko).
-Primerjava z izvirno kodo nad istim vhodom je PR C.
+Primerjava z izvirno kodo nad istim vhodom je PR C (predaja v
+`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12).
 
 ### 2.4 Val 5 — horizont B (2. letnik)
 

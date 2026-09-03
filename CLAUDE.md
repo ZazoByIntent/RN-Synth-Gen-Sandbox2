@@ -21,9 +21,10 @@ inputs: `TrajectoryView.sequence` / `as_sequence()`, `Grid.chain`, the `bbox` mo
 converted into `data/interim/porto/`, numbers in `docs/HANDOFF.md` §2.3); PR B2
 (orchestrator cells mode: `dataset.representation: cells`, no map or matching, membership
 inference only; `config/experiments/porto_cells_mia.yaml`) is done on branch
-`claude/cells-mode-orchestrator` (3 Sep 2026, stacked on PR #34; Porto membership
+`claude/cells-mode-orchestrator` (PR #35, 3 Sep 2026, stacked on PR #34; Porto membership
 inference measured at 2,000 trips, rows in `docs/HANDOFF.md` §2.3, run guide
-`docs/RUNNING.md` §9.2); PR C (the Porto comparison run) is open;
+`docs/RUNNING.md` §9.2); PR C (the Porto comparison run) is open with its handoff in
+`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12;
 ZM-2 … ZM-4 are open.**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.

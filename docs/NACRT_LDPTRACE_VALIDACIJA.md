@@ -5,8 +5,9 @@ Stanje ob zapisu: 2. september 2026, veja `claude/zm1-ldptrace` (PR #32 na `main
 kot PR #33 na veji `claude/ldptrace-metrics` (odprt, čaka na združitev); dejanske
 odločitve so pri D-V.7. PR B je razrezan na B1 in B2; **B1 je izveden** (3. september
 2026, veja `claude/cells-mode`, PR #34; predaja v §10) in **B2 je izveden** (3. september
-2026, veja `claude/cells-mode-orchestrator`, skladana na PR #34; dejanske odločitve in
-izmerjeni pogon Porta v §11.4 in §11.5). PR C je odprt. Ta dokument je predaja za eno do tri implementacijske seje, ki
+2026, veja `claude/cells-mode-orchestrator`, **PR #35**, skladana na PR #34; dejanske
+odločitve in izmerjeni pogon Porta v §11.4 in §11.5). PR C je odprt; **predaja za PR C je
+v §12**. Ta dokument je predaja za eno do tri implementacijske seje, ki
 uvedejo (a) metrike uporabnosti iz članka LDPTrace, (b) način branja surovih koordinat
 na mreži kot alternativo ujetim zaporedjem odsekov, izbirljiv v konfiguraciji, in
 (c) primerjalni pogon izvirne kode in najinega porta nad istimi podatki. Seja prebere
@@ -251,7 +252,7 @@ nova `_cell_pool`; veja v `run_experiment`; `_generator_ctor`; `_mia_pool`),
 B1 `claude/cells-mode` na `claude/ldptrace-metrics`, B2 se sklada na B1); potrjeni načrt
 B1 in skica B2 sta v §10. *B1 izveden 3. septembra 2026* (dejanske datoteke in
 odstopanja v §10.4, številke Porta v §2 in §10.6). *B2 izveden 3. septembra 2026* (veja
-`claude/cells-mode-orchestrator`, skladana na PR #34): `experiments/orchestrator.py`,
+`claude/cells-mode-orchestrator`, PR #35, skladana na PR #34): `experiments/orchestrator.py`,
 `config/experiments/porto_cells_mia.yaml`, `tests/test_cells_mode.py`, `docs/ARCHITECTURE.md`,
 `docs/RUNNING.md` (§9.2, §10), `docs/HANDOFF.md` §2.3, `CLAUDE.md`; dejanske odločitve in
 odstopanja v §11.4, izmerjeni pogon Porta v §11.5.
@@ -259,9 +260,11 @@ odstopanja v §11.4, izmerjeni pogon Porta v §11.5.
 **PR C — validacijski pogon (`claude/ldptrace-validation`).** Novo:
 `src/trajguard/experiments/ldptrace_eval.py`, `tests/test_ldptrace_eval.py` (na
 `tiny.dat`), `scripts/ldptrace_reference.patch`. Spremenjeno: `docs/HANDOFF.md` §2.3
-(tabela primerjave, commit klona, bbox in števila Porta), `docs/RUNNING.md` §9.1
-(ukazi), `CLAUDE.md` (vrstica stanja), `docs/NACRT_MEHANIZMI.md` §2 (validacija
-zaključena), ta dokument (oznaka zaključka in dejanske odločitve).
+(tabela primerjave, commit klona, bbox in števila Porta), `docs/RUNNING.md` (nov §9.3 in
+kazalo; §9.1 je pretvorba, §9.2 pogon MIA v načinu celic), `CLAUDE.md` (vrstica stanja),
+`docs/NACRT_MEHANIZMI.md` §2 (validacija zaključena), ta dokument (oznaka zaključka in
+dejanske odločitve v §12.5). Predaja s stanjem, dejstvi iz B2 in odprtimi odločitvami je
+v §12.
 
 ## 5. Testi (samo fixture, brez omrežja in brez `data/`)
 
@@ -959,3 +962,100 @@ daljši od 10 minut, tečejo kot samostojen proces (PowerShell Start-Process) z 
 dnevnika. Koda, identifikatorji, docstringi in testi v angleščini; pogovor z mano v
 slovenščini, brez nepojasnjenih kratic.
 ```
+
+## 12. Predaja za PR C (3. september 2026; seja zaključena pred izvedbo)
+
+### 12.1 Stanje repozitorija
+
+- Odprti in skladani PR-ji: #33 (`claude/ldptrace-metrics`, PR A) ← #34
+  (`claude/cells-mode`, PR B1) ← **#35 (`claude/cells-mode-orchestrator`, PR B2)**; vrstni
+  red združevanja 33 → 34 → 35. **Veja za PR C:** `claude/ldptrace-validation`, odcepljena
+  od `claude/cells-mode-orchestrator` (če je #35 medtem združen, od `main`; preveri z
+  `gh pr view 35 --json state`). PR na `main`; v opisu napiši, na kaj se sklada.
+- Podatki na računalniku (niso v gitu): `data/interim/porto/porto.dat` (245 MB, 367.008
+  poti), `porto.xz` (48 MB, format izvirnika), `porto_stats.json` (`grid_bbox`
+  `[-8.640001, 41.140007, -8.600003, 41.169997]`, v konfiguraciji zaokrožen na šest
+  decimalk); predpomnilnik bazena `data/processed/17a5b3fba2ac1341/` (2.000 poti:
+  `clean.parquet`, `chains.parquet`, `meta.json`) in rezultati `results/porto_cells_mia/`
+  (seme 42, `seed1..3`, `repetitions.csv`). Klona izvirnika `external/LDPTrace` še ni
+  (`external/` je v `.gitignore`); nastane v seji (D-V.9). `data/raw/porto/train.csv` je
+  nespremenljiv.
+- Definicija končanega: `uv run ruff check .`, `uv run ruff format --check .`,
+  `uv run mypy src`, `uv run pytest -q` (333 testov, ~54 s); izpis v opis PR. Ni novih
+  odvisnosti. Ukazi nad 10 minut tečejo kot samostojen proces (`Start-Process`) z
+  dnevnikom; izvirnik brez `--multiprocessing`.
+- Prompt za sejo PR C ni v tem dokumentu (avtorjeva odločitev 3. septembra 2026; predan je
+  bil v seji); sestavi se iz §9 in tega razdelka.
+
+### 12.2 Preverjena dejstva iz B2, ki jih PR C potrebuje
+
+- **Dostop do verig.** `_cell_pool(load_config(pot))` v `experiments/orchestrator.py` vrne
+  `(chains, clean_by_id, split_counts)`: zapisi `CellChain(traj_id, user_id, chain)` v
+  vrstnem redu nalagalnika (= vrstni red v `.dat`), oznaka razreza v
+  `clean_by_id[traj_id].split`. Brez orkestratorja: `LDPTraceDatLoader(pot)
+  .iter_trajectories()` → `grid.chain(TrajectoryView(clean=…).as_cells(grid))` ali
+  neposredno `grid.cell_of(lat, lon)` po točkah in `grid.chain(...)`, z `Grid(bbox=grid_bbox,
+  n_rows=6, n_cols=6)`. Poti imajo `traj_id = "ldptrace_dat/<id>"`, `user_id = "<id>"`.
+- **Generator v načinu mreže.** `LDPTraceGenerator(bbox=grid_bbox, epsilon=ε, n_rows=6,
+  n_cols=6, seed=s)`; `fit([TrajectoryView(sequence=veriga), …])` (samo razrez `train` ali
+  brez oznake), po `fit` atributa `l_k` in `report_epsilon`; `generate(n, seed)` vrne
+  `SyntheticTrajectory` s `payload` = terka celic in `map_id = ""`; `sequence_log_prob`.
+  Ciljni generator roke v orkestratorju je isti razred nad verigami razreza `train` v
+  vrstnem redu predpomnilnika s `seed = seme pogona + 0` (senčni `1000 + k`); ponovna
+  prilagoditev ga natanko reproducira (tako so dobljeni L_k v `HANDOFF.md` §2.3).
+- **Čas.** Tveganje iz §7 (»1–3 min na seme«) je zastarelo: 17 prilagajanj nad 1.000
+  učnimi verigami (16 senčnih + tarča) traja 0,7 s, torej ~0,04 s na prilagoditev tisočih
+  verig; celoten pogon `porto_cells_mia` traja 58 s, od tega ~57 s branje in čiščenje
+  367.008 poti iz `.dat` (`clean` s terkami točk, ~1,7 GB vrha pomnilnika). Prilagoditev
+  nad celotno populacijo je reda deset sekund na seme, vektorizacija ni potrebna; sinteza
+  `generate(367.008)` in metrike nad njo (vzorci dolžine 2–8, top-k) so neizmerjene —
+  izmeri jih najprej na podvzorcu (`--max-trajectories`).
+- **L_k je nestabilen pri n = 1.000** (mreža 36 celic, proračun ε/10 za histogram dolžin):
+  po semenih 42/1/2/3 je 1/4/1/1 pri ε = 0,5, 1/5/1/1 pri ε = 1 in 1/7/2/7 pri ε = 1,5;
+  učne verige so dolge 1–25 celic, mediana 5. Pri L_k = 1 naprava poroča samo začetek in
+  konec in sinteza da enocelične poti. Članek dela s celotno populacijo (~360.000), kjer se
+  histogram umiri; to je glavni razlog za priporočilo v 12.3(a).
+- **Merilo 4 iz §6 je izpolnjeno v B2:** vrstice MIA za `markov` in `ldptrace` nad Portom
+  obstajajo (`HANDOFF.md` §2.3: AUC 0,58 oziroma ~0,50, tri semena, 11 s). PR C jih ne
+  ponavlja, razen če spremeni konfiguracijo.
+- **Mreža izvirnika.** Izvirnik bbox računa sam iz `porto.xz` (`dataset_stats`, ± 1e-6),
+  kar je natanko pravilo za `grid_bbox` v `porto_stats.json` (prevzeto v B1); naš `Grid`
+  indeksira vrstico po lat in stolpec po lon (vrstično), izvirnik `i·n + j` po x — to
+  vpliva samo na izenačenja (D-V.7, odločitev 6). Verige obeh strani morajo biti enake;
+  preveri na nekaj poteh, preden meriš.
+- **Nespremenjenost današnje poti.** PR C orkestratorja ne potrebuje spreminjati; če doda
+  `l_k` v `run.json` (12.3(c)), je to nov ključ brez vpliva na `results.csv` in hash, zlati
+  izpis iz §11.4 ni potreben. Pri vsaki primerjavi svežih izračunov nad fixturom z
+  ujemanjem fiksiraj `PYTHONHASHSEED` (ujemanje na zemljevid ni ponovljivo med procesi,
+  `HANDOFF.md` §2.5); način celic tega nima.
+
+### 12.3 Odločitve za plan mode PR C (seja jih predlaga, avtor potrdi)
+
+- **(a) Populacija primerjave.** Priporočeno: **vseh 367.008 poti na obeh straneh**
+  (izvirnik podvzorčenja nima, metrike članka so populacijske, L_k se pri 2.000 ne umiri).
+  Alternativa: podvzorec 2.000 z istimi id-ji na obeh straneh (naš izbor je determinističen:
+  `_subsample_users` premeša urejene `user_id` s `split_seed` 42; izvirnik bi potreboval
+  popravek za branje seznama id-jev). MIA ostane pri `max_users: 2000`.
+- **(b) Vhod ogrodja `ldptrace_eval.py`.** Priporočeno: neposredno `.dat` + `grid_bbox`
+  (kot izvirnik, brez orkestratorjevega predpomnilnika in razreza), z
+  `--max-trajectories N` za poskusne zagone; alternativa je predpomnilnik konfiguracije.
+- **(c) `l_k` v `run.json`** (neobvezno): zapis `l_k` in `report_epsilon` ciljnega
+  generatorja po rokah, da prihodnji pogoni MIA ne potrebujejo ponovne prilagoditve.
+- **(d) Semena in ε** po D-V.10 (ε ∈ {0,5, 1, 1,5}, semena 1–5 na obeh straneh); neobvezno
+  ε = 2 in mreža 12 × 12 za vez na `HANDOFF.md` §2.3.
+
+### 12.4 Popravki načrta §4/§6/§7 za PR C
+
+- `docs/RUNNING.md`: PR C doda **nov §9.3** in vrstico v kazalu (§9.1 je pretvorba, §9.2
+  pogon MIA v načinu celic); §4 in §6 sta prvotno pisala »§9.1«.
+- §7, alineja »Čas«: umaknjena (12.2); alineja »Delitev po uporabnikih«: rešena z
+  `max_users: 2000` v B2.
+- §6, zadnji ukaz (`trajguard repeat porto_cells_mia`): že izveden v B2; ponovi le ob
+  spremembi konfiguracije.
+- Izhod ogrodja v `results/ldptrace_validation/` (ni v gitu), popravek izvirnika v
+  `scripts/ldptrace_reference.patch` (edini artefakt izvirnika v gitu), commit klona v
+  `HANDOFF.md` §2.3.
+
+### 12.5 Dejanske odločitve in izmerjeno (izpolni PR C)
+
+*(Še ni.)*
