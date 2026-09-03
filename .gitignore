@@ -33,3 +33,6 @@ maps/*
 # Images written by the visual recipes in docs/RUNNING.md §4
 /beijing_map.png
 /trajectory_before_after.png
+
+# Clone of the LDPTrace reference code (docs/NACRT_LDPTRACE_VALIDACIJA.md, D-V.9)
+external/
