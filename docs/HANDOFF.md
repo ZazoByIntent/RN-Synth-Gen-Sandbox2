@@ -330,11 +330,21 @@ celic, mediana 3, na mreži 12 × 12):
   v konfiguraciji, primerjalni pogon nad javnim Portom): načrt, predaja in prompt v
   `docs/NACRT_LDPTRACE_VALIDACIJA.md`. Ponovitev številk iz članka ni mogoča (izvirnik
   ne prilaga podatkov in nima semena); cilj je diferencialna primerjava port ↔ izvirnik
-  nad istim vhodom. **Stanje 2. septembra 2026 (zvečer):** PR A (devet metrik članka,
+  nad istim vhodom. **Stanje 3. septembra 2026:** PR A (devet metrik članka,
   `src/trajguard/evaluation/ldptrace_metrics.py`) je oddan kot PR #33 (odprt); PR B je
-  razrezan na B1 (predstavitev in vhodi; načrt potrjen, predaja s promptom v tistem
-  dokumentu §10, koda še ni napisana) in B2 (orkestrator); PR C sledi. Rezultati
-  primerjave še niso izmerjeni; tabela z devetimi metrikami × tremi ε pride sem v PR C.
+  razrezan na B1 in B2. **B1 je izveden** (veja `claude/cells-mode`, skladana na PR #33):
+  oblika `sequence` in `as_sequence()` pri `TrajectoryView`, `Grid.chain`, način `bbox`
+  generatorja `ldptrace`, nalagalnik `ldptrace_dat` in pretvorba Porta
+  (`scripts/porto_to_ldptrace_dat.py`). Današnja pot je nespremenjena: zlati izpis
+  generatorja `ldptrace` v načinu omrežja je pred in po spremembi identičen. **Porto,
+  izmerjeno 3. septembra 2026:** iz 1.710.670 vrstic `train.csv` je z bbox lon −8,64 …
+  −8,60, lat 41,14 … 41,17 (osrednji Porto, ~3,4 × 3,3 km) obdržanih **367.008 poti**
+  (članek: 361.591) z 12.136.174 točkami; odvrženih 10 (`MISSING_DATA`), 36.508 (< 2
+  točki), 1.307.144 (zunaj bbox); bbox točk lon −8,64 … −8,600004, lat 41,140008 …
+  41,169996, `grid_bbox` = ± 1e-6; 371 s. Izhod `data/interim/porto/` (245 MB `.dat`,
+  48 MB `.xz`, `porto_stats.json`) ni v gitu. Prvotno predlagani bbox (−8,69 … −8,55 ×
+  41,13 … 41,19) bi obdržal 81 % poti. B2 (orkestrator, način `cells`) in PR C sledita;
+  tabela z devetimi metrikami × tremi ε pride sem v PR C.
 
 ### 2.4 Val 5 — horizont B (2. letnik)
 

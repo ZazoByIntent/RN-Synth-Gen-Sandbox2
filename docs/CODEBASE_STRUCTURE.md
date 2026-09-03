@@ -66,6 +66,7 @@ trajguard/
 │   └── synthetic/     # generator outputs           ┘
 ├── maps/              # built road networks (expensive one-time OpenStreetMap builds)
 ├── notebooks/         # visual sanity checks (e.g. "does map-matching look right?")
+├── scripts/           # thin command-line wrappers around package functions (Porto conversion)
 ├── results/           # one folder per experiment run (metrics.csv, run.json, plots)
 └── reports/           # aggregated human-readable report (trajguard report)
 ```
@@ -152,7 +153,7 @@ module and thereby "knows" every component. If you add a component and the
 orchestrator cannot find it, the missing import in `builtins.py` is the reason.
 
 Currently registered names (grep for `@register` to refresh this list):
-`osm` (map source); `geolife` (dataset); `leuven` (matcher); `none`,
+`osm` (map source); `geolife`, `ldptrace_dat` (datasets); `leuven` (matcher); `none`,
 `geo_indistinguishability` (mechanisms); `markov`, `rn_ldp_synth`, `ldptrace`
 (generators); `reidentification`, `membership_inference`, `reconstruction`,
 `poi_inference` (attacks); `top_k_accuracy`, `linkage_rate` (metrics).
@@ -176,6 +177,11 @@ In pipeline order, with the reason each package exists:
   by trajectory is essential: if one person's trips appeared in both the
   training data and the attack targets, a membership-inference experiment
   would be measuring leakage that the experimental setup itself created.
+  `ldptrace_dat.py` reads the text format of the LDPTrace reference code (one
+  user per trajectory, synthetic timestamps, no map — it exists so the `ldptrace`
+  port can be validated against that code on identical input) and holds the pure
+  functions that convert the public Porto taxi file into it;
+  `scripts/porto_to_ldptrace_dat.py` is their command-line wrapper.
 - **`matching/`** — `leuven.py` snaps noisy GPS points onto the roads actually
   traveled (map matching: GPS navigation in reverse). Attacks that compare
   routes need road-segment sequences, not jittery dots, and the match-quality

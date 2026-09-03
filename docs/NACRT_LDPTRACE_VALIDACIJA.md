@@ -86,6 +86,16 @@ Prebral podagent 2. septembra 2026; seja jih ne preverja znova, razen kjer piše
   mreža 6 × 6, ε ∈ {0,5, 1,0, 1,5}, kvantil 0,9, delitev ε/10 in 9ε/10, poizvedbe
   1/9 prostora, povprečje petih sintez. Oldenburg 500.000 poti (generator), Hangzhou
   348.144 (zaseben), Campus 1.000.000 (generiran po drugem članku, ni objavljen).
+- **Porto po najini pretvorbi (izmerjeno 3. septembra 2026, PR B1,
+  `scripts/porto_to_ldptrace_dat.py`, 371 s, pod 1 GB pomnilnika).** Od 1.710.670
+  vrstic datoteke `train.csv` je obdržanih **367.008 poti** (članek: 361.591) z
+  12.136.174 točkami; odvrženih 10 zaradi `MISSING_DATA`, 36.508 z manj kot dvema
+  točkama in 1.307.144 z vsaj eno točko zunaj bbox. Bbox izbora: lon −8,64 … −8,60,
+  lat 41,14 … 41,17 (osrednji Porto, ~3,4 × 3,3 km; prvotni predlog −8,69 … −8,55 ×
+  41,13 … 41,19 bi obdržal 81 % poti, ~1,4 milijona). Bbox obdržanih točk: lon −8,64 …
+  −8,600004, lat 41,140008 … 41,169996; `grid_bbox` = ta bbox ± 1e-6, zapisan v
+  `data/interim/porto/porto_stats.json` (izhod ni v gitu: `porto.dat` 245 MB,
+  `porto.xz` 48 MB).
 
 ## 3. Odločitve (»priporočeno« pomeni predlog, ki ga seja potrdi ali spremeni)
 
@@ -99,6 +109,7 @@ Prebral podagent 2. septembra 2026; seja jih ne preverja znova, razen kjer piše
   točkama, obdrži poti, katerih **vse** točke ležijo v bbox središča Porta. Predlog bbox:
   lon −8,69 … −8,55, lat 41,13 … 41,19; seja izpiše število obdržanih poti in bbox po
   potrebi popravi, da je red velikosti ~360.000; točnega števila iz članka ne lovi.
+  *(Izvedeno v PR B1 z bbox lon −8,64 … −8,60, lat 41,14 … 41,17 → 367.008 poti; §10.6.)*
   Izhod: `data/interim/porto/porto.dat` (format izvirnika, koordinate `lon,lat`) in
   `porto.xz` (za izvirno kodo) ter `porto_stats.json` (bbox, števila). Bbox iz
   statistike je javen vhod v konfiguracijo (D-V.4), tako da najin port in izvirnik
@@ -236,7 +247,8 @@ nova `_cell_pool`; veja v `run_experiment`; `_generator_ctor`; `_mia_pool`),
 (predstavitev + generator + nalagalnik + skripta) in B2 (orkestrator + konfiguracija),
 če oboje ne gre v en pregleden PR. **Odločeno 2. septembra 2026: razrez B1 + B2** (veja
 B1 `claude/cells-mode` na `claude/ldptrace-metrics`, B2 se sklada na B1); potrjeni načrt
-B1 in skica B2 sta v §10.
+B1 in skica B2 sta v §10. *B1 izveden 3. septembra 2026* (dejanske datoteke in
+odstopanja v §10.4, številke Porta v §2 in §10.6); B2 je odprt.
 
 **PR C — validacijski pogon (`claude/ldptrace-validation`).** Novo:
 `src/trajguard/experiments/ldptrace_eval.py`, `tests/test_ldptrace_eval.py` (na
@@ -450,6 +462,34 @@ kratic.
 
 ### 10.4 Potrjeni načrt B1 po datotekah
 
+**Izvedeno 3. septembra 2026 (veja `claude/cells-mode`, odcepljena od
+`claude/ldptrace-metrics`, ker PR #33 še ni bil združen).** Načrt spodaj je izveden
+dobesedno, z naslednjimi potrjenimi drobnimi odstopanji:
+
+1. `LDPTraceGenerator._params` dobi ključ `bbox` **samo v načinu `bbox`** (načrt je
+   predvideval `None` v načinu omrežja), da `params_hash` sintetičnih zapisov v
+   današnjem načinu ostane bit za bitom enak. Dokaz nespremenjenosti: »zlati« izpis
+   generatorja v načinu omrežja (verige, `generate` pri fiksnih semenih,
+   `sequence_log_prob` nad 20 fixture potmi, štiri konfiguracije) je pred in po
+   spremembi identičen (isti md5), glej opis PR.
+2. `porto_stats.json` ima poleg načrtovanih polj še `source`, `bbox_filter`,
+   `max_trajectories` in `n_read` (sledljivost pogona brez opisa PR).
+3. Vrstica `>0:` brez točk je napaka nalagalnika (pisec je nikoli ne zapiše); pri
+   `max_trajectories` branje ustavi takoj, ko je doseženo, `n_read` šteje prebrane vrstice.
+4. Test kraljeve hoje v `tests/test_ldptrace.py` kliče `gen.grid.chain`; isti ročno
+   pričakovani primeri so še v `tests/test_views.py`. Dodana testa: omrežni način
+   sprejme poglede samo s `sequence` (senčni modeli napada članstva) in da isti izpis kot
+   z ujetimi pogledi; oba načina dasta isto verigo za isto pot.
+5. `docs/RUNNING.md` §1: pričakovano število testov popravljeno na 316.
+6. Pretvorba Porta je **varčna s pomnilnikom**: obdržane poti hrani kot polja `numpy`
+   oblike `(n, 2)` (16 B na točko namesto ~100 B za terko), `porto.dat` piše sproti,
+   `porto.xz` pa kot ročno sestavljen tok `pickle` (opkode `EMPTY_LIST`/`MARK`/`APPENDS`,
+   `BINFLOAT` + `TUPLE2`), ki ga `pickle.load` prebere kot isti
+   `list[list[tuple[float, float]]]`, kot bi ga dal `pickle.dump` (test čez meje paketov
+   `APPENDS`). Razlog: prvi zagon s seznami terk je na 16 GB računalniku presegel 8 GB.
+   Privzeti bbox `PORTO_CENTRE_BBOX` je popravljen na izmerjeno vrednost (§10.6), fixture
+   `train_tiny.csv` ima eno pot premaknjeno v ta bbox.
+
 **`src/trajguard/representation/views.py`**
 - `Grid.chain(cells: Sequence[int]) -> list[int]`: preveri obseg indeksov, strne
   zaporedne dvojnike, med nesosednjimi celicami vstavi kraljevo hojo (vrstica in stolpec
@@ -562,7 +602,17 @@ predpomnjena kot `clean.parquet` + `chains.parquet`); `run_experiment` preveri T
 `uv run python scripts/porto_to_ldptrace_dat.py data/raw/porto/train.csv data/interim/porto`
 s predlaganim bbox lon −8,69 … −8,55, lat 41,13 … 41,19; če je število obdržanih poti daleč
 od ~360.000, bbox popravi (širši → več poti) in oboje zapiši sem in v `HANDOFF.md` §2.3.
-*(Izmerjeno: še ni.)*
+
+**Izmerjeno 3. septembra 2026.** Predlagani bbox je bil daleč prevelik: na prvih
+300.000 vrsticah je obdržal 81 % poti (ocena ~1,4 milijona na celotni datoteki), zato je
+bil na istem vzorcu izbran ožji bbox z deležem ~0,22: **lon −8,64 … −8,60, lat 41,14 …
+41,17** (zdaj privzeta vrednost `PORTO_CENTRE_BBOX` v `datasets/ldptrace_dat.py`, ukaz
+zgoraj teče brez `--bbox`). Celotna pretvorba: 1.710.670 vrstic → **367.008 poti**
+(članek 361.591), 12.136.174 točk, 371 s; bbox točk lon −8,64 … −8,600004, lat 41,140008
+… 41,169996, `grid_bbox` = ± 1e-6 (natančne vrednosti v `porto_stats.json` in v
+`RUNNING.md` §9.1). Prvi poskus s seznami terk je porabil > 8 GB pomnilnika in je bil
+prekinjen; pretvorba zato hrani poti kot polja `numpy` in piše pickle pretočno (§10.4,
+odstopanje 6).
 
 ### 10.7 Prompt za sejo B1 (kopiraj v celoti)
 

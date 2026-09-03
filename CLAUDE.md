@@ -15,9 +15,12 @@ baseline candidate) and measured at the 20-user rung on 2 Sep 2026 (rows in
 `docs/HANDOFF.md` §2.3); its validation against the authors' code follows
 `docs/NACRT_LDPTRACE_VALIDACIJA.md`: PR A (the paper's nine utility metrics,
 `evaluation/ldptrace_metrics.py`) is done (PR #33); PR B1 (cells representation and
-inputs) has an approved plan and handoff in that document's §10 but no code yet; PR B2
-(orchestrator cells mode) and PR C (the Porto comparison run) are open; ZM-2 … ZM-4 are
-open.**
+inputs: `TrajectoryView.sequence` / `as_sequence()`, `Grid.chain`, the `bbox` mode of
+`ldptrace`, the `ldptrace_dat` loader and the Porto conversion) is done on branch
+`claude/cells-mode` (3 Sep 2026, stacked on PR #33; 367,008 Porto trajectories converted
+into `data/interim/porto/`, numbers in `docs/HANDOFF.md` §2.3); PR B2 (orchestrator cells
+mode, plan sketch in that document's §10.5) and PR C (the Porto comparison run) are open;
+ZM-2 … ZM-4 are open.**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.
 
