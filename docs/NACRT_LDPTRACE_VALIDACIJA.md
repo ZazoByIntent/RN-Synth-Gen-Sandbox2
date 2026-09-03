@@ -582,6 +582,9 @@ B1 izveden), `CLAUDE.md` (vrstica stanja).
 
 ### 10.5 Skica B2 (svoj načrt po potrditvi B1)
 
+*Skica je nadomeščena s potrjenim načrtom in predajo za B2 v §11 (3. september 2026);
+spodnje besedilo ostaja kot izvor.*
+
 `experiments/orchestrator.py`: `load_config` bere `dataset.representation`
 (`segments` privzeto | `cells`) in v načinu `cells` obvezen `dataset.grid: {n_rows, n_cols,
 bbox}` ter neobvezen `map`; `_version_hash` vključi `representation` in `grid`; nova
@@ -643,5 +646,287 @@ src, uv run pytest -q čisti, izpis prilepljen; potisk na origin in PR na main z
 dokazi, brez novih odvisnosti, opomba o skladanju na PR #33). Testi berejo samo
 tests/fixtures/. Po oddaji B1 predlagaj načrt za B2 (§10.5) v plan mode in počakaj na
 mojo potrditev. Koda, identifikatorji, docstringi in testi v angleščini; pogovor z mano v
+slovenščini, brez nepojasnjenih kratic.
+```
+
+## 11. Predaja za PR B2 (3. september 2026; seja zaključena pred izvedbo)
+
+### 11.1 Stanje repozitorija
+
+- `main` = `e4adfe3` (PR #32 združen). Odprta sta PR #33 (`claude/ldptrace-metrics`, PR A)
+  in **PR #34 (`claude/cells-mode`, PR B1, skladan na #33)**: commiti `8bd3d42` (nalagalnik
+  `ldptrace_dat` + pretvorba Porta), `144e526` (oblika `sequence`, `Grid.chain`, način `bbox`
+  generatorja `ldptrace`), `68a0f96` (varčna pretvorba, privzeti bbox), `7aa475d`
+  (dokumentacija) in commit s to predajo.
+- **Veja za B2:** `claude/cells-mode-orchestrator`, odcepljena od `claude/cells-mode` (če je
+  PR #34 medtem združen, od `main`; preveri z `gh pr view 34 --json state`). PR na `main`; v
+  opisu napiši, da se sklada na PR #34, če ta še ni združen.
+- **Podatki na računalniku** (niso v gitu): `data/interim/porto/porto.dat` (245 MB, 367.008
+  poti), `porto.xz` (48 MB), `porto_stats.json` z `grid_bbox`
+  `[-8.640001, 41.140007000000004, -8.600003000000001, 41.169996999999995]` (§10.6);
+  `data/raw/porto/train.csv` je nespremenljiv. Zemljevida Porta ni in ga B2 ne potrebuje.
+- Definicija končanega: `uv run ruff check .`, `uv run ruff format --check .`,
+  `uv run mypy src`, `uv run pytest -q` (316 testov, ~68 s); izpis v opis PR. Ruff: dolžina
+  vrstice 100; mypy `strict`. Ni novih odvisnosti.
+- Praktična opomba iz B1: ukazi v ozadju orodja Bash imajo omejitev 10 minut; daljši pogoni
+  (branje 367.008 poti v predpomnilnik, `repeat` čez tri semena) naj tečejo kot samostojen
+  proces (`Start-Process` v PowerShellu z izpisom v dnevnik) in se spremljajo prek dnevnika.
+  Vsaka pot Porta je svoj uporabnik, zato `max_users` pomeni število poti.
+
+### 11.2 Odločitve avtorja za B2 (potrjene v seji 3. septembra 2026)
+
+1. **Načrt B2 iz §11.4 je potrjen** skupaj s petimi dopolnitvami skice §10.5:
+   (a) blok `map_matching` je v načinu `cells` neobvezen; (b) `privacy_mechanisms` je v
+   načinu `cells` zavrnjen pred cevovodom (zaščite potrebujejo ponovno ujemanje na
+   zemljevidu); (c) v generator se poleg `bbox` vbrizgata `n_rows`/`n_cols` mreže, nasprotujoče
+   vrednosti v konfiguraciji so napaka; (d) `representation` in `grid` vstopita v
+   `_version_hash` **samo v načinu `cells`**, da hash današnjih konfiguracij ostane bit za
+   bitom enak in se obstoječi bazeni (stopnja 182) ne preračunavajo; (e) test konec-do-konca
+   teče nad fixturom `geolife_onroad` v načinu `cells`, `tiny.dat` služi enotnemu testu bazena.
+2. `docs/REZULTATI_SHEMA.md` se ne spremeni (nov stolpec ni potreben; `n_rematch_dropped` je
+   v načinu celic prazen, kar se zapiše v `RUNNING.md`).
+3. Pravi pogon `config/experiments/porto_cells_mia.yaml` (`max_users: 2000`) in
+   `trajguard repeat … --seeds 1 2 3` se poženeta po prehodu testov; vrstice gredo v
+   `docs/HANDOFF.md` §2.3, `RUNNING.md` §9.2 in v §11.5 tega dokumenta.
+4. B2 se izvede v sveži seji: začne v plan mode, načrt povzame in ga predloži v potrditev.
+
+### 11.3 Preverjena dejstva, ki jih nova seja ne odkriva znova
+
+Številke vrstic veljajo za `src/trajguard/experiments/orchestrator.py` na commitu `7aa475d`
+(datoteka ima ~1.630 vrstic; B1 je ni spreminjal).
+
+**Konfiguracija.** `RunConfig` (zamrznjen dataclass, vrstice 108–147) ima polja `exp_id`,
+`seed`, `split_seed`, `output_dir`, `cache_dir`, `protected_dir`, `map_source`, `map_region`,
+`map_bbox`, `map_crs`, `map_dir`, `dataset_id`, `dataset_path`, `dataset_native_region`,
+`max_users`, `cleaning: CleaningConfig`, `matcher_id`, `radius_m`, `gps_error_m`,
+`k_candidates`, `min_match_score`, `fractions`, `mechanisms`, `generators`, `attacks`,
+`metric_names`, `top_k`, `utility_names`, `utility_grid`, `bootstrap_n`, `bootstrap_ci`,
+`measure_memory`, `attack_time_budget_s`, `export`, `plots`; polja zemljevida so
+neopcijska. `MechanismSpec` (93–106, lastnost `ref` = `id:k=v,…`) je skupen mehanizmom in
+generatorjem; `AttackSpec` 78–91; `_ORCHESTRATOR_ATTACKS` 66–68; `_req(d, key, ctx)` 149–152.
+`load_config` (329–461): obvezni bloki `experiment`, **`map`**, `dataset`, `cleaning`,
+**`map_matching`**, `split`, `metrics` (335–341); `map.bbox` 4 vrednosti (342–344); polja
+zemljevida 422–427; `dataset.id` = ime nalagalnika, `dataset.path`, neobvezen
+`native_region`, `max_users` ≥ 1 (413–415, 428–431); `cleaning` zahteva vse štiri ključe
+(432–437); `map_matching` zahteva `matcher` in `min_match_score` (438–442); `split.scheme`
+samo `by_user`, `fractions` obvezne (346–348, 443); generatorji/mehanizmi neobvezni prek
+`_variant_specs` (301–326, seznami parametrov se razširijo v mrežo); napadi 378–381 +
+`_attack_specs` 155–289 (napad na članstvo 237–273: `attacker` ⊆ `{n_shadow, subsample}`,
+`target_scope == ['synthetic']`, `fprs` v (0, 1)); `metrics` 365–377 in 444–451; `reporting`
+350–364; semena 410–411. **Preverba T1 ni v `load_config`**, ampak na začetku
+`run_experiment` (1187–1202): `ConsistencyError`, če `cfg.map_region != loader_cls.native_region`;
+`LDPTraceDatLoader.native_region == "none"` zato danes pade pri vsakem zemljevidu.
+
+**Hash in predpomnilnik.** `_version_hash` (509–534): sha256 slovarja
+`{"map": [source, region, crs, bbox, str(map_dir), _built_map_timestamp], "dataset": [id,
+str(path)], "cleaning": asdict, "matching": [matcher_id, radius_m, gps_error_m,
+k_candidates, min_match_score], "sample": max_users, "split": [sorted(fractions),
+split_seed]}`, 16 šestnajstiških znakov; seme pogona, roke in napadi niso v hashu.
+`_built_map_timestamp` (493–507) bere `map_dir/map_region/meta.json`. Predpomnilnik bazena:
+`cfg.cache_dir / _version_hash(cfg)` (682) s `matched.parquet` (`_MATCHED_SCHEMA` 466–476),
+`clean.parquet` (`_CLEAN_SCHEMA` 478–490) in atomarno zapisanim `meta.json`
+(`{"dropped", "split_counts", …}`); `_write_pool_cache` 566–616, `_read_pool_cache` 618–651.
+`_matched_pool(cfg, provide)` (678–707): predpomnilnik → `provide()` (687) → nalagalnik
+`registry.get("dataset", cfg.dataset_id)(cfg.dataset_path)` → `clean` (689–693) →
+`_subsample_users(cleaned, max_users, split_seed)` (694–695, 709–723) → `split_by_user`
+(696) → `match_many` (701) → `clean_by_id` samo za ujete (702–703) → zapis. `dropped` so
+izgube pri ujemanju surovega bazena in gredo v `run.json` kot `n_dropped` (1592);
+`n_rematch_dropped` je izguba pri ponovnem ujemanju zaščitene izdaje in pri vrsticah MIA
+ni nikoli nastavljen.
+
+**Omrežje.** `_NetProvider` (464), `_net_provider(cfg)` (654–676, memoiziran); klici
+`provide()` samo na vrsticah 687 (`_matched_pool`), 832 (`_protected_pool`) in 1062
+(`_generator_ctor.make`).
+
+**`run_experiment`** (od 1181): zaščita pisanja pod `data/raw` (1184–1186) → T1
+(1187–1202) → načrti napadov (1204–1272; MIA 1245–1259: zahteva neprazne generatorje in
+deleža `train` ter `test` > 0, sonda konstruktorja napada) → načrti mehanizmov
+(1273–1280) → `provide = _net_provider(cfg)` (1282) → načrti generatorjev (1283–1294:
+`inspect.signature(gen_cls).bind_partial(**params)`, nato `_generator_ctor`) →
+`_matched_pool` **brezpogojno** (1296) → `_build_metrics` (1297) → `_target_pools`
+(1298; 853–871: obseg `synthetic` ne ustvari bazena, pri konfiguraciji samo z MIA je
+`pools == {}`) → razpošiljanje napadov (1305–1369; MIA 1317–1323 kliče
+`_membership_values(cfg, spec, attack_cls, matched, clean_by_id, gen_plans)`) → blok
+koristnosti (1371–1413; `Grid(bbox=cfg.map_bbox, …)` na 1371 se zgradi brezpogojno, telo
+teče le za bazene `protected:` z `metrics.utility`) → `arms` (1415–1425, samo iz `pools`) →
+`_write_results` (klic 1428–1439, definicija 1535–1618; `run.json` 1589–1616 z
+`n_matched = len(matched)` (1591), `n_dropped` (1592), `split_counts`, `arms`,
+`over_budget`, `warnings`).
+
+**Napad na članstvo.** `_generator_ctor(gen_cls, params, cfg, provide)` (1047–1068):
+vbrizg po podpisu, `network = provide()[0]`, `seed = cfg.seed + odmik` (0 tarča, `1000 + k`
+senčni). `_mia_pool(matched, clean_by_id)` (1070–1097): bazen = senčne + učne + testne
+poti (`m.edge_seq`, 1092–1094), kandidati `(indeks, je_član)`, napaka brez učnih ali
+testnih poti (1087–1091). `_membership_values` (1100–1174): tarča se prilagodi na
+`TrajectoryView(clean=clean_by_id[m.traj_id], matched=m)` (1124), `result_id =
+f"membership_inference:synthetic:{gspec.ref}"` (1130–1131), varovalo S4-2 (1132–1139),
+vrstice (1149–1173) z `arm_id`, `target_ref`, `epsilon` (iz atributa generatorja),
+`n_shadow`, `n_pool` (= število kandidatov), `n_members`, `n_nonmembers`. Pogledi se v
+orkestratorju gradijo samo na vrsticah 824 (`_protected_pool`) in 1124. Konstruktorji:
+`LDPTraceGenerator(network=None, bbox=None, epsilon=1.0, n_rows=12, n_cols=12, quantile,
+length_share, alpha, beta, seed=0)`; `MarkovGenerator(order, alpha, max_len)` brez
+`network` in `seed`; `RNLDPSynthGenerator(network, …)` zahteva omrežje.
+
+**Ostalo.** `experiments/cli.py`: `run` → `_print_summary` (`load_config`, pri `--seed`
+`replace(cfg, seed=…, output_dir=cfg.output_dir / f"seed{seed}")`, `run_experiment`);
+`repeat` → `run_repetitions` v `experiments/repeat.py`. `datasets/split.py::split_by_user(trajs,
+fractions, seed)`; `datasets/cleaning.py::clean(raw, cfg) -> CleanTrajectory | None` je z
+`max_speed_kmh: 1e9, min_points: 1, min_length_m: 0, resample_s: 0` prepustno.
+`reporting/results_schema.py::RESULTS_COLUMNS` (21–59) in `tests/test_results_schema.py`
+pripenjata shemo na `docs/REZULTATI_SHEMA.md`; vrstice MIA že polnijo vse potrebne stolpce.
+`docs/RUNNING.md`: §9.1 je zaseden (pretvorba Porta), razdelek za pogon v načinu celic je
+§9.2; §10 (predpomnjenje) omenja samo hash današnje poti.
+
+**Testi.** `tests/test_orchestrator.py`: `base_config(tmp_path, maps_dir, region)` (17–67;
+`experiment.cache_dir`, `experiment.protected_dir`, `map.dir` so ključi samo za teste),
+`beijing_maps_dir` (70–76, kopija `tests/fixtures/maps/beijing_fixture` v
+`tmp_path/maps/beijing`), `write_config` (79–82), `mia_config` (281–294: `n_shadow: 8`,
+`subsample: 0.5`, `fprs: [0.25]`), enotna testa `_mia_pool` (348–402), MIA konec-do-konca
+(405–427; bere vrnjeni seznam `MetricValue`, `out/metrics.csv`, `out/run.json`), test
+predpomnilnika (137–146: natanko `{matched.parquet, clean.parquet, meta.json}`), test hasha
+(152–163). Testi zavrnitev pred cevovodom podajo neobstoječo mapo zemljevidov, da bi vsak
+korak cevovoda padel. `tests/test_repeat.py:10` uvaža pomožne funkcije iz
+`test_orchestrator`. Fixture `geolife_onroad`: 8 poti, 2 uporabnika (005, 006); delitev
+po uporabnikih z deleži 0,5/0,2/0,2/0,1 da učnega in testnega uporabnika (4 nečlani, zato
+`fprs: [0.25]`); čiščenje s privzetimi vrednostmi obdrži vse točke. Fixture `tiny.dat`:
+5 poti, pričakovane verige v `tests/fixtures/ldptrace_dat/README.md`.
+
+**Pomnilnik pravega pogona.** Vrstni red `nalagalnik → clean → subsample` očisti vseh
+367.008 poti (12,1 M točk kot terke, ~1,7 GB), preden `max_users` izbere 2.000; na 16 GB
+je to sprejemljivo in se zgodi enkrat (predpomnilnik).
+
+### 11.4 Potrjeni načrt B2 po datotekah
+
+**`src/trajguard/experiments/orchestrator.py`** (edina datoteka s pravo logiko)
+
+- `RunConfig`: novi polji `representation: str` (`"segments"` | `"cells"`) in
+  `cell_grid: Grid | None`; lastnost `has_map` (`map_source != ""`).
+- `load_config`: bere `dataset.representation` (privzeto `segments`; druga vrednost →
+  `ValueError`). V načinu `cells`: `dataset.grid: {n_rows, n_cols, bbox}` obvezen
+  (`n_rows`, `n_cols` ≥ 2, bbox 4 števila, min < max); blok `map` neobvezen (če manjka:
+  `map_source/region/crs = ""`, `map_bbox` = bbox mreže, ker je polje neopcijsko); blok
+  `map_matching` neobvezen (ujemanja ni). V načinu `segments` se nič ne spremeni: `map` in
+  `map_matching` ostaneta obvezna.
+- `_version_hash`: v načinu `cells` doda ključa `representation` in `grid`
+  (`[n_rows, n_cols, bbox]`); v načinu `segments` slovar ostane natanko današnji (isti
+  hash → obstoječi predpomnilniki veljajo).
+- Nov zapis `CellChain(traj_id, user_id, chain: tuple[int, ...])` in nova
+  `_cell_pool(cfg) -> (chains, clean_by_id, split_counts)`: nalagalnik → `clean` →
+  `_subsample_users` → `split_by_user` (isti vrstni red kot `_matched_pool`) → za vsako pot
+  `grid.chain(TrajectoryView(clean=t).as_cells(grid))`. Predpomnilnik v
+  `cache_dir/<hash>/`: `clean.parquet` (ista shema kot danes), `chains.parquet`
+  (`traj_id, user_id, chain: list<int64>`), `meta.json` (`dropped: 0`, `split_counts`,
+  `representation`, `grid`). `_write_pool_cache`/`_read_pool_cache` se razdelita na
+  pomožne funkcije po tabelah (`_write_clean_table`, `_read_clean_table`, …), obstoječi
+  klici ostanejo.
+- `run_experiment`: preverba T1 samo, če je `map` podan (`has_map`); v načinu `cells`
+  pred cevovodom zavrne vsak napad razen `membership_inference`, neprazen
+  `privacy_mechanisms` in vsako roko generatorja, katere podpis zahteva `network`, ne
+  sprejme pa `bbox` (`rn_ldp_synth`); bazen pride iz `_cell_pool` (`matched = []`,
+  `dropped = 0`), `_target_pools` da prazen slovar, blok koristnosti se izvede le, če bazeni
+  obstajajo; `run.json` dobi `representation`, `n_matched` v načinu celic šteje verige.
+- `_generator_ctor`: v načinu `cells` vbrizga `bbox` (bbox mreže) ter `n_rows`/`n_cols`,
+  če jih podpis sprejme in jih konfiguracija ne podaja; če jih podaja z drugo vrednostjo kot
+  mreža → `ValueError` že pri načrtovanju rok; `network` se ne vbrizga. Način `segments`
+  nespremenjen.
+- `_mia_pool` in `_membership_values` sprejmeta `Sequence[MatchedTrajectory | CellChain]`;
+  pomožni `_item_sequence(item)` (`edge_seq` ali `chain`) in `_item_view(item, clean)`
+  (`TrajectoryView(clean=…, matched=…)` ali `TrajectoryView(clean=…, sequence=chain)`).
+  Obstoječi enotni testi `_mia_pool` z `MatchedTrajectory` ostanejo nespremenjeni.
+
+**`config/experiments/porto_cells_mia.yaml` (novo)**: brez `map` in `map_matching`;
+`dataset: {id: ldptrace_dat, path: data/interim/porto/porto.dat, representation: cells,
+grid: {n_rows: 6, n_cols: 6, bbox: [-8.640001, 41.140007, -8.600003, 41.169997]},
+max_users: 2000}` (bbox = `grid_bbox` iz `porto_stats.json`); čiščenje izklopljeno
+(`max_speed_kmh: 1.0e9, min_points: 1, min_length_m: 0, resample_s: 0`); delitev
+(0,5/0,2/0,2/0,1) in napad (`n_shadow: 16`, `subsample: 0.5`, `fprs: [0.001, 0.01, 0.1]`)
+kot v `geolife_mech_mia_u20.yaml`; roki `markov {order: 1}` in `ldptrace
+{epsilon: [0.5, 1.0, 1.5]}` (mreža se vbrizga); `metrics.privacy: []`, `bootstrap
+{n: 1000, ci: 0.95}`, `memory: false`, `attack_time_budget_s: 300`; `reporting.export:
+[csv]`. Glava datoteke pojasni, da je `max_users` (= število poti) izbran za čas in da je
+celotna populacija možna z brisanjem ključa.
+
+**`tests/test_cells_mode.py` (novo)**, uvozi `base_config`/`write_config` iz
+`test_orchestrator` (vzorec `test_repeat.py`), brez fixtura zemljevida:
+- konec-do-konca nad fixturom `geolife_onroad` (8 poti, 2 uporabnika, isti razrez kot
+  obstoječi test MIA) v načinu `cells` z mrežo 6 × 6 nad bbox fixtura
+  `[116.30, 39.98, 116.32, 39.995]`, roki `markov` in `ldptrace` (ε = 600): vrstice
+  `membership_inference:synthetic:{markov:order=1, ldptrace:epsilon=600.0}`, AUC v [0, 1],
+  `markov` > 0,5; predpomnilnik vsebuje natanko `clean.parquet`, `chains.parquet`,
+  `meta.json`; `run.json`: `n_matched == 8`, `n_dropped == 0`, `representation == "cells"`;
+  drugi zagon bere predpomnilnik in da iste vrednosti; `results.csv`: `epsilon == "600.0"`
+  pri `ldptrace`, `n_rematch_dropped` prazen;
+- `_cell_pool` nad `tiny.dat` (`ldptrace_dat`, mreža 6 × 6 nad `0..6 × 0..6`, čiščenje
+  izklopljeno): 5 verig enakih README-ju fixtura, `user_id` `"0".."4"`, vsota
+  `split_counts` = 5, ponovni klic vrne enake verige iz Parqueta;
+- zavrnitve pred cevovodom (pot do podatkov namerno neobstoječa): `reidentification` v
+  načinu `cells`; `rn_ldp_synth`; `privacy_mechanisms: [{id: none}]`; `cells` brez
+  `dataset.grid`; slaba mreža (`n_rows: 1`, bbox s tremi števili); `segments` brez `map`
+  → še vedno `missing required key map`; `cells` z `map.region: ljubljana` nad Geolife
+  → `ConsistencyError` (T1 velja, ko je zemljevid podan); `ldptrace_dat` s katerim koli
+  `map` → `ConsistencyError`; `ldptrace` z `n_rows: 5` ob mreži 6 × 6 → `ValueError`;
+- `_version_hash`: `segments` ≠ `cells` za isto konfiguracijo; hash se spremeni z
+  `n_rows` in z bbox mreže; obstoječi test o semenih ostane nespremenjen.
+
+**Dokumentacija**: `docs/RUNNING.md` (nov §9.2 »Membership inference in the cells
+representation (Porto)« z ukazom `uv run trajguard run config/experiments/porto_cells_mia.yaml`,
+izmerjenim izpisom in opombo, da je `n_rematch_dropped` v načinu celic prazen; kazalo;
+§10 predpomnjenje: `representation`/`grid` v hashu, `chains.parquet`),
+`docs/ARCHITECTURE.md` (veja celic v diagramu toka podatkov, ključa
+`dataset.representation`/`dataset.grid` v razdelku o konfiguraciji, opomba v tabeli
+skladnosti), ta dokument (§4 PR B2 izveden, §11.4 dejanske odločitve, §11.5 izmerjeno),
+`docs/HANDOFF.md` §2.3 (izmerjene vrstice MIA za Porto), `CLAUDE.md` (vrstica stanja).
+`docs/REZULTATI_SHEMA.md` se ne spremeni.
+
+**Dokaz nespremenjenosti današnje poti**: obstoječi `tests/test_orchestrator.py`
+(predpomnilnik, hash, MIA) brez sprememb; pred spremembo se shrani zlati izpis
+(`_version_hash` in `results.csv` konfiguracije `mia_config` nad fixturom v načinu
+`segments`) in se po spremembi primerja — razlika mora biti prazna.
+
+### 11.5 Pravi pogon Porta (v B2, po prehodu testov)
+
+`uv run trajguard run config/experiments/porto_cells_mia.yaml` (prvi zagon prebere in očisti
+vseh 367.008 poti v predpomnilnik, nato napad nad 2.000 potmi), nato
+`uv run trajguard repeat config/experiments/porto_cells_mia.yaml --seeds 1 2 3`. Zapiši:
+čas prvega branja in napada na seme, `l_k` roke `ldptrace` po ε (iz izpisa ali `run.json`,
+če ga B2 doda), tabelo AUC in `tpr@fpr = 0,1` (povprečje in interval čez tri semena) za
+`markov` in `ldptrace` ε ∈ {0,5, 1, 1,5} v `HANDOFF.md` §2.3 in `RUNNING.md` §9.2.
+*(Izmerjeno: še ni.)*
+
+### 11.6 Prompt za sejo B2 (kopiraj v celoti)
+
+```
+Nadaljujeva validacijo generatorja ldptrace proti izvirni kodi LDPTrace v repozitoriju
+trajguard: PR B2 (način celic v orkestratorju). Preberi CLAUDE.md, docs/ARCHITECTURE.md
+in docs/NACRT_LDPTRACE_VALIDACIJA.md §11 V CELOTI (to je predaja s potrjenim načrtom) ter
+iz istega dokumenta §3 (D-V.4 do D-V.6) in §10.5; arhiva arhiv/ ne odpiraj. Kot vzorec
+preberi src/trajguard/experiments/orchestrator.py v celoti (po kosih; številke vrstic so
+v §11.3), src/trajguard/experiments/cli.py, src/trajguard/representation/views.py,
+src/trajguard/datasets/ldptrace_dat.py (samo razred LDPTraceDatLoader in konstante),
+src/trajguard/synthesis/ldptrace.py (samo __init__ in cell_sequence),
+config/experiments/geolife_mech_mia_u20.yaml, tests/test_orchestrator.py (base_config,
+beijing_maps_dir, write_config, mia_config, teste _mia_pool, test MIA konec-do-konca in
+teste zavrnitev pred cevovodom), tests/test_repeat.py (uvoz pomožnih funkcij iz
+test_orchestrator), tests/fixtures/ldptrace_dat/README.md in
+tests/fixtures/geolife_onroad/README.md.
+
+Odločitve avtorja, ki jih ne sprašuj znova (§11.2): načrt B2 iz §11.4 je potrjen skupaj s
+petimi dopolnitvami skice §10.5 (neobvezen map_matching v načinu cells, zavrnitev
+privacy_mechanisms, vbrizg n_rows/n_cols v generator z zavrnitvijo nasprotujočih
+vrednosti, representation/grid v hashu samo v načinu cells, test konec-do-konca nad
+fixturom geolife_onroad); docs/REZULTATI_SHEMA.md se ne spremeni; pravi pogon
+config/experiments/porto_cells_mia.yaml (max_users 2000) in repeat s semeni 1 2 3 se
+požene po prehodu testov, vrstice gredo v docs/HANDOFF.md §2.3, RUNNING §9.2 in v §11.5.
+
+Začni v plan mode: načrt na kratko povzemi in ga predloži v potrditev; odstopanja od
+§11.4 najprej predlagaj. Veja claude/cells-mode-orchestrator se odcepi od
+claude/cells-mode (PR #34), če ta še ni združen (preveri z gh pr view 34), sicer od main.
+Definicija končanega: uv run ruff check ., uv run ruff format --check ., uv run mypy src,
+uv run pytest -q čisti, izpis prilepljen; pred spremembo shrani zlati izpis današnje poti
+(_version_hash in results.csv konfiguracije MIA nad fixturom v načinu segments) in ga po
+spremembi primerjaj; potisk na origin in PR na main z gh (opis z dokazi, brez novih
+odvisnosti, opomba o skladanju na PR #34). Testi berejo samo tests/fixtures/. Ukazi,
+daljši od 10 minut, tečejo kot samostojen proces (PowerShell Start-Process) z nadzorom
+dnevnika. Koda, identifikatorji, docstringi in testi v angleščini; pogovor z mano v
 slovenščini, brez nepojasnjenih kratic.
 ```

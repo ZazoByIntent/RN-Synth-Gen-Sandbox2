@@ -343,7 +343,8 @@ celic, mediana 3, na mreži 12 × 12):
   točki), 1.307.144 (zunaj bbox); bbox točk lon −8,64 … −8,600004, lat 41,140008 …
   41,169996, `grid_bbox` = ± 1e-6; 371 s. Izhod `data/interim/porto/` (245 MB `.dat`,
   48 MB `.xz`, `porto_stats.json`) ni v gitu. Prvotno predlagani bbox (−8,69 … −8,55 ×
-  41,13 … 41,19) bi obdržal 81 % poti. B2 (orkestrator, način `cells`) in PR C sledita;
+  41,13 … 41,19) bi obdržal 81 % poti. B2 (orkestrator, način `cells`) ima potrjen načrt
+  in predajo s promptom v tistem dokumentu §11 (koda še ni napisana); PR C sledi;
   tabela z devetimi metrikami × tremi ε pride sem v PR C.
 
 ### 2.4 Val 5 — horizont B (2. letnik)
