@@ -1,0 +1,62 @@
+# LDPTrace validation, PR B2 (docs/NACRT_LDPTRACE_VALIDACIJA.md §11): membership
+# inference against the `ldptrace` port in the cells representation over the public
+# Porto taxi trips — the input the authors' code reads: raw coordinates on a 6x6 grid,
+# no road network, no map matching.
+#
+# Input: data/interim/porto/porto.dat, written by scripts/porto_to_ldptrace_dat.py from
+# data/raw/porto/train.csv (docs/RUNNING.md §9.1). The grid bbox is `grid_bbox` from
+# porto_stats.json (point bbox widened by 1e-6, the reference's dataset_stats rule), so
+# the port and the reference share one grid. Every trip is its own user in the .dat
+# loader, so `max_users` counts trips: 2 000 keeps the attack (16 shadows x 4 arms) to
+# minutes. Delete the key to run the whole population (367 008 trips; the first run
+# cleans and caches all of them regardless, ~1.7 GB peak).
+#
+# Cleaning is switched off (the reference uses the trips as they are: resample_s 0 keeps
+# every point, min_points 1 keeps single-point trips). Split, attack and budget copy
+# geolife_mech_mia_u20.yaml. ε ∈ {0.5, 1.0, 1.5} is the paper's grid; ε is spent per
+# trajectory (per device), as for rn_ldp_synth — not comparable with per-point ε.
+experiment:
+  id: porto_cells_mia
+  seed: 42                   # run seed: shadow subsets, OUE noise
+  split_seed: 42             # population seed: trip subsample + split; pinned across seeds
+  output_dir: results/porto_cells_mia
+
+dataset:
+  id: ldptrace_dat           # native_region "none": no map block, no map matching
+  path: data/interim/porto/porto.dat
+  representation: cells
+  grid: {n_rows: 6, n_cols: 6, bbox: [-8.640001, 41.140007, -8.600003, 41.169997]}
+  max_users: 2000            # = trips (one user per trip); chosen for runtime
+
+cleaning:                    # switched off: the reference takes the trips as they are
+  max_speed_kmh: 1.0e9
+  min_points: 1
+  min_length_m: 0
+  resample_s: 0
+
+split:
+  scheme: by_user
+  fractions: {train: 0.5, test: 0.2, shadow: 0.2, attack: 0.1}
+
+privacy_mechanisms: []       # must be empty in the cells representation (no re-matching)
+
+synthetic_generators:
+  - id: markov               # non-private baseline (memorizes the train chains)
+    params: {order: 1}
+  - id: ldptrace             # grid 6x6 and bbox injected from dataset.grid; quantile 0.9,
+    params: {epsilon: [0.5, 1.0, 1.5]}   # length_share 0.1, alpha 0.3, beta 0.2 (defaults)
+
+attacks:
+  - type: membership_inference
+    target_scope: [synthetic]
+    attacker: {n_shadow: 16, subsample: 0.5}
+    fprs: [0.001, 0.01, 0.1] # ~400 non-members at max_users 2000: 0.01 and 0.1 resolve
+
+metrics:
+  privacy: []                # MIA brings its own family metrics (auc, tpr@fpr=...)
+  bootstrap: {n: 1000, ci: 0.95}   # unused by MIA rows: score-based, CI across seeds
+  memory: false
+  attack_time_budget_s: 300  # report §6.6, X = 300 s per attack invocation
+
+reporting:
+  export: [csv]
