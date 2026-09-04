@@ -162,6 +162,12 @@ načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
   celic v odseke in roka `ldptrace` v `experiments/rnldp_eval.py` ostajata odprta
   (ločen PR, glej D-1.2). Validacija porta proti izvirni kodi (metrike članka, način
   surovih koordinat, Porto) ima lasten načrt: `docs/NACRT_LDPTRACE_VALIDACIJA.md`.
+- **Validacija proti izvirni kodi je zaključena (4. september 2026, PR C, veja
+  `claude/ldptrace-validation`):** port in izvirnik (klon `2d30e41`, popravek samo za
+  seme) sta bila pognana nad istimi 367.008 potmi Porta na mreži 6 × 6 pri ε ∈ {0,5, 1,
+  1,5} s petimi semeni; tabela devetih metrik in branje sta v `docs/HANDOFF.md` §2.3,
+  dejanske odločitve v `docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5. LDPTrace ostaja
+  kandidat za baseline (odločitev D5 je še odprta).
 
 ### 2.1 Kaj mehanizem počne (Du et al., PVLDB 2023; koda `zealscott/LDPTrace`)
 

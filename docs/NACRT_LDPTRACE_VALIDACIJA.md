@@ -6,8 +6,10 @@ kot PR #33 na veji `claude/ldptrace-metrics` (odprt, čaka na združitev); dejan
 odločitve so pri D-V.7. PR B je razrezan na B1 in B2; **B1 je izveden** (3. september
 2026, veja `claude/cells-mode`, PR #34; predaja v §10) in **B2 je izveden** (3. september
 2026, veja `claude/cells-mode-orchestrator`, **PR #35**, skladana na PR #34; dejanske
-odločitve in izmerjeni pogon Porta v §11.4 in §11.5). PR C je odprt; **predaja za PR C je
-v §12**. Ta dokument je predaja za eno do tri implementacijske seje, ki
+odločitve in izmerjeni pogon Porta v §11.4 in §11.5). **PR C je izveden** (4. september
+2026, veja `claude/ldptrace-validation`, PR #⟨PR⟩; predaja v §12, dejanske odločitve in
+izmerjeno v §12.5, tabela v `docs/HANDOFF.md` §2.3) — **validacija je zaključena**. Ta
+dokument je bil predaja za eno do tri implementacijske seje, ki
 uvedejo (a) metrike uporabnosti iz članka LDPTrace, (b) način branja surovih koordinat
 na mreži kot alternativo ujetim zaporedjem odsekov, izbirljiv v konfiguraciji, in
 (c) primerjalni pogon izvirne kode in najinega porta nad istimi podatki. Seja prebere
@@ -264,7 +266,9 @@ odstopanja v §11.4, izmerjeni pogon Porta v §11.5.
 kazalo; §9.1 je pretvorba, §9.2 pogon MIA v načinu celic), `CLAUDE.md` (vrstica stanja),
 `docs/NACRT_MEHANIZMI.md` §2 (validacija zaključena), ta dokument (oznaka zaključka in
 dejanske odločitve v §12.5). Predaja s stanjem, dejstvi iz B2 in odprtimi odločitvami je
-v §12.
+v §12. *Izvedeno 4. septembra 2026*: dejansko spremenjeno še `experiments/orchestrator.py`
+in `tests/test_cells_mode.py` (zapis `l_k` v `run.json`, 12.3(c)) ter
+`docs/CODEBASE_STRUCTURE.md` (stavek o ogrodju); odstopanja od načrta v §12.5.
 
 ## 5. Testi (samo fixture, brez omrežja in brez `data/`)
 
@@ -1056,6 +1060,64 @@ slovenščini, brez nepojasnjenih kratic.
   `scripts/ldptrace_reference.patch` (edini artefakt izvirnika v gitu), commit klona v
   `HANDOFF.md` §2.3.
 
-### 12.5 Dejanske odločitve in izmerjeno (izpolni PR C)
+### 12.5 Dejanske odločitve in izmerjeno (PR C, 4. september 2026)
 
-*(Še ni.)*
+**Odločitve iz 12.3 (avtor potrdil v seji 4. septembra 2026):**
+
+- **(a)** Populacija: vseh 367.008 poti na obeh straneh, brez razreza in podvzorčenja.
+- **(b)** Vhod ogrodja: neposredno `.dat` + `Grid` (`load_dat`), `--max-trajectories N` za
+  poskusne zagone (pilot na prvih 20.000 poteh: port 9 s na zagon, izvirnik 50 s).
+- **(c)** `l_k` in `report_epsilon` ciljnega generatorja se zapisujeta v `run.json` pod
+  `arms["synthetic:<ref>"]` (`_membership_values` vrne dejstva prilagojene tarče,
+  `run_experiment` jih doda k `arms`); `results.csv`, shema in hash predpomnilnika so
+  nespremenjeni; test v `test_cells_mode.py` to trdi. MIA nad Portom ni bila ponovljena.
+- **(d)** ε ∈ {0,5, 1, 1,5}, semena 1–5, kvantil 0,9, mreža 6 × 6; neobvezna ε = 2 in mreža
+  12 × 12 nista izvedena (ostajata odprti).
+
+**Odstopanja od §3, §4 in §6 (predlagana v plan mode, potrjena):**
+
+- `--score-synthesis` in `--reference-log` sprejmeta vzorec poti z ogradama `{eps}` in
+  `{seed}`, razširjen čez `--epsilons` × `--seeds` (`{eps}` kot Pythonov zapis `float`, npr.
+  `1.0`, kakor izvirnik imenuje datoteke); dobesedna pot dela pri enem ε in enem semenu.
+- Novi argumenti `--reference-log` (razčleni izvirnikov dnevnik v isto obliko JSON),
+  `--compare` (tabela Markdown čez več datotek JSON) in `--save-synthesis` (port shrani
+  sintetične točke v formatu izvirnika; test iz §5 oceni tako datoteko in dobi vrednosti
+  zagona nazaj do zadnje decimalke).
+- Popravek izvirnika vsebuje samo `--seed` (privzeto 2022) in seme v imenu izhodne
+  datoteke; popravki za numpy 2 iz D-V.9 niso bili potrebni.
+- `docs/CODEBASE_STRUCTURE.md` dobi stavek o ogrodju; zanka 15 zagonov izvirnika je
+  dokumentirana v `RUNNING.md` §9.3 (PowerShell), ne kot nova skripta.
+- Pilot izvirnika na podvzorcu je tekel z začasno zamenjavo `porto.xz` (prvih 20.000 poti,
+  zapisano z `write_reference_xz`), da izvirnikov seznam naborov ni bilo treba popravljati.
+
+**Preverjena dejstva o izvirniku (klon `2d30e4135db11fd50d1fb98f59a1e84ebc61b218`, veja
+`main`, 13. november 2023; `github.com/zealscott/LDPTrace` je preusmerjen na
+`yuntaod/LDPTrace`):** koda je v `LDPTrace/code/` in teče iz te mape (relativne poti
+`../data/porto.xz`, `logger/logger_config.json`); `--seed` ni obstajal, seme 2022 je bilo
+trdo kodirano v `main.py` vrstice 20–21 in 375–376; sinteza se shrani kot navaden
+`pickle` seznama poti s koordinatami (ena točka na celico, `convert_grid_to_raw`) v
+`../data/porto/syn_porto_eps_{ε}_max_0.9_grid_6[_seed_{s}].pkl` (seme doda popravek);
+metrike gredo samo prek `logging` v konzolo in `log/LDPTrace/<MMDD_HHMMSS>/info.log`
+(imenik brez `exist_ok`, zato dva zagona ne smeta začeti v isti sekundi); edini zunanji
+paket je numpy; `--multiprocessing` na Windows pade (ni `__main__` varovala). Bbox mreže
+izvirnik izračuna sam (`dataset.dataset_stats`: min/max točk, `GridMap` doda ± 1e-6):
+`min_x −8,64, min_y 41,140008, max_x −8,600004, max_y 41,169996`, natanko naš `bbox`, robovi
+mreže bitno enaki našemu `grid_bbox`. Pravilo za L_k (`estimate_max_length`) je enako
+najinemu `_quantile_length`.
+
+**Točka na meji celice (novo dejstvo, spremeni D-V.7 odločitev 6).** Izvirnik preslika
+točko v celico z linearnim pregledom in zaprtimi intervali (`lo <= v <= hi`, prva zadeta
+celica), `Grid.cell_of` s polodprtimi; meja med stolpcema 2 in 3 mreže 6 × 6 nad Portom
+leži natanko pri lon −8,620002 (koordinata s šestimi decimalkami, ki jo točke zares
+zadenejo). Pred popravkom se je razlikovalo 108 od prvih 20.000 verig (0,5 %), po njem
+(`reference_cells` v ogrodju ponovi izvirnikovo aritmetiko robov `min + korak·i`) 0 od
+20.000 (112.951 celic). Orkestratorjev `_cell_pool` še uporablja `Grid.cell_of`
+(`HANDOFF.md` §2.5).
+
+**Izmerjeno (podrobnosti in tabela v `HANDOFF.md` §2.3):** port 15 zagonov v 60 min (~4
+min na zagon ob sočasni obremenitvi), izvirnik 15 zagonov v 2 h 16 min z dvema vzporednima
+procesoma (10–23 min na zagon), ocena izvirnikovih sintez 27 min. Merilo 1: osem
+metrik enakih do 1,1 · 10⁻¹⁶, AvRE se razlikuje za 0,09 (največ 0,32) (drug žreb poizvedb). Merilo 2: 19
+od 27 celic v razponu izvirnika, 8 znotraj dvakratne razpršenosti (port boljši), razlika
+pojasnjena z žrebom L_k (pri enakem L_k se strani ujemata). Merilo 3: trend z ε enak na
+obeh straneh (premer pri obeh raven). L_k pri 367.008 poročilih: na 40 semenih kroga dolžin porta mediana 8 pri vseh ε, razpon 1–34 (ε = 0,5; 5 % semen ≥ 30), 5–27 (ε = 1) in 6–20 (ε = 1,5) pri pravem 0,9-kvantilu 9; izvirnikova L_k 34 in 35 sta vzorca iz iste porazdelitve.

@@ -349,8 +349,8 @@ celic, mediana 3, na mreži 12 × 12):
   `dataset.representation: cells` (mreža iz `dataset.grid`, brez zemljevida in ujemanja,
   samo napad na članstvo), konfiguracija `config/experiments/porto_cells_mia.yaml`, testi
   `tests/test_cells_mode.py`; današnja pot `segments` je nespremenjena (isti hash
-  predpomnilnika, zlati izpis pred in po spremembi enak). PR C sledi; tabela z devetimi
-  metrikami × tremi ε pride sem v PR C.
+  predpomnilnika, zlati izpis pred in po spremembi enak). **PR C je izveden** (4. september
+  2026; tabela z devetimi metrikami × tremi ε in branje sta spodaj).
 
 **Porto, napad na članstvo v načinu celic (izmerjeno 3. septembra 2026, commit `829e69f`).**
 Ukaza `uv run trajguard run config/experiments/porto_cells_mia.yaml` in
@@ -382,11 +382,105 @@ po semenih 42/1/2/3 je 1/4/1/1 pri ε = 0,5, 1/5/1/1 pri ε = 1 in 1/7/2/7 pri �
 zapisan v `run.json`: vrednosti so iz ponovne prilagoditve ciljnega generatorja
 (`LDPTraceGenerator(bbox=grid_bbox, n_rows=6, n_cols=6, epsilon=ε, seed=seme pogona)`)
 nad učnimi verigami iz predpomnilnika v vrstnem redu datoteke, kar natanko reproducira
-generator orkestratorja (`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.2). Članek dela z
+generator orkestratorja (`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.2); od PR C orkestrator
+`l_k` in `report_epsilon` ciljnega generatorja zapisuje v `run.json` pod
+`arms["synthetic:<roka>"]`, ta pogon pa ni bil ponovljen. Članek dela z
 ~360.000 potmi; celotna populacija je dosegljiva z brisanjem ključa `max_users`
 (predpomnilnik vsebuje samo izbranih 2.000 poti, prvi zagon spet prebere datoteko).
-Primerjava z izvirno kodo nad istim vhodom je PR C (predaja v
-`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12).
+Primerjava z izvirno kodo nad istim vhodom je PR C (spodaj).
+
+**Validacija `ldptrace` proti izvirni kodi nad Portom (PR C, izmerjeno 4. septembra 2026,
+veja `claude/ldptrace-validation`, commit kode `5106966`).** Izvirnik: klon
+`github.com/zealscott/LDPTrace` (danes preusmerjen na `yuntaod/LDPTrace`), commit
+`2d30e4135db11fd50d1fb98f59a1e84ebc61b218` (13. november 2023), v `external/LDPTrace` (ni
+v gitu), s popravkom `scripts/ldptrace_reference.patch` — samo argument `--seed` namesto
+dvakrat trdo kodiranega semena 2022 in seme v imenu izhodne datoteke; popravki za numpy 2
+niso bili potrebni (izvirnik uvaža samo numpy in teče v obstoječem okolju `uv`). Vhod:
+istih 367.008 poti (`porto.xz` za izvirnik, `porto.dat` za port), mreža 6 × 6 nad
+`grid_bbox` (izvirnik jo izračuna sam iz podatkov; njegov bbox točk in robovi mreže so
+bitno enaki našim), kvantil 0,9, ε ∈ {0,5, 1, 1,5}, semena 1–5 na obeh straneh, brez
+razreza in podvzorčenja; izvirnik poroča odrezano zadnjo celico, port pravo. Ukazi in časi:
+`docs/RUNNING.md` §9.3; ogrodje `experiments/ldptrace_eval.py`, metrike
+`evaluation/ldptrace_metrics.py`; izhod `results/ldptrace_validation/` (ni v gitu).
+
+Preverba pred meritvijo: verige izvirnika (`trajectory_point2grid`) in ogrodja so enake na
+vseh prvih 20.000 poteh, a šele potem, ko ogrodje uporabi izvirnikovo pravilo zaprtih
+intervalov za točko na meji celice (`reference_cells`): meja med stolpcema 2 in 3 leži
+natanko pri lon −8,620002, kar je koordinata s šestimi decimalkami, ki jo točke Porta
+zares zadenejo; `Grid.cell_of` (polodprti intervali) je dal drugačno verigo pri 108 od
+20.000 poti (0,5 %). Način celic v orkestratorju (§9.2 v `RUNNING.md`) še vedno uporablja
+`Grid.cell_of` (postavka v 2.5).
+
+Časi: port bere `.dat` 80 s, na (ε, seme) prilagoditev 24–37 s, sinteza 367.008 poti
+78–134 s, devet metrik 107–137 s, torej ~4 min; vseh 15 zagonov 60 min ob sočasnih dveh
+procesih izvirnika. Izvirnik 10–23 min na zagon (pretvorba točk 1,5 min, poročila OUE
+2 min, sinteza 3 min, lastne metrike ~10 min, od tega premer 6 min), 15 zagonov v dveh
+vzporednih procesih 2 h 16 min; ocena njegovih sintez z našimi metrikami 27 min.
+
+Tabela (povprečje [najmanj; največ] čez pet semen; sedem metrik so napake, nižje je bolje;
+Kendall in F1 sta oceni, višje je bolje; `l_k` je javna meja dolžine iz kroga dolžin):
+
+| ε | metrika | izvirnik (lastne metrike) | izvirnik (naše metrike) | port (naše metrike) |
+|---|---|---|---|---|
+| 0.5 | density_error | 0.1032 [0.0332; 0.1685] | 0.1032 [0.0332; 0.1685] | 0.0663 [0.0325; 0.1561] |
+| 0.5 | hotspot_query_error | 0.6586 [0.2003; 1.0000] | 0.6586 [0.2003; 1.0000] | 0.4788 [0.1529; 1.0000] |
+| 0.5 | point_query_avre | 1.0736 [0.2861; 1.9185] | 0.9703 [0.3092; 1.6011] | 0.6192 [0.3211; 1.5564] |
+| 0.5 | coverage_kendall_tau | 0.2908 [0.0413; 0.6317] | 0.2908 [0.0413; 0.6317] | 0.4781 [0.1460; 0.6667] |
+| 0.5 | trip_error | 0.3788 [0.2883; 0.4800] | 0.3788 [0.2883; 0.4800] | 0.3184 [0.2538; 0.3755] |
+| 0.5 | diameter_error | 0.0234 [0.0148; 0.0345] | 0.0234 [0.0148; 0.0345] | 0.0245 [0.0202; 0.0346] |
+| 0.5 | length_error | 0.0849 [0.0329; 0.1155] | 0.0849 [0.0329; 0.1155] | 0.0535 [0.0192; 0.1105] |
+| 0.5 | pattern_f1 | 0.1760 [0.1400; 0.2500] | 0.1760 [0.1400; 0.2500] | 0.2500 [0.1200; 0.3200] |
+| 0.5 | pattern_support_error | 0.8522 [0.8175; 0.8750] | 0.8522 [0.8175; 0.8750] | 0.8212 [0.7511; 0.8911] |
+| 0.5 | l_k | 13.8 [3.0; 35.0] | — | 7.4 [4.0; 17.0] |
+| 1.0 | density_error | 0.0669 [0.0446; 0.0966] | 0.0669 [0.0446; 0.0966] | 0.0376 [0.0201; 0.0510] |
+| 1.0 | hotspot_query_error | 0.4632 [0.1529; 0.7001] | 0.4632 [0.1529; 0.7001] | 0.2841 [0.0464; 0.5676] |
+| 1.0 | point_query_avre | 0.7352 [0.4096; 1.3445] | 0.6482 [0.4200; 1.1107] | 0.3559 [0.1912; 0.4681] |
+| 1.0 | coverage_kendall_tau | 0.4546 [0.1778; 0.6000] | 0.4546 [0.1778; 0.6000] | 0.6032 [0.5333; 0.6952] |
+| 1.0 | trip_error | 0.3096 [0.2452; 0.4220] | 0.3096 [0.2452; 0.4220] | 0.2365 [0.2289; 0.2423] |
+| 1.0 | diameter_error | 0.0217 [0.0082; 0.0333] | 0.0217 [0.0082; 0.0333] | 0.0211 [0.0147; 0.0251] |
+| 1.0 | length_error | 0.0540 [0.0325; 0.0681] | 0.0540 [0.0325; 0.0681] | 0.0348 [0.0254; 0.0509] |
+| 1.0 | pattern_f1 | 0.2820 [0.2300; 0.3600] | 0.2820 [0.2300; 0.3600] | 0.3920 [0.3200; 0.4600] |
+| 1.0 | pattern_support_error | 0.7769 [0.7304; 0.8156] | 0.7769 [0.7304; 0.8156] | 0.7114 [0.6456; 0.7957] |
+| 1.0 | l_k | 14.4 [6.0; 34.0] | — | 6.6 [6.0; 8.0] |
+| 1.5 | density_error | 0.0427 [0.0229; 0.0697] | 0.0427 [0.0229; 0.0697] | 0.0308 [0.0202; 0.0463] |
+| 1.5 | hotspot_query_error | 0.2088 [0.1142; 0.3216] | 0.2088 [0.1142; 0.3216] | 0.1530 [0.0699; 0.2107] |
+| 1.5 | point_query_avre | 0.5142 [0.2590; 0.9926] | 0.4899 [0.2656; 0.8180] | 0.3189 [0.2338; 0.4231] |
+| 1.5 | coverage_kendall_tau | 0.5537 [0.3143; 0.7111] | 0.5537 [0.3143; 0.7111] | 0.6546 [0.5968; 0.7238] |
+| 1.5 | trip_error | 0.2400 [0.2242; 0.2651] | 0.2400 [0.2242; 0.2651] | 0.2178 [0.2053; 0.2298] |
+| 1.5 | diameter_error | 0.0305 [0.0161; 0.0426] | 0.0305 [0.0161; 0.0426] | 0.0310 [0.0204; 0.0460] |
+| 1.5 | length_error | 0.0358 [0.0227; 0.0521] | 0.0358 [0.0227; 0.0521] | 0.0291 [0.0211; 0.0345] |
+| 1.5 | pattern_f1 | 0.3840 [0.3300; 0.4400] | 0.3840 [0.3300; 0.4400] | 0.4400 [0.3800; 0.5100] |
+| 1.5 | pattern_support_error | 0.7039 [0.6641; 0.7210] | 0.7039 [0.6641; 0.7210] | 0.6739 [0.6256; 0.7239] |
+| 1.5 | l_k | 9.8 [6.0; 16.0] | — | 7.2 [6.0; 8.0] |
+
+Branje po merilih iz `docs/NACRT_LDPTRACE_VALIDACIJA.md` §6:
+
+1. **Metrike se ujemajo.** Naše metrike nad izvirnikovo sintezo dajo isto vrednost kot
+   izvirnikov lastni izpis pri osmih od devetih metrik v vseh 15 zagonih (največja razlika
+   1,1 · 10⁻¹⁶); AvRE se razlikuje za 0,09 (največ 0,32) v povprečju, ker izvirnik središča 200 poizvedb
+   žreba iz globalnega `random`, ogrodje pa iz svojega `rng` (ista porazdelitev, drug žreb).
+2. **Port sledi izvirniku.** Od 27 celic (9 metrik × 3 ε) je povprečje porta znotraj
+   razpona petih semen izvirnika v 19; v preostalih osmih (ε = 1: gostota, AvRE, Kendall,
+   potovanja, F1, podpora vzorcev; ε = 1,5: potovanja, F1) je razlika manjša od dvakratne
+   razpršenosti semen in v vseh osmih je port boljši. To ni sistematična napaka porta: pri
+   enakem L_k se strani ujemata (ε = 1, seme 3, L_k = 6 na obeh straneh: gostota 0,051
+   proti 0,047, Kendall 0,53 proti 0,55, potovanja 0,242 proti 0,245, F1 0,37 proti 0,36;
+   ε = 1,5, seme 3, L_k = 6: 0,031 proti 0,028, 0,64 proti 0,65, 0,230 proti 0,224, 0,44
+   proti 0,44), razlika povprečij pa izvira iz žreba L_k: izvirnik je v petih semenih dobil
+   L_k 35/8/3/9/14 (ε = 0,5), 34/9/6/9/14 (ε = 1) in 16/8/6/9/10 (ε = 1,5), port
+   17/5/5/4/6, 8/6/6/6/7 in 8/7/7/6/8. L_k je 0,9-kvantil zašumljenega histograma dolžin pri
+   proračunu ε/10 (pravilo je v obeh izvedbah enako: neodrezana ocena OUE, tekoča vsota
+   ≥ 0,9 · vsota, rezerva 36) in je tudi pri 367.008 poročilih nestabilen: na 40 semenih samega kroga dolžin porta je L_k pri ε = 0,5 mediana 8, povprečje 11,2, razpon 1–34 (5 % semen ≥ 30, 20 % semen ≤ 5), pri ε = 1 mediana 8 in razpon 5–27, pri ε = 1,5 mediana 8 in razpon 6–20, medtem ko je pravi 0,9-kvantil dolžin verig 9; izvirnikovih 15 vrednosti (tudi 34 in 35) in portovih 15 so vzorci iz te težkorepe porazdelitve. Znano
+   sistematično odstopanje (port poroča pravo zadnjo celico) se ne vidi kot poslabšanje.
+3. **Trend z ε.** Na obeh straneh napake padajo in oceni rasteta z ε pri gostoti, vročih
+   točkah, AvRE, Kendallu, potovanjih, dolžini, F1 in podpori vzorcev; premer je pri obeh
+   ravno 0,02–0,03 in ne sledi ε (v grafih članka za Porto je premer prav tako najmanjša
+   napaka).
+4. Vrstice MIA za `markov` in `ldptrace` nad Portom so iz B2 (zgoraj) in niso ponovljene.
+
+Sklep: port je nad istim vhodom funkcionalno enakovreden izvirniku (isti postopek, iste
+metrike do zadnje decimalke, razlike v razponu semen); LDPTrace ostaja kandidat za
+baseline (odločitev D5 je odprta).
 
 ### 2.4 Val 5 — horizont B (2. letnik)
 
@@ -423,6 +517,12 @@ federativni pristopi, diffusion generatorji. Vse se priključi prek obstoječih 
   vseh zagonov nad enkrat izračunanim bazenom; dva sveža izračuna pa lahko pri
   izenačenjih odstopata za rob. Odprto: preveriti pri pravih podatkih in po potrebi
   fiksirati `PYTHONHASHSEED` v `RUNNING.md` ali v CLI.
+- **Točka na meji celice v načinu celic** (ugotovljeno 4. septembra 2026 v PR C): `Grid.cell_of`
+  uporablja polodprte intervale, izvirnik LDPTrace zaprte s prvo zadeto celico; nad Portom
+  meja lon −8,620002 zadene 0,5 % poti in da drugačno verigo. Ogrodje validacije
+  (`reference_cells` v `experiments/ldptrace_eval.py`) uporablja izvirnikovo pravilo,
+  orkestratorjev `_cell_pool` pa še `Grid.cell_of`; za MIA nad Portom to ni pomembno.
+  Odprto: ali `_cell_pool` preklopiti na isto pravilo (spremeni hash predpomnilnika).
 
 ---
 
