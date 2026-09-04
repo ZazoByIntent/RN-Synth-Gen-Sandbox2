@@ -565,7 +565,8 @@ Branje:
   praznimi bazeni traja ~0,01 s, plača se samo ponovno ujemanje vsake roke, ~1–2 min pri
   u20) in ponovitve čez semena, če bo poročilo potrebovalo interval čez semena.
 
-**ZM-3 naivna trojica — zaključen (4. september 2026, veja `claude/zm3-naive-baselines`).**
+**ZM-3 naivna trojica — zaključen (4. september 2026, PR #39, veja
+`claude/zm3-naive-baselines`).**
 Mehanizmi `spatial_rounding`, `temporal_downsampling` in `gaussian_noise`
 (`src/trajguard/privacy/naive.py`; dejanske odločitve v `docs/NACRT_MEHANIZMI.md` §4,
 uvodni odstavek), vsi **brez formalne garancije** (`guarantee = "none"`, `spent_budget`

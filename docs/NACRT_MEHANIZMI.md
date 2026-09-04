@@ -18,7 +18,7 @@ zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) 
 | --- | --- | --- | --- | --- | --- | --- |
 | ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, PR #32, združen v `main`) |
 | ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | **zaključen** (4. september 2026, PR #38, veja `claude/zm2-point-ldp`) |
-| ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | **zaključen** (4. september 2026, veja `claude/zm3-naive-baselines`) |
+| ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | **zaključen** (4. september 2026, PR #39, veja `claude/zm3-naive-baselines`) |
 | ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | odprt |
 
 Vrstni red je hkrati prioriteta: LDPTrace je edini celovit sintetizator pod lokalno DP in
