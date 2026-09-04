@@ -1,0 +1,103 @@
+# Mechanism-breadth sibling config at the 50-user rung of the design §6.4 sample ladder
+# (20 -> 50 -> 182): the measurement rung between geolife_mech_reid_u20.yaml (measured
+# 4 Sep 2026, docs/HANDOFF.md §2.3) and geolife_mech_reid_u182.yaml. It mirrors the S4
+# pair geolife_geoind_reid_u20.yaml -> geolife_geoind_reid_u50.yaml: only
+# dataset.max_users, experiment.id and output_dir differ from the u20 file; population
+# threshold 0.05, budget 300 s and memory: false stay (docs/RUNNING.md §7.4, §7.3 R0), so
+# this rung is measured at the same settings as S4's u50 rung. The raw-pool cache of
+# geolife_geoind_reid_u50.yaml is shared (same population, cleaning, matching, split).
+# NOT RUN YET (file created 4 Sep 2026; running it is the author's decision).
+#
+# Why ALL u20 arms, not a pre-selection: as in S4, the 50 rung is where the author decides
+# which arms go on to the expensive 182 rung (docs/HANDOFF.md §1.3, NACRT_MEHANIZMI §4.5);
+# pruning before measuring would pre-empt that decision. geolife_mech_reid_u182.yaml
+# carries the pre-selection suggested by the u20 reading (one arm per mechanism) — revise
+# it from this rung's numbers.
+#
+# Cost estimate (single seed, from the u20 run and the S4 u50 record): reidentification on
+# the two full pools (`raw`, `none`) compares DTW against the whole gallery, so its cost
+# grows roughly quadratically with the pool (measured exponent ~1.9, docs/HANDOFF.md §1.3):
+# ~8 min for the two 238-trace pools at u20 (42 / 70 / 136 s at k = 3 / 5 / 10 per pool)
+# -> ~30 min for the 465-trace gallery of this rung, with the k = 10 calls (~470 s each)
+# over the 300 s budget exactly as in S4 (recorded in run.json over_budget, not an error).
+# Downsampled galleries are 5–70x cheaper per pair (gallery traces have ~74 / 23 / 6.5
+# points instead of ~350; at u20 8–25 s per call instead of 42–136 s); rounding 100 m keeps
+# ~45 % of the traces (~4x cheaper); the destructive arms (rounding 500 / 2000 m, Gaussian
+# 200 / 1000 m, every point_ldp ε, geo-ind ε = 1) drop nearly the whole pool at re-matching
+# and pay only their re-matching (~2–3 min for all 13 perturbing arms at this rung; the
+# nine naive arms took ~75 s together at u20). Expect ~45 min per seed in total.
+#
+# Arms and their units are unchanged from the u20 header (read it for the per-arm
+# expectations): `point_ldp` ε is spent PER POINT over 20 x 20 cells (the orchestrator
+# injects the map bbox; never set bbox here), geo-ind ε is per 100 m per point, the naive
+# trio has no ε and no guarantee. All are baseline candidates (decision D5 is open).
+experiment:
+  id: geolife_mech_reid_u50
+  seed: 42                   # run seed: mechanism noise, attacker knowledge, bootstrap
+  split_seed: 42             # population seed: user subsample + split; pinned across seeds
+  output_dir: results/geolife_mech_reid_u50
+
+map:
+  source: osm
+  region: beijing            # must equal the Geolife native region (orchestrator enforces)
+  bbox: [116.20, 39.75, 116.55, 40.05]
+  crs: EPSG:32650
+
+dataset:
+  id: geolife
+  path: data/raw/geolife
+  native_region: beijing
+  max_users: 50              # design §6.4 sample ladder: 20/50/100/182
+
+cleaning:
+  max_speed_kmh: 200
+  min_points: 20
+  min_length_m: 500
+  resample_s: 5
+
+map_matching:
+  matcher: leuven
+  k_candidates: 8
+  radius_m: 50
+  gps_error_m: 20
+  # S4-1 population threshold, same as the frozen u50 config (docs/RUNNING.md §7.4)
+  min_match_score: 0.05
+
+split:
+  scheme: by_user
+  fractions: {train: 0.5, test: 0.2, shadow: 0.2, attack: 0.1}
+
+privacy_mechanisms:
+  - id: none
+  - id: geo_indistinguishability
+    params: {epsilon: [1.0]}             # S4 anchor: ε per unit_m = 100 m per point
+  - id: point_ldp
+    params: {epsilon: [4.0, 6.0, 8.0]}   # ε per point over 20 x 20 cells (see u20 header)
+  - id: spatial_rounding
+    params: {cell_m: [100, 500, 2000]}   # metres; no guarantee
+  - id: temporal_downsampling
+    params: {interval_s: [30, 120, 600]} # seconds; first and last point kept
+  - id: gaussian_noise
+    params: {sigma_m: [50, 200, 1000]}   # metres per axis; no guarantee
+
+attacks:
+  - type: reidentification
+    attacker:
+      known_points: [3, 5, 10]   # points the attacker knows about each target
+      distance: dtw
+    target_scope: [raw, protected]
+  - type: reconstruction         # MAP inversion of the geo-ind noise; skips other arms
+    target_scope: [protected]
+  - type: poi_inference          # home/work stay-point inference (design §6.4)
+    target_scope: [protected]
+    attacker: {tz_offset_h: 8}   # Geolife timestamps are GMT, Beijing is UTC+8
+    threshold_m: 200             # a user counts as localised within 200 m
+
+metrics:
+  privacy: [top1_acc, topk_acc, linkage_rate]
+  top_k: 5
+  utility: [cell_js_divergence, length_dist_error]
+  utility_grid: {n_rows: 20, n_cols: 20}
+  bootstrap: {n: 1000, ci: 0.95}
+  memory: false              # as in the S4 u50 config (R0 note there)
+  attack_time_budget_s: 300  # report §6.6, X = 300 s per attack invocation

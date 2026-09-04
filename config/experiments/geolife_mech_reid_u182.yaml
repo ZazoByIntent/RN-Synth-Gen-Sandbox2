@@ -1,0 +1,126 @@
+# Mechanism-breadth sibling config at the full 182-user REPORTING rung of the design §6.4
+# sample ladder (20 -> 50 -> 182), the counterpart of the S4 reporting config
+# geolife_geoind_reid.yaml. It keeps the u20 population recipe, cleaning, matching, split
+# and attacks and carries the two S4 author decisions of 17 Aug 2026, both grounded in
+# the 50-rung measurement (docs/HANDOFF.md §1.3, §1.4; geolife_geoind_reid.yaml header):
+# population threshold 0.3 (see the map_matching comment) and attack budget 1200 s (see
+# the metrics comment). The u20/u50 siblings stay at threshold 0.05 / budget 300 s — they
+# are the measured record of those rungs. The raw-pool cache of geolife_geoind_reid.yaml
+# (1770 matched traces, 114 users at threshold 0.3) is shared.
+# NOT RUN YET (file created 4 Sep 2026; running it is the author's decision, after the
+# u50 rung has been measured — revise the arm selection below from those numbers).
+# Named with an explicit `_u182` suffix (S4 used no suffix for 182); the `max_users`
+# column in results.csv remains the source of the rung, not the file name.
+#
+# Arm selection: the two anchors (`none`, geo-ind ε = 1) plus ONE arm per mechanism —
+# `point_ldp` ε = 8, `spatial_rounding` 100 m, `temporal_downsampling` 120 s,
+# `gaussian_noise` 50 m. These are the arms that at u20 (docs/HANDOFF.md §2.3) either kept
+# a measurable re-matched pool (rounding 100 m: 104 of 238 traces; downsampling 120 s:
+# 207 of 238) or gave non-degenerate home/work-inference and utility rows (Gaussian 50 m:
+# 43 % of homes and 50 % of workplaces localised within 200 m; point_ldp ε = 8: the only ε
+# that keeps 88 % of true cells and the smallest cell-JS divergence, 0.03). The destructive
+# arms (rounding 500 / 2000 m, Gaussian 200 / 1000 m, point_ldp ε = 4 / 6) drop nearly the
+# whole pool at every rung and show nothing at 182 that u20/u50 do not already show;
+# adding any of them back is one YAML line in the params list.
+#
+# Expected effect of threshold 0.3 (not measured): survival of the perturbed releases will
+# be LOWER than at threshold 0.05 — rounding 100 m and Gaussian 50 m may lose most or all
+# traces here even though they kept some at u20/u50; downsampling keeps the geometry and
+# should survive. `n_rematch_dropped` in run.json says what happened; the rows that stay
+# informative when a pool empties are `poi_inference` and the utility metrics.
+#
+# Cost estimate (single seed, from the S4 182-rung record with the same 1770-trace
+# gallery): reidentification on `raw` and `none` is the dominant cost and exceeds the
+# 1200 s budget at every k exactly as in S4 (~3 600 / ~6 000 / ~12 000 s per pool at
+# k = 3 / 5 / 10, i.e. ~12 h for the two pools; recorded in run.json over_budget, not an
+# error — rule R1, docs/RUNNING.md §7.3). The downsampled gallery has ~15x fewer points per
+# trace, so its calls should land in the hundreds of seconds; rounding 100 m and the
+# destructive arms pay mostly their re-matching (~1770 releases each, a few minutes per
+# arm). Expect ~13–14 h per seed; repetitions (`trajguard repeat --seeds`) multiply this.
+#
+# Units (see the u20 header): `point_ldp` ε per point over 20 x 20 cells (the orchestrator
+# injects the map bbox; never set bbox here), geo-ind ε per 100 m per point, the naive
+# trio without ε or guarantee. All are baseline candidates (decision D5 is open).
+experiment:
+  id: geolife_mech_reid_u182
+  seed: 42                   # run seed: mechanism noise, attacker knowledge, bootstrap
+  split_seed: 42             # population seed: user subsample + split; pin it and vary
+                             # only seed for repetitions (trajguard run <cfg> --seed N)
+  output_dir: results/geolife_mech_reid_u182
+
+map:
+  source: osm
+  region: beijing            # must equal the Geolife native region (orchestrator enforces)
+  bbox: [116.20, 39.75, 116.55, 40.05]
+  crs: EPSG:32650
+
+dataset:
+  id: geolife
+  path: data/raw/geolife
+  native_region: beijing
+  max_users: 182             # full-scale reporting rung, stated explicitly: the
+                             # max_users column in results.csv and the per-rung
+                             # split in notebooks/03_s4_sweep.ipynb rely on it
+
+cleaning:
+  max_speed_kmh: 200
+  min_points: 20
+  min_length_m: 500
+  resample_s: 5
+
+map_matching:
+  matcher: leuven
+  k_candidates: 8
+  radius_m: 50
+  gps_error_m: 20
+  # S4-1 population threshold, reporting value (R3; author decision, 17 Aug 2026, from
+  # the 50-rung measurement, docs/HANDOFF.md §1.3): 0.3 reaches >= 100 non-members for
+  # the membership attack with margin. Same value as geolife_geoind_reid.yaml, so the
+  # raw pool is the same 1770-trace gallery. 0.05 remains the u20/u50 record.
+  min_match_score: 0.3
+
+split:
+  scheme: by_user
+  fractions: {train: 0.5, test: 0.2, shadow: 0.2, attack: 0.1}
+
+privacy_mechanisms:
+  - id: none
+  - id: geo_indistinguishability
+    params: {epsilon: [1.0]}      # S4 anchor: ε per unit_m = 100 m per point
+  - id: point_ldp
+    params: {epsilon: [8.0]}      # ε per point over 20 x 20 cells; ε = 4 / 6 dropped (header)
+  - id: spatial_rounding
+    params: {cell_m: [100]}       # metres; 500 / 2000 m dropped (header)
+  - id: temporal_downsampling
+    params: {interval_s: [120]}   # seconds; 30 / 600 s dropped (header)
+  - id: gaussian_noise
+    params: {sigma_m: [50]}       # metres per axis; 200 / 1000 m dropped (header)
+
+attacks:
+  - type: reidentification
+    attacker:
+      known_points: [3, 5, 10]   # points the attacker knows about each target
+      distance: dtw
+    target_scope: [raw, protected]
+  - type: reconstruction         # MAP inversion of the geo-ind noise; skips other arms
+    target_scope: [protected]
+  - type: poi_inference          # home/work stay-point inference (design §6.4)
+    target_scope: [protected]
+    attacker: {tz_offset_h: 8}   # Geolife timestamps are GMT, Beijing is UTC+8
+    threshold_m: 200             # a user counts as localised within 200 m
+
+metrics:
+  privacy: [top1_acc, topk_acc, linkage_rate]
+  top_k: 5
+  utility: [cell_js_divergence, length_dist_error]
+  utility_grid: {n_rows: 20, n_cols: 20}
+  bootstrap: {n: 1000, ci: 0.95}
+  memory: false              # R0 (docs/RUNNING.md §7.3): budget verdicts need untraced runs
+  # Budget 1200 s (R3; author decision, 17 Aug 2026, from the 50-rung measurement), the
+  # S4 reporting value; see geolife_geoind_reid.yaml. The raw/none calls exceed it at
+  # every k on the 1770-trace gallery (S4 record, docs/HANDOFF.md §1.4); rule R1 applies.
+  attack_time_budget_s: 1200
+
+reporting:
+  export: [csv]
+  plots: [tradeoff, by_epsilon, by_knowledge, mechanisms, runtime]
