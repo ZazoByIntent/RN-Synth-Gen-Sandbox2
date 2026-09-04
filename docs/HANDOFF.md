@@ -485,8 +485,8 @@ Sklep: port je nad istim vhodom funkcionalno enakovreden izvirniku (isti postope
 metrike do zadnje decimalke, razlike v razponu semen); LDPTrace ostaja kandidat za
 baseline (odločitev D5 je odprta).
 
-**ZM-2 točkovni LDP — zaključen (4. september 2026, veja `claude/zm2-point-ldp`, PR na
-`main`).** Mehanizem `point_ldp` (`src/trajguard/privacy/point_ldp.py`; dejanske
+**ZM-2 točkovni LDP — zaključen (4. september 2026, PR #38, veja
+`claude/zm2-point-ldp`).** Mehanizem `point_ldp` (`src/trajguard/privacy/point_ldp.py`; dejanske
 odločitve v `docs/NACRT_MEHANIZMI.md` §3, uvodni odstavek): vsaka GPS točka se preslika
 v celico mreže 20 × 20 nad bbox zemljevida (k = 400 celic, celica ~1,5 × 1,7 km nad
 Pekingom), celica gre skozi k-arni randomizirani odgovor (prava celica ostane z

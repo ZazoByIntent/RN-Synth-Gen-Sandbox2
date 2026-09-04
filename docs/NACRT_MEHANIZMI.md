@@ -17,7 +17,7 @@ zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) 
 | Korak | Mehanizem | Vmesnik | Garancija | Javna koda | Obseg | Stanje |
 | --- | --- | --- | --- | --- | --- | --- |
 | ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, PR #32, združen v `main`) |
-| ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | **zaključen** (4. september 2026, veja `claude/zm2-point-ldp`, PR na `main`) |
+| ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | **zaključen** (4. september 2026, PR #38, veja `claude/zm2-point-ldp`) |
 | ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | odprt |
 | ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | odprt |
 
@@ -278,8 +278,8 @@ primerljivosti; izvirnik uporablja {0,5, 1, 1,5}.
 
 ## 3. ZM-2 Točkovni LDP (`privacy/point_ldp.py`, registrsko ime `point_ldp`) — ZAKLJUČEN
 
-**Izvedeno 4. septembra 2026** (veja `claude/zm2-point-ldp` iz `main` po združitvi PR
-#33–#37; PR na `main`). Dejanske odločitve, kjer je načrt spodaj puščal izbiro ali kjer se
+**Izvedeno 4. septembra 2026** (PR #38, veja `claude/zm2-point-ldp` iz `main` po
+združitvi PR #33–#37). Dejanske odločitve, kjer je načrt spodaj puščal izbiro ali kjer se
 je izvedba od njega razlikovala:
 
 - D-2.3: mreža **20 × 20** (k = 400) in ε ∈ {4, 6, 8}, kot priporočeno. Razlogi: ista
