@@ -1,0 +1,57 @@
+diff --git a/LDPTrace/code/main.py b/LDPTrace/code/main.py
+index f8711e3..130f3ac 100644
+--- a/LDPTrace/code/main.py
++++ b/LDPTrace/code/main.py
+@@ -17,8 +17,8 @@ import lzma
+ 
+ from logger.logger import ConfigParser
+ import multiprocessing
+-np.random.seed(2022)
+-random.seed(2022)
++np.random.seed(args.seed)
++random.seed(args.seed)
+ CORES = multiprocessing.cpu_count() // 2
+ 
+ config = ConfigParser(name='LDPTrace', save_dir='./')
+@@ -351,7 +351,7 @@ if args.re_syn:
+ 
+     synthetic_trajectories = convert_grid_to_raw(synthetic_database)
+ 
+-    with open(f'../data/{args.dataset}/syn_{args.dataset}_eps_{args.epsilon}_max_{args.max_len}_grid_{args.grid_num}.pkl', 'wb') as f:
++    with open(f'../data/{args.dataset}/syn_{args.dataset}_eps_{args.epsilon}_max_{args.max_len}_grid_{args.grid_num}_seed_{args.seed}.pkl', 'wb') as f:
+         pickle.dump(synthetic_trajectories, f)
+ 
+     synthetic_grid_trajectories = synthetic_database
+@@ -359,7 +359,7 @@ if args.re_syn:
+ else:
+     try:
+         logger.info('Reading saved synthetic database...')
+-        with open(f'../data/{args.dataset}/syn_{args.dataset}_eps_{args.epsilon}_max_{args.max_len}_grid_{args.grid_num}.pkl',
++        with open(f'../data/{args.dataset}/syn_{args.dataset}_eps_{args.epsilon}_max_{args.max_len}_grid_{args.grid_num}_seed_{args.seed}.pkl',
+                   'rb') as f:
+             synthetic_trajectories = pickle.load(f)
+         synthetic_grid_trajectories = convert_raw_to_grid(synthetic_trajectories)
+@@ -372,8 +372,8 @@ orig_grid_trajectories = grid_trajectories
+ orig_sampled_trajectories = convert_grid_to_raw(orig_grid_trajectories)
+ 
+ # ============================ EXPERIMENTS =========================== #
+-np.random.seed(2022)
+-random.seed(2022)
++np.random.seed(args.seed)
++random.seed(args.seed)
+ logger.info('Experiment: Density Error...')
+ orig_density = get_real_density(orig_grid_trajectories)
+ syn_density = get_real_density(synthetic_grid_trajectories)
+diff --git a/LDPTrace/code/parse.py b/LDPTrace/code/parse.py
+index 7a64afd..d88b7aa 100644
+--- a/LDPTrace/code/parse.py
++++ b/LDPTrace/code/parse.py
+@@ -16,6 +16,8 @@ parser.add_argument('--max_len', type=float, default=0.9,
+ parser.add_argument('--size_factor', type=float, default=9.0,
+                     help='Quantile of estimated max length')
+ parser.add_argument('--multiprocessing', action='store_true')
++parser.add_argument('--seed', type=int, default=2022,
++                    help='Random seed (numpy and random); the original hard-coded 2022')
+ 
+ 
+ args = parser.parse_args()

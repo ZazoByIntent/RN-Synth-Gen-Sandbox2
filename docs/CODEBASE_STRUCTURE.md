@@ -242,8 +242,11 @@ In pipeline order, with the reason each package exists:
   and writes results with full provenance), `repeat.py` (the `trajguard repeat`
   command: the same config once per seed, aggregated to `repetitions.csv` with
   an across-seed confidence interval), `cli.py` (the `trajguard run` / `repeat`
-  / `report` commands), and `rnldp_eval.py` (the standalone RN-LDP-Synth
-  evidence sweep, runnable offline on the committed fixtures).
+  / `report` commands), `rnldp_eval.py` (the standalone RN-LDP-Synth
+  evidence sweep, runnable offline on the committed fixtures) and
+  `ldptrace_eval.py` (the standalone LDPTrace validation harness: the `ldptrace`
+  port and the authors' reference implementation scored with the paper's nine
+  metrics over the same `.dat` file, `docs/NACRT_LDPTRACE_VALIDACIJA.md`).
 - **`reporting/`** — `results_schema.py` is the unified results table
   (`results.csv`, `docs/REZULTATI_SHEMA.md`) as code; `results_io.py` reads it
   back and aggregates repetitions across seeds; `plots.py` draws the per-run

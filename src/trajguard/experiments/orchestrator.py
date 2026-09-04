@@ -1381,24 +1381,33 @@ def _membership_values(
     items: Sequence[_PoolItem],
     clean_by_id: dict[str, CleanTrajectory],
     gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]],
-) -> tuple[list[ResultRow], list[str]]:
+) -> tuple[list[ResultRow], list[str], dict[str, dict[str, Any]]]:
     """Run LiRA membership inference against every fitted generator arm (design §6.2).
 
     Per arm: the target generator fits on the train split (its release contract), and
     the attack scores train members against test non-members using same-class shadow
     generators from the arm's factory. AUC and TPR@FPR are score-based point values,
     so the CI columns stay empty by design — the interval across seeds comes from
-    ``trajguard repeat``. Returns the rows plus one validity warning per (arm, fpr)
-    operating point the non-members cannot resolve (S4-2); those values are NaN.
+    ``trajguard repeat``. Returns the rows, one validity warning per (arm, fpr)
+    operating point the non-members cannot resolve (S4-2; those values are NaN), and
+    per-arm facts of the fitted target for ``run.json`` (``ldptrace``: the public length
+    cap ``l_k`` and the per-report ``report_epsilon``, so later readers need not refit).
     """
     pool, candidates, train_m = _mia_pool(items, clean_by_id)
     n_members = sum(1 for _, is_member in candidates if is_member)
     n_nonmembers = len(candidates) - n_members
     rows: list[ResultRow] = []
     warnings: list[str] = []
+    arm_facts: dict[str, dict[str, Any]] = {}
     for gspec, make in gen_plans:
         target = make(0)
         target.fit([_item_view(m, clean_by_id[m.traj_id]) for m in train_m])
+        l_k = getattr(target, "l_k", None)
+        if l_k is not None:
+            arm_facts[f"synthetic:{gspec.ref}"] = {
+                "l_k": int(l_k),
+                "report_epsilon": _finite_or_none(_opt_float_attr(target, "report_epsilon")),
+            }
         attack = attack_cls(
             **dict(spec.mia_params),
             shadow_factory=lambda k, _make=make: _make(1000 + k),
@@ -1447,7 +1456,7 @@ def _membership_values(
             )
             for name, val in membership_report(result, fprs=spec.fprs).items()
         )
-    return rows, warnings
+    return rows, warnings, arm_facts
 
 
 def run(config_path: str | Path) -> list[MetricValue]:
@@ -1609,6 +1618,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     arm_info = _arm_infos(mech_plans)
     all_rows: list[ResultRow] = []
     run_warnings: list[str] = []
+    generator_arms: dict[str, dict[str, Any]] = {}  # fitted-target facts per MIA arm
     probe_counts: dict[str, int] = {}
     for spec, attack_cls in plans:
         if spec.attack_type == "reconstruction":
@@ -1624,11 +1634,12 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             )
             continue
         if spec.attack_type == "membership_inference":
-            mia_rows, mia_warnings = _membership_values(
+            mia_rows, mia_warnings, mia_arms = _membership_values(
                 cfg, spec, attack_cls, items, clean_by_id, gen_plans
             )
             all_rows.extend(mia_rows)
             run_warnings.extend(mia_warnings)
+            generator_arms.update(mia_arms)
             continue
         for ref, pool in pools.items():
             if ref.split(":", 1)[0] not in spec.target_scopes:
@@ -1728,6 +1739,9 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         }
         for ref, pool in pools.items()
     }
+    # Generator arms attacked by membership inference are not release pools; they add
+    # the fitted target's public facts (e.g. ldptrace's l_k) under ``synthetic:<ref>``.
+    arms.update(generator_arms)
     matrix = _matrix_table(all_rows)
     over_budget = _over_budget_attacks(all_rows, cfg.attack_time_budget_s)
     _write_results(

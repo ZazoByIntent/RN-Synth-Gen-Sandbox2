@@ -13,7 +13,8 @@ reconstruction, POI inference · §7.1 repetitions across seeds · §7.2 members
 inference · §7.3 runtime budget and scope reduction · §7.4 validation run and the
 threshold history · §8 `trajguard report` · §9 RN-LDP-Synth evidence sweep ·
 §9.1 LDPTrace validation inputs (Porto conversion) · §9.2 membership inference in the
-cells representation (Porto) · §10 caching · §11 troubleshooting.
+cells representation (Porto) · §9.3 LDPTrace validation run (reference vs port) · §10
+caching · §11 troubleshooting.
 
 ## 0. One-time setup
 
@@ -35,7 +36,7 @@ anything manually.
 uv run pytest
 ```
 
-**Expected outcome:** `333 passed` in about a minute (September 2026). The suite runs entirely on
+**Expected outcome:** `353 passed` in about a minute (September 2026). The suite runs entirely on
 small fixture files committed under `tests/fixtures/` — no internet, no dataset, no
 built map required. If this is green, your environment is set up correctly.
 
@@ -753,6 +754,89 @@ Read it against the `markov` ceiling: on a 6×6 grid the chains are short (train
 `ldptrace` is unstable at this sample size (1 to 7 across seeds and ε; the true maximum
 is 25) — the paper works with the whole population. Measured rows and reading:
 `docs/HANDOFF.md` §2.3.
+
+## 9.3 LDPTrace validation run: the authors' code vs the `ldptrace` port (Porto, hours)
+
+PR C of `docs/NACRT_LDPTRACE_VALIDACIJA.md`: both implementations synthesize the same
+367 008 Porto trips (§9.1) on the same 6×6 grid and are scored with the paper's nine
+utility metrics (`evaluation/ldptrace_metrics.py`). Three columns come out — the reference
+with its own printed metrics, the reference's synthesis with our metrics, and the port with
+our metrics — each as mean and range over seeds 1–5 at ε ∈ {0.5, 1.0, 1.5}. Measured
+table and reading: `docs/HANDOFF.md` §2.3.
+
+**One-time setup of the reference code** (kept out of git; `external/` is ignored):
+
+```sh
+git clone https://github.com/zealscott/LDPTrace external/LDPTrace     # commit 2d30e41 was used
+cd external/LDPTrace && git apply ../../scripts/ldptrace_reference.patch && cd ../..
+cp data/interim/porto/porto.xz external/LDPTrace/LDPTrace/data/porto.xz
+```
+
+The patch is the only artefact of the reference in this repository: it adds `--seed`
+(the code hard-codes 2022 twice) and puts the seed into the synthesis file name so five
+seeds do not overwrite each other. Nothing else changes; the reference imports only numpy
+and runs in this project's `uv` environment (no numpy 2 fixes were necessary).
+
+**Reference side** — 15 runs, each from `external/LDPTrace/LDPTrace/code/` (the code uses
+relative paths), stdout to a log per run; `--multiprocessing` must stay off on Windows
+(the script has no `__main__` guard):
+
+```powershell
+# from the repository root, PowerShell; one run ≈ 10–23 min, so run this detached
+$log = "$PWD\results\ldptrace_validation\reference"; New-Item -ItemType Directory -Force $log | Out-Null
+Set-Location external\LDPTrace\LDPTrace\code
+foreach ($eps in "0.5", "1.0", "1.5") { foreach ($seed in 1..5) {
+  cmd /c "uv run python main.py --dataset porto --grid_num 6 --max_len 0.9 --epsilon $eps --re_syn --seed $seed > `"$log\eps${eps}_seed${seed}.log`" 2>&1"
+} }
+```
+
+Each run writes `LDPTrace/data/porto/syn_porto_eps_<ε>_max_0.9_grid_6_seed_<s>.pkl`
+(a plain pickle of the synthetic trajectories as `(x, y)` points, one point per cell) and
+prints `Quantile: <L_k>` plus the nine metrics into the log. Two runs must not start in the
+same second (the code creates `log/LDPTrace/<MMDD_HHMMSS>/` without `exist_ok`); the
+4 September 2026 run used two detached workers with staggered starts.
+
+**Port side and scoring** — the harness reads the `.dat` directly (no orchestrator cache,
+no split), maps points to cells with the reference's closed-interval rule and runs the port
+for every (ε, seed); then it scores the reference's saved syntheses with the same metrics
+and parses the reference logs:
+
+```sh
+uv run python -m trajguard.experiments.ldptrace_eval --dat data/interim/porto/porto.dat \
+    --stats data/interim/porto/porto_stats.json --grid 6 --epsilons 0.5 1.0 1.5 \
+    --seeds 1 2 3 4 5 --label port --out results/ldptrace_validation/port.json
+uv run python -m trajguard.experiments.ldptrace_eval --dat data/interim/porto/porto.dat \
+    --stats data/interim/porto/porto_stats.json --grid 6 --epsilons 0.5 1.0 1.5 \
+    --seeds 1 2 3 4 5 --label "reference (our metrics)" \
+    --score-synthesis "external/LDPTrace/LDPTrace/data/porto/syn_porto_eps_{eps}_max_0.9_grid_6_seed_{seed}.pkl" \
+    --out results/ldptrace_validation/reference_ours.json
+uv run python -m trajguard.experiments.ldptrace_eval --epsilons 0.5 1.0 1.5 --seeds 1 2 3 4 5 \
+    --label "reference (own metrics)" \
+    --reference-log "results/ldptrace_validation/reference/eps{eps}_seed{seed}.log" \
+    --out results/ldptrace_validation/reference_own.json
+uv run python -m trajguard.experiments.ldptrace_eval --compare \
+    results/ldptrace_validation/reference_own.json results/ldptrace_validation/reference_ours.json \
+    results/ldptrace_validation/port.json
+```
+
+`{eps}` and `{seed}` are placeholders the harness fills from `--epsilons` / `--seeds`
+(`{eps}` as Python's float repr: `1.0`, exactly as the reference names its files).
+`--max-trajectories N` keeps the first N trips of the file for a timing run;
+`--save-synthesis DIR` stores the port's synthetic points in the reference's format (the
+test suite scores such a file and gets the run's values back to the digit).
+
+**Expected outcome** (measured 4 September 2026): reading the `.dat` takes 80 s
+once; the port needs about 4 min per (ε, seed) (fit 24–37 s, synthesis of 367 008 chains
+78–134 s, the nine metrics 107–137 s; 15 runs in 60 min), the reference 10–23 min per run
+(point → cell conversion 1.5 min, OUE reports 2 min, synthesis 3 min, its own metrics
+about 10 min, of which the diameter 6 min; 15 runs in 2 h 16 min on two workers), and
+scoring its 15 syntheses with our metrics about 27 min. Each command
+prints a table with one row per (ε, metric) and `mean [min; max]` over the seeds; the
+`--compare` table is the one recorded in `docs/HANDOFF.md` §2.3. Output stays out of git
+(`results/`). The grid check that precedes any measurement — the reference's
+`trajectory_point2grid` and the harness give the same chain for the first 20 000 trips
+once the closed-interval cell rule is used — is recorded in
+`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5.
 
 ## 10. How caching works (read before re-running with changed data)
 
