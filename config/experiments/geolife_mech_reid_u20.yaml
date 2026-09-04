@@ -1,6 +1,7 @@
-# Protection-mechanism breadth, perturbation branch (docs/NACRT_MEHANIZMI.md §1.4, §3):
+# Protection-mechanism breadth, perturbation branch (docs/NACRT_MEHANIZMI.md §1.4, §3, §4):
 # reidentification, reconstruction and POI inference against protected releases at the
-# 20-user rung, with the new point-LDP arms next to two anchors from the S4 campaign.
+# 20-user rung, with the point-LDP arms (ZM-2) and the three naive baselines (ZM-3) next
+# to two anchors from the S4 campaign.
 #
 # Why a sibling file: the S4 configs (geolife_geoind_reid*.yaml) are the frozen,
 # measured record of the sample ladder and must not change. This file copies the
@@ -8,7 +9,21 @@
 # raw pool is shared) and only swaps the mechanism arms.
 #
 # Arms: `none` (identity, upper risk bound), `geo_indistinguishability` at ε = 1
-# (anchor from S4; ε = 1 per 100 m per point) and `point_ldp` at ε ∈ {4.0, 6.0, 8.0}.
+# (anchor from S4; ε = 1 per 100 m per point), `point_ldp` at ε ∈ {4.0, 6.0, 8.0}, and
+# the naive trio without a formal guarantee (privacy/naive.py, no ε, `spent_budget`
+# None; the by_epsilon plot skips them, the mechanisms plot shows them by parameter):
+#   `spatial_rounding` cell_m ∈ {100, 500, 2000}: every point snaps to the centre of a
+#     cell_m × cell_m metre cell of a global grid (max displacement cell_m·√2/2 = 71 /
+#     354 / 1414 m, mean ≈ 0.38·cell_m); consecutive points in one cell become
+#     identical released points. With the 50 m matching radius, 500 and 2000 m are
+#     expected to drop most trajectories at re-matching.
+#   `temporal_downsampling` interval_s ∈ {30, 120, 600}: keeps the first point, then one
+#     point per interval, and the last point (cleaning already resamples at 5 s, so
+#     30 s keeps ~1/6 of the points, 600 s ~1/120, i.e. a few points per trajectory —
+#     often too few to re-match; recorded as n_rematch_dropped, not an error).
+#   `gaussian_noise` sigma_m ∈ {50, 200, 1000}: independent N(0, σ²) per axis in metres
+#     (radial RMS σ·√2); σ = 200 m is in the range of geo-ind at ε = 1 (mean
+#     displacement 200 m), 1000 m is expected to drop everything at re-matching.
 #
 # ε unit for `point_ldp`: ε is spent PER POINT over the cells of a 20 × 20 grid on the
 # map bbox (k = 400 cells, ~1.5 × 1.7 km over Beijing; the mechanism's default grid,
@@ -20,7 +35,8 @@
 # This per-point ε is NOT comparable with the per-trajectory ε of `ldptrace` and
 # `rn_ldp_synth` (geolife_mech_mia_u20.yaml), nor with geo-ind's ε per 100 m.
 # The orchestrator injects the map bbox into `point_ldp` (never set bbox here).
-# Point LDP is a baseline candidate (decision D5 in project Izbirni predmeti is open).
+# Point LDP and the naive trio are baseline candidates (decision D5 in project Izbirni
+# predmeti is open).
 experiment:
   id: geolife_mech_reid_u20
   seed: 42                   # run seed: mechanism noise, attacker knowledge, bootstrap
@@ -63,6 +79,12 @@ privacy_mechanisms:
     params: {epsilon: [1.0]}             # S4 anchor: ε per unit_m = 100 m per point
   - id: point_ldp
     params: {epsilon: [4.0, 6.0, 8.0]}   # ε per point over 20 x 20 cells (see header)
+  - id: spatial_rounding
+    params: {cell_m: [100, 500, 2000]}   # metres; no guarantee (see header)
+  - id: temporal_downsampling
+    params: {interval_s: [30, 120, 600]} # seconds; first and last point kept
+  - id: gaussian_noise
+    params: {sigma_m: [50, 200, 1000]}   # metres per axis; no guarantee
 
 attacks:
   - type: reidentification

@@ -565,6 +565,132 @@ Branje:
   praznimi bazeni traja ~0,01 s, plača se samo ponovno ujemanje vsake roke, ~1–2 min pri
   u20) in ponovitve čez semena, če bo poročilo potrebovalo interval čez semena.
 
+**ZM-3 naivna trojica — zaključen (4. september 2026, PR #39, veja
+`claude/zm3-naive-baselines`).**
+Mehanizmi `spatial_rounding`, `temporal_downsampling` in `gaussian_noise`
+(`src/trajguard/privacy/naive.py`; dejanske odločitve v `docs/NACRT_MEHANIZMI.md` §4,
+uvodni odstavek), vsi **brez formalne garancije** (`guarantee = "none"`, `spent_budget`
+`None`, brez atributa `epsilon`, zato jih graf `by_epsilon` preskoči, graf `mechanisms` pa
+izriše po parametru): zaokroževanje premakne vsako točko v središče celice `cell_m` ×
+`cell_m` m na globalni metrski mreži (največji premik `cell_m`·√2/2 = 71 / 354 / 1.414 m,
+povprečni ≈ 0,38·`cell_m`; zaporedne točke v isti celici postanejo enake izdane točke in se
+obdržijo), redčenje obdrži prvo točko, nato po eno na `interval_s` in zadnjo (čiščenje
+vzorči na 5 s; izdaja ima v povprečju 352 → 74 / 23 / 6,5 točk pri 30 / 120 / 600 s,
+najmanj 5 / 2 / 2), Gaussov šum doda neodvisen N(0, σ²) v metrih po obeh oseh (RMS premik
+σ·√2 = 71 / 283 / 1.414 m). Orkestrator se ni spremenil. Izmerjeno pri stopnji 20 z isto
+konfiguracijo kot ZM-2 (`config/experiments/geolife_mech_reid_u20.yaml`, devet novih rok ob
+sidrih `none`, geo-ind ε = 1 in `point_ldp` ε ∈ {4, 6, 8}), ukaz
+`uv run trajguard run config/experiments/geolife_mech_reid_u20.yaml` s `PYTHONHASHSEED=0`,
+seme 42, commit kode `1b72e79`. Celoten pogon 1.054 s (17,6 min; ~495 s reidentifikacija
+nad `raw` in `none`, ponovno ujemanje vseh devetih rok skupaj ~75 s, ostalo napadi nad
+preživelimi bazeni), torej nad pragom 10 min na seme in brez ponovitev `repeat`;
+`over_budget.attacks` in opozorila so prazni. **Regresija:** vrstice `raw`, `none`,
+geo-ind ε = 1 in vse tri roke `point_ldp` (reidentifikacija, sklepanje o domu/delu,
+uporabnost, rekonstrukcija) se do zadnje izpisane decimalke ujemajo z zapisom ZM-2 zgoraj
+(isto seme, predpomnjeni bazeni), zato spodaj niso ponovljene. Vrednosti iz
+`results/geolife_mech_reid_u20/` (`run.json`, `results.csv`; interval je bootstrap
+95-odstotni interval znotraj pogona; rezultati ostajajo lokalni):
+
+| Roka | `n_pool` (uporabnikov) | `n_rematch_dropped` | `top1_acc` pri k = 3 / 5 / 10 | Čas napada k = 3 / 5 / 10 |
+|------|----------|---------------------|-------------------------------|---------------------------|
+| `raw` = `none` (sidro) | 238 (16) | 0 | 0,283 [0,228; 0,338] / 0,384 [0,325; 0,447] / 0,489 [0,426; 0,557] | 42 / 70 / 136 s |
+| `spatial_rounding` 100 m | 104 (14) | 134 | 0,266 [0,215; 0,325] / 0,350 [0,291; 0,409] / 0,422 [0,363; 0,481] | 8 / 14 / 27 s |
+| `spatial_rounding` 500 m | 32 (8) | 206 | 0,181 [0,135; 0,232] / 0,177 [0,135; 0,228] / 0,228 [0,177; 0,283] | 3 / 4 / 8 s |
+| `spatial_rounding` 2000 m | 10 (5) | 228 | 0,042 [0,021; 0,072] / 0,042 [0,021; 0,072] / 0,046 [0,021; 0,076] | 1 / 2 / 3 s |
+| `temporal_downsampling` 30 s | 222 (16) | 16 | 0,485 [0,418; 0,549] / 0,473 [0,409; 0,536] / 0,570 [0,506; 0,633] | 8 / 13 / 25 s |
+| `temporal_downsampling` 120 s | 207 (16) | 31 | 0,544 [0,481; 0,608] / 0,536 [0,473; 0,599] / 0,557 [0,494; 0,624] | 2 / 3 / 6 s |
+| `temporal_downsampling` 600 s | 212 (16) | 26 | 0,485 [0,422; 0,549] / 0,494 [0,430; 0,557] / 0,498 [0,430; 0,561] | 0,7 / 1,0 / 1,9 s |
+| `gaussian_noise` σ = 50 m | 11 (4) | 227 | 0,346 [0,283; 0,409] / 0,325 [0,266; 0,388] / 0,295 [0,236; 0,350] | 0,2 / 0,3 / 0,5 s |
+| `gaussian_noise` σ = 200 m | 1 (1) | 237 | 0,274 [0,219; 0,338] pri vseh k (degenerirano: ena sled v galeriji) | 0,02–0,03 s |
+| `gaussian_noise` σ = 1000 m | 0 (0) | 238 | 0,000 pri vseh k (prazen bazen) | 0,01 s |
+
+`top5_acc` pri k = 3 / 5 / 10: `raw` 0,679 / 0,679 / 0,776; zaokroževanje 0,734 / 0,734 /
+0,751 (100 m), 0,734 / 0,743 / 0,722 (500 m), 0,430 pri vseh k (2000 m); redčenje 0,789 /
+0,823 / 0,865 (30 s), 0,802 / 0,835 / 0,861 (120 s), 0,861 / 0,852 / 0,848 (600 s); Gauss
+0,574 pri vseh k (50 m), 0,274 (200 m), 0 (1000 m). Pri galerijah z ≤ 8 uporabniki je
+`top5_acc` neinformativen (pet od osmih uporabnikov pokrije že naključje), `top1_acc` pa je
+tam vezan na delež sond preživelih uporabnikov (pri σ = 200 m 0,274 = delež sond
+uporabnika edine preživele sledi, kot pri geo-ind ε = 1 zgoraj).
+
+Ostale družine napadov in uporabnost (ena vrednost na roko; `poi_inference` 1,0–2,0 s na
+roko; rekonstrukcija po zasnovi teče samo nad geo-ind):
+
+| Roka | `poi_inference`: `home_error_m` / `work_error_m` / `home_localised` / `work_localised` | `cell_js_divergence` (mreža 20 × 20) | `length_dist_error` (m) |
+|------|------|------|------|
+| `none` | 0 / 0 / 1,00 / 1,00 | 0 | 0 |
+| `geo_indistinguishability` ε = 1 (sidro) | 14.520 / 2.030 / 0 / 0,21 | 0,0065 | 9,4 · 10⁴ |
+| `spatial_rounding` 100 m | 1.030 / 681 / 0,29 / 0,50 | 0,0011 | 1.146 |
+| `spatial_rounding` 500 m | 6.533 / 972 / 0,14 / 0,36 | 0,0141 | 2.384 |
+| `spatial_rounding` 2000 m | 9.713 / 2.395 / 0 / 0 | 0,181 | 4.190 |
+| `temporal_downsampling` 30 s | 11.040 / 528 / 0,14 / 0,57 | 0,0030 | 558 |
+| `temporal_downsampling` 120 s | 12.880 / 1.202 / 0,14 / 0,50 | 0,0096 | 1.426 |
+| `temporal_downsampling` 600 s | 1.023 / 2.245 / 0 / 0,14 | 0,0368 | 2.760 |
+| `gaussian_noise` σ = 50 m | 2.859 / 797 / 0,43 / 0,50 | 0,0011 | 2,4 · 10⁴ |
+| `gaussian_noise` σ = 200 m | 2.426 / 3.123 / 0 / 0 | 0,0088 | 1,1 · 10⁵ |
+| `gaussian_noise` σ = 1000 m | NaN / 2.224 / 0 / 0 | 0,0767 | 6,1 · 10⁵ |
+
+Branje:
+
+- **Zaokroževanje** ščiti pred povezovanjem samo tako, da izdajo uniči: pri 100 m se
+  ponovno ujame še 104 od 238 sledi (največji premik 71 m je nad polmerom ujemanja 50 m,
+  a del točk ostane v dosegu) in med preživelimi je reidentifikacija skoraj enaka surovi
+  (0,27 / 0,35 / 0,42 proti 0,28 / 0,38 / 0,49); pri 500 in 2000 m preživi 32 oziroma 10
+  sledi in vrednosti padejo zaradi majhne galerije, ne zaradi neločljivosti. Sklepanje o
+  domu/delu pri 100 m umesti 29 % domov in 50 % delovnih mest v 200 m (središče celice je
+  od prave točke oddaljeno ≤ 71 m, dvojniki v celici tvorijo »postanke«); šele 2000 m
+  pade na 0 / 0. `length_dist_error` je 1–4 km (dvojniki krajšajo, cikcak med središči
+  celic daljša), `cell_js_divergence` pri 2000 m (0,18) je primerljiv s `point_ldp` ε = 6.
+- **Redčenje je najbolj presenetljiva roka: reidentifikacija se dvigne nad surovo — a
+  zaradi napadalca, ne mehanizma.** Pri 30 / 120 / 600 s preživi 222 / 207 / 212 sledi
+  (vseh 16 uporabnikov), `top1_acc` pri k = 3 pa je 0,49 / 0,54 / 0,49 proti 0,28 nad
+  surovim bazenom, in to pri 20–100-krat krajšem času napada. Razlaga je **preverjena in
+  potrjena** (4. september 2026; tabela, merilo in odprta odločitev v 2.5): napad računa
+  nenormirano DTW razdaljo, ki sešteva po celotni poravnavi, zato nad surovim bazenom
+  skoraj vedno zmaga ena najkrajših galerijskih sledi (mediana razmerja med dolžino
+  zmagovalca in mediano galerije 0,06 pri k = 3); redčenje galerijske sledi skrajša s
+  povprečno 106 na 21 / 4,7 / 1,4 ujetih točk in to pristranskost odpravi. Z normirano
+  razdaljo (`dtw / L`) je surovi bazen pri 0,52 / 0,57 / 0,60 (k = 3 / 5 / 10), redčene
+  roke pa pri 0,48–0,61, torej na isti ravni ali pod njo (600 s pri k ≥ 5: −0,08 / −0,10).
+  Izmerjeno je torej: časovno redčenje pod tem napadalcem **ne ščiti pred povezovanjem**
+  (kvečjemu rahlo pri 600 s in normiranem napadalcu), njegov navidezni dvig tveganja pa
+  je artefakt nenormirane razdalje, ki velja za ves zapis S4. Sklepanje o domu/delu: delovna
+  mesta umeščena pri 57 % / 50 % / 14 %, domovi pri 14 % / 14 % / 0 % (odkrivanje
+  postankov potrebuje zadostno pokritost `dwell_s`; pri 600 s večina postankov izgine).
+  Uporabnost: `length_dist_error` 0,6–2,8 km (tetivna dolžina se krajša), `cell_js`
+  ≤ 0,04.
+- **Gaussov šum** ima pri σ = 50 m RMS premik 71 m, kar je že nad polmerom ujemanja:
+  preživi 11 sledi štirih uporabnikov, pri σ = 200 m ena (enaka usoda kot geo-ind ε = 1 s
+  povprečnim premikom 200 m: ena sled, `length_dist_error` istega reda 1,1 · 10⁵ proti
+  9,4 · 10⁴), pri σ = 1000 m nobena. `top1_acc` 0,35 pri σ = 50 m je vrednost degenerirane
+  galerije (štirje uporabniki), ne mere neločljivosti. Sklepanje o domu/delu pa šuma 50 m
+  ne opazi: 43 % domov in 50 % delovnih mest v 200 m, ker se centroid postanka čez mnogo
+  zašumljenih točk povpreči nazaj na pravo lokacijo; pri 200 m pade na 0 / 0. Uporabnost:
+  `cell_js` ostane majhen (točke ostanejo v svojih celicah 1,5 km), `length_dist_error`
+  pa eksplodira (23 km pri 50 m, 610 km pri 1000 m), ker vsak korak med zaporednima
+  točkama doda naključni hod reda σ, pomnožen s ~350 točkami na sled.
+- **Praktični sklep za matriko tveganj:** noben od treh naivnih mehanizmov ne zniža
+  reidentifikacije, ne da bi hkrati uničil ponovno ujemanje (zaokroževanje ≥ 500 m, Gauss
+  ≥ 200 m) — isti vzorec »zaščita z uničenjem izdaje« kot pri geo-ind ε = 1 in
+  `point_ldp`; redčenje ne uniči ničesar in reidentifikacijo celo poveča. Za sklepanje o
+  domu/delu sta zaokroževanje 100 m in Gauss 50 m praktično brez učinka. Vsi trije
+  ostajajo kandidati za baseline (odločitev D5 je odprta).
+- Odprto: (1) hipoteza o dolžinski pristranskosti DTW je **preverjena in potrjena** (4.
+  september 2026, 2.5); odprta ostaja avtorjeva odločitev med normirano razdaljo
+  napadalca in kontrolo dolžine v poročilu; (2) kopiji konfiguracije za stopnji 50 in 182
+  **obstajata in nista pognani** (4. september 2026): `config/experiments/geolife_mech_reid_u50.yaml`
+  (vse roke iz u20, prag 0,05, proračun 300 s — merilna stopnja odloči, kaj gre na 182, kot
+  pri S4) in `config/experiments/geolife_mech_reid_u182.yaml` (prag 0,3 in proračun 1.200 s,
+  poročevalski vrednosti S4 z dne 17. avgusta 2026; sidri `none` in geo-ind ε = 1 ter po
+  ena roka na mehanizem: `point_ldp` ε = 8, zaokroževanje 100 m, redčenje 120 s, Gauss
+  50 m — roke, ki pri u20 ohranijo merljiv bazen ali dajo neizrojene vrstice sklepanja o
+  domu/delu in uporabnosti; uničevalne roke so ena vrstica YAML). Pogon je odločitev
+  avtorja; ocena cene v glavi vsake datoteke (~45 min na seme pri u50, ~13–14 h pri 182,
+  ker reidentifikacija nad `raw`/`none` raste kvadratno z bazenom in pri 182 prekorači
+  proračun kot v S4; pri pragu 0,3 bo preživetje zaokroževanja 100 m in Gaussa 50 m nižje
+  kot pri 0,05); (3) ponovitve čez semena za Gaussov šum, edino roko s semenom
+  (zaokroževanje in redčenje sta deterministična, njuni intervali so samo bootstrap
+  znotraj pogona).
+
 ### 2.4 Val 5 — horizont B (2. letnik)
 
 A1 polni klasifikator lastnosti (Geolife nima demografskih oznak), M4 ujemanje
@@ -606,6 +732,68 @@ federativni pristopi, diffusion generatorji. Vse se priključi prek obstoječih 
   (`reference_cells` v `experiments/ldptrace_eval.py`) uporablja izvirnikovo pravilo,
   orkestratorjev `_cell_pool` pa še `Grid.cell_of`; za MIA nad Portom to ni pomembno.
   Odprto: ali `_cell_pool` preklopiti na isto pravilo (spremeni hash predpomnilnika).
+- **Dolžinska pristranskost DTW v reidentifikaciji — preverjena in potrjena** (ugotovljeno
+  4. septembra 2026 pri ZM-3, preverjeno isti dan na veji `claude/zm3-naive-baselines`,
+  glej 2.3): časovno redčenje izdaje na 30 / 120 / 600 s dvigne `top1_acc` pri k = 3 z
+  0,28 na 0,49–0,54 ob skoraj celem bazenu. Hipoteza: `geometry.dtw` vrne nenormirano
+  vsoto po poravnavi, zato je razdalja med k znanimi točkami in galerijsko sledjo
+  sorazmerna s številom njenih točk in kratke sledi zmagujejo. **Preverba:** skript zunaj
+  repozitorija (koda napada se ni spremenila), ki bere samo predpomnjene bazene u20 s
+  semenom 42 (surovi `data/processed/56dcf747ce5967f6`, 238 sledi, in tri izdaje redčenja
+  v `data/protected/`) in ponovi zanko napada iz `attacks/reidentification.py` (sonde iz
+  surovega bazena, `_evenly_spaced` k točk, galerija brez lastne sledi, ena razdalja na
+  uporabnika) s tremi razdaljami iz enega prehoda dinamičnega programiranja: nenormirana
+  `dtw`, `dtw / L` (L je dolžina optimalne poravnave, vračanje po matriki stroškov) in
+  `dtw / max(n, m)`; `top1_acc` z bootstrapom 1.000 / seme 42 kot v pogonu; 59 s. Nenormirana
+  razdalja reproducira izmerjeni zapis do zadnje decimalke, vključno z intervali (sidro).
+  Napad dela nad ujetimi točkami (`matched_points`), ki jih je v povprečju 106 / 21 / 4,7 /
+  1,4 na sled (mediana 64 / 15 / 4 / 1; največ 601) — manj kot izdanih točk (352 / 74 / 23 /
+  6,5), a z isto težko desno repo.
+
+  | Bazen | k | `dtw` (kot v pogonu) | `dtw / L` | `dtw / max(n, m)` |
+  |---|---|---|---|---|
+  | surovi | 3 | 0,283 [0,228; 0,338] | 0,523 [0,460; 0,586] | 0,523 [0,460; 0,586] |
+  | surovi | 5 | 0,384 [0,325; 0,447] | 0,565 [0,506; 0,624] | 0,565 [0,506; 0,624] |
+  | surovi | 10 | 0,489 [0,426; 0,557] | 0,603 [0,544; 0,667] | 0,603 [0,544; 0,667] |
+  | redčenje 30 s | 3 | 0,485 [0,418; 0,549] | 0,591 [0,523; 0,654] | 0,591 [0,523; 0,654] |
+  | redčenje 30 s | 5 | 0,473 [0,409; 0,536] | 0,612 [0,549; 0,675] | 0,608 [0,544; 0,667] |
+  | redčenje 30 s | 10 | 0,570 [0,506; 0,633] | 0,595 [0,532; 0,658] | 0,586 [0,523; 0,646] |
+  | redčenje 120 s | 3 | 0,544 [0,481; 0,608] | 0,574 [0,511; 0,641] | 0,574 [0,511; 0,641] |
+  | redčenje 120 s | 5 | 0,536 [0,473; 0,599] | 0,570 [0,506; 0,633] | 0,565 [0,502; 0,629] |
+  | redčenje 120 s | 10 | 0,557 [0,494; 0,624] | 0,570 [0,506; 0,637] | 0,557 [0,494; 0,624] |
+  | redčenje 600 s | 3 | 0,485 [0,422; 0,549] | 0,481 [0,418; 0,544] | 0,481 [0,418; 0,544] |
+  | redčenje 600 s | 5 | 0,494 [0,430; 0,557] | 0,489 [0,426; 0,553] | 0,494 [0,430; 0,557] |
+  | redčenje 600 s | 10 | 0,498 [0,430; 0,561] | 0,498 [0,430; 0,561] | 0,498 [0,430; 0,561] |
+
+  Diagnostika nad surovim bazenom (razmerje med številom točk najbližje galerijske sledi
+  in mediano števila točk v galeriji; mediana / povprečje / delež sond, pri katerih je
+  zmagovalec krajši od mediane): nenormirana 0,06 / 0,13 / 1,00 pri k = 3, 0,08 / 0,19 /
+  0,98 pri k = 5, 0,23 / 0,37 / 0,92 pri k = 10 — zmagovalec je skoraj vedno ena najkrajših
+  sledi v galeriji; normirana `dtw / L` 0,59 / 1,03 / 0,66, 0,91 / 1,26 / 0,57, 0,95 /
+  1,58 / 0,51 — razmerje se premakne k 1. Vnaprej določeno merilo je izpolnjeno v vseh
+  treh delih: (a) normirana razdalja surovi bazen dvigne na 0,52 / 0,57 / 0,60, torej na
+  raven redčenih rok pod nenormirano razdaljo (0,47–0,57) ali nad njo; (b) prednost
+  redčenih rok pred surovim bazenom pade v bootstrap interval surovega bazena v šestih od
+  devetih celic, pri 30 s in k = 3 ostane tik nad njim (+0,07; 0,591 proti zgornji meji
+  0,586), pri 600 s in k ≥ 5 se obrne (−0,08 / −0,10: galerija z 1–2 ujetima točkama
+  normiranega napadalca ovira); (c) razmerje dolžin zmagovalcev gre od < 0,25 proti ≈ 1.
+  Razdalji `dtw / L` in `dtw / max(n, m)` dasta praktično isto (pri k ≪ m je dolžina
+  poravnave ≈ m); pri 600 s vse tri sovpadajo, ker galerijska sled z eno točko poravnavo
+  fiksira.
+
+  **Pomen.** Pristranskost je lastnost napadalca iz zasnove §6.1, ne mehanizma: v vsem
+  izmerjenem zapisu S4 (stopnje 20 / 50 / 182, vse roke) nenormirani napadalec razvršča
+  galerijo pretežno po številu ujetih točk in ne po geometriji, zato so vrednosti
+  reidentifikacije nad surovim bazenom **podcenjene** (pri u20 0,28 → 0,52 pri k = 3) in
+  redčenje »pomaga« samo zato, ker to pristranskost odpravi. Koda napada se ni spremenila,
+  ker bi sprememba razdalje spremenila celoten izmerjeni zapis S4. **Odprta odločitev
+  avtorja** z dvema možnostma: (1) normirana razdalja napadalca (`dtw / L` ali `dtw /
+  max(n, m)` v `attacks/reidentification.py`, smiselno kot nova vrednost
+  `attacker.distance`, da `dtw` ostane zapis S4) s ponovnim pogonom lestvice; ali (2)
+  kontrola dolžine v poročilu (napadalec ostane, poleg vrstic pogona se poroča kontrola s
+  sondami oziroma galerijo enake dolžine, redčenje pa se bere kot vzvod, ki napadalcu
+  odpravi pristranskost). Do odločitve poročilo redčenja ne sme brati kot »zaščita, ki
+  poveča tveganje«, temveč kot razkritje pristranskosti napadalca.
 
 ---
 

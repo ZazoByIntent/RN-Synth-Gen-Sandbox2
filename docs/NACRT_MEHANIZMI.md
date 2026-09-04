@@ -18,7 +18,7 @@ zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) 
 | --- | --- | --- | --- | --- | --- | --- |
 | ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, PR #32, združen v `main`) |
 | ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | **zaključen** (4. september 2026, PR #38, veja `claude/zm2-point-ldp`) |
-| ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | odprt |
+| ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | **zaključen** (4. september 2026, PR #39, veja `claude/zm3-naive-baselines`) |
 | ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | odprt |
 
 Vrstni red je hkrati prioriteta: LDPTrace je edini celovit sintetizator pod lokalno DP in
@@ -397,7 +397,57 @@ Rekonstrukcija roke preskoči (po zasnovi).
 
 ---
 
-## 4. ZM-3 Naivna trojica (`privacy/naive.py`, imena `spatial_rounding`, `temporal_downsampling`, `gaussian_noise`)
+## 4. ZM-3 Naivna trojica (`privacy/naive.py`, imena `spatial_rounding`, `temporal_downsampling`, `gaussian_noise`) — ZAKLJUČEN
+
+**Izvedeno 4. septembra 2026** (veja `claude/zm3-naive-baselines` iz `main` po združitvi
+PR #38). Dejanske odločitve, kjer je načrt spodaj puščal izbiro ali kjer se je izvedba od
+njega razlikovala:
+
+- D-3.1: **en modul, trije razredi** (`SpatialRounding`, `TemporalDownsampling`,
+  `GaussianNoise`) s skupno zasebno funkcijo za izdajo (`_release`: `guarantee = "none"`,
+  `epsilon = None`) in skupno validacijo parametrov (`_positive_finite`: vrednost mora biti
+  pozitivna in končna, sicer `ValueError` z imenom parametra). Pretvorba metri ↔ stopinje
+  je konstanta modula (`_METERS_PER_DEG_LAT = 111_320`, ista ekvirektangularna formula
+  kot v `geoind.py`); v `geometry.py` ni izluščena, ker je ta modul namenoma omejen na
+  projicirane metre in ker `geoind.py` kot zamrznjen mehanizem kampanje S4 ni bil
+  dotaknjen.
+- Zaokroževanje teče po §4.1 na **globalni metrski mreži**, ne prek `Grid.cell_bounds`:
+  `Grid` potrebuje bbox in n_rows/n_cols, ima celice v stopinjah (ne kvadratne v metrih)
+  in točke zunaj bboxa pripne na rob; globalna mreža nič od tega ne potrebuje (brez
+  vbrizga bboxa). Korak dolžine se izračuna pri **zaokroženi** širini, zato je operacija
+  natanko idempotentna (test: dvakratna uporaba je bitno enaka enkratni).
+- D-3.2: sonde reidentifikacije napad vedno jemlje iz surovega bazena (`aux`), zato
+  redčenje nikoli ne omeji napadalčevih k točk, le galerijo; DTW deluje nad zaporedji
+  dolžine ≥ 1 in `_evenly_spaced` pri k ≥ n vrne vse točke. Ujemalnik Leuven izdajo z eno
+  ali dvema točkama ujame ali odvrže brez napake (poskus na fixturih: pri »samo prva in
+  zadnja« 2 od 8 ujeti; ena sama točka dobi oceno 0,92). Pokrito s testi.
+- D-3.3: **dvojniki se obdržijo** (zvesta izdaja): ujemalnik jih prenese (fixturi pri
+  25 m: 49 zaporednih dvojnikov, vseh 8 poti ujetih; pri 100 in 500 m vse odvržene, ker je
+  premik nad polmerom ujemanja 50 m, brez napake). Strnjevanja ni.
+- D-3.4: razredi nimajo atributov `epsilon` in `unit_m`; `spent_budget()` vrne `None`;
+  `params_hash` iz lastnega parametra (Gauss doda `seed`). Konstruktorji sprejmejo `seed`
+  tudi pri determinističnih mehanizmih, ker orkestrator vedno kliče
+  `mech_cls(**params, seed=cfg.seed)`.
+- Redčenje: prva točka vedno, nato vsaka, ki je od zadnje obdržane oddaljena ≥
+  `interval_s`, zadnja vedno (zadnji razmik je lahko krajši); `interval_s ≤ 5 s` (korak
+  čiščenja) da identiteto, ki jo orkestrator prepozna in ne ujema ponovno. Orkestrator se
+  ni spremenil.
+- Gauss: N(0, σ²) po obeh oseh v metrih, en `Generator` na primerek porabljen čez klice
+  `apply` (kot geo-ind); RMS premik σ·√2, test pri n = 2000 s toleranco 10 %.
+- Izmerjene vrstice pri stopnji 20 (seme 42, pogon 1.054 s = 17,6 min, nad pragom 10 min
+  na seme, brez ponovitev `repeat`; vrstice ZM-2 se reproducirajo do decimalke):
+  `docs/HANDOFF.md` §2.3. Ponovno ujemanje obdrži 104 / 32 / 10 od 238 sledi pri
+  zaokroževanju 100 / 500 / 2000 m, 222 / 207 / 212 pri redčenju 30 / 120 / 600 s in
+  11 / 1 / 0 pri Gaussu 50 / 200 / 1000 m. Napoved iz 4.5 se je potrdila za
+  zaokroževanje in Gauss (zaščita z uničenjem izdaje kot pri `point_ldp`), redčenje pa je
+  presenetilo: reidentifikacija se dvigne **nad** surovo (0,49–0,54 pri k = 3 proti 0,28)
+  ob skoraj nedotaknjenem bazenu — zaradi dolžinske pristranskosti nenormirane DTW v
+  napadu, kar je bilo 4. septembra 2026 preverjeno in potrjeno (`HANDOFF.md` §2.5:
+  normirana razdalja surovi bazen dvigne na 0,52 / 0,57 / 0,60, koda napada se ni
+  spremenila, odločitev avtorja je odprta). Kopiji konfiguracije za stopnji 50 in 182
+  (`geolife_mech_reid_u50.yaml` z vsemi rokami, `geolife_mech_reid_u182.yaml` s po eno roko
+  na mehanizem) obstajata od 4. septembra 2026 in nista pognani (4.5). Trojica ostaja
+  kandidat za baseline (odločitev D5 je odprta).
 
 ### 4.1 Kaj mehanizmi počnejo
 
