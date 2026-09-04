@@ -16,7 +16,7 @@ zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) 
 
 | Korak | Mehanizem | Vmesnik | Garancija | Javna koda | Obseg | Stanje |
 | --- | --- | --- | --- | --- | --- | --- |
-| ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, veja `claude/zm1-ldptrace`) |
+| ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, PR #32, združen v `main`) |
 | ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | odprt |
 | ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | odprt |
 | ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | odprt |
@@ -139,8 +139,8 @@ stolpcev (`arm_id` in `params` zadostujeta).
 
 ## 2. ZM-1 LDPTrace kot generator (`synthesis/ldptrace.py`, registrsko ime `ldptrace`) — ZAKLJUČEN
 
-**Izvedeno 2. septembra 2026** (veja `claude/zm1-ldptrace`). Dejanske odločitve, kjer je
-načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
+**Izvedeno 2. septembra 2026** (PR #32, združen v `main` 2. septembra 2026). Dejanske
+odločitve, kjer je načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
 
 - D-1.5: poročilo konca nosi **pravo zadnjo celico** (članek), tudi ko so poročila
   prehodov odrezana pri L_k; odstopanje od javne kode je zapisano v docstringu modula.
@@ -162,12 +162,12 @@ načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
   celic v odseke in roka `ldptrace` v `experiments/rnldp_eval.py` ostajata odprta
   (ločen PR, glej D-1.2). Validacija porta proti izvirni kodi (metrike članka, način
   surovih koordinat, Porto) ima lasten načrt: `docs/NACRT_LDPTRACE_VALIDACIJA.md`.
-- **Validacija proti izvirni kodi je zaključena (4. september 2026, PR C, veja
-  `claude/ldptrace-validation`):** port in izvirnik (klon `2d30e41`, popravek samo za
-  seme) sta bila pognana nad istimi 367.008 potmi Porta na mreži 6 × 6 pri ε ∈ {0,5, 1,
-  1,5} s petimi semeni; tabela devetih metrik in branje sta v `docs/HANDOFF.md` §2.3,
-  dejanske odločitve v `docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5. LDPTrace ostaja
-  kandidat za baseline (odločitev D5 je še odprta).
+- **Validacija proti izvirni kodi je zaključena (4. september 2026, PR C = PR #36;
+  PR #33–#36 so združeni v `main` 4. septembra 2026):** port in izvirnik (klon
+  `2d30e41`, popravek samo za seme) sta bila pognana nad istimi 367.008 potmi Porta na
+  mreži 6 × 6 pri ε ∈ {0,5, 1, 1,5} s petimi semeni; tabela devetih metrik in branje sta
+  v `docs/HANDOFF.md` §2.3, dejanske odločitve v `docs/NACRT_LDPTRACE_VALIDACIJA.md`
+  §12.5. LDPTrace ostaja kandidat za baseline (odločitev D5 je še odprta).
 
 ### 2.1 Kaj mehanizem počne (Du et al., PVLDB 2023; koda `zealscott/LDPTrace`)
 

@@ -13,22 +13,21 @@ list of open items: `docs/HANDOFF.md`. Protection-mechanism breadth per
 `docs/NACRT_MEHANIZMI.md`: ZM-1 LDPTrace is implemented (generator `ldptrace`,
 baseline candidate) and measured at the 20-user rung on 2 Sep 2026 (rows in
 `docs/HANDOFF.md` §2.3); its validation against the authors' code follows
-`docs/NACRT_LDPTRACE_VALIDACIJA.md`: PR A (the paper's nine utility metrics,
-`evaluation/ldptrace_metrics.py`) is done (PR #33); PR B1 (cells representation and
-inputs: `TrajectoryView.sequence` / `as_sequence()`, `Grid.chain`, the `bbox` mode of
-`ldptrace`, the `ldptrace_dat` loader and the Porto conversion) is done on branch
-`claude/cells-mode` (PR #34, 3 Sep 2026, stacked on PR #33; 367,008 Porto trajectories
-converted into `data/interim/porto/`, numbers in `docs/HANDOFF.md` §2.3); PR B2
-(orchestrator cells mode: `dataset.representation: cells`, no map or matching, membership
-inference only; `config/experiments/porto_cells_mia.yaml`) is done on branch
-`claude/cells-mode-orchestrator` (PR #35, 3 Sep 2026, stacked on PR #34; Porto membership
-inference measured at 2,000 trips, rows in `docs/HANDOFF.md` §2.3, run guide
-`docs/RUNNING.md` §9.2); PR C (the Porto comparison run: harness `experiments/ldptrace_eval.py`, reference clone
-`2d30e41` patched only for a seed, 3 ε × 5 seeds on both sides over all 367,008 trips) is
-done on branch `claude/ldptrace-validation` (PR #36, 4 Sep 2026, stacked on PR #35; the
-port matches the reference within the seed spread and our metrics reproduce the reference's
-own printout to the digit — table in `docs/HANDOFF.md` §2.3, run guide `docs/RUNNING.md`
-§9.3, actual decisions `docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5);
+`docs/NACRT_LDPTRACE_VALIDACIJA.md` and is complete: PRs #33–#36 were merged into `main`
+on 4 Sep 2026 (merge commits, in the order 33 → 34 → 35 → 36). PR A (PR #33): the paper's
+nine utility metrics, `evaluation/ldptrace_metrics.py`. PR B1 (PR #34): cells
+representation and inputs (`TrajectoryView.sequence` / `as_sequence()`, `Grid.chain`, the
+`bbox` mode of `ldptrace`, the `ldptrace_dat` loader and the Porto conversion; 367,008
+Porto trajectories converted into `data/interim/porto/`, numbers in `docs/HANDOFF.md`
+§2.3). PR B2 (PR #35): orchestrator cells mode (`dataset.representation: cells`, no map or
+matching, membership inference only; `config/experiments/porto_cells_mia.yaml`; Porto
+membership inference measured at 2,000 trips, rows in `docs/HANDOFF.md` §2.3, run guide
+`docs/RUNNING.md` §9.2). PR C (PR #36): the Porto comparison run (harness
+`experiments/ldptrace_eval.py`, reference clone `2d30e41` patched only for a seed, 3 ε × 5
+seeds on both sides over all 367,008 trips; the port matches the reference within the seed
+spread and our metrics reproduce the reference's own printout to the digit — table in
+`docs/HANDOFF.md` §2.3, run guide `docs/RUNNING.md` §9.3, actual decisions
+`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5).
 ZM-2 … ZM-4 are open.**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.

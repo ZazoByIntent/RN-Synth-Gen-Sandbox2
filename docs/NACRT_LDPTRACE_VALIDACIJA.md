@@ -1,15 +1,15 @@
 # Načrt: validacija generatorja `ldptrace` proti izvirni kodi
 
-Stanje ob zapisu: 2. september 2026, veja `claude/zm1-ldptrace` (PR #32 na `main`,
-čaka na združitev). **Napredek (2. september 2026, zvečer):** PR A (metrike) izveden
-kot PR #33 na veji `claude/ldptrace-metrics` (odprt, čaka na združitev); dejanske
-odločitve so pri D-V.7. PR B je razrezan na B1 in B2; **B1 je izveden** (3. september
-2026, veja `claude/cells-mode`, PR #34; predaja v §10) in **B2 je izveden** (3. september
-2026, veja `claude/cells-mode-orchestrator`, **PR #35**, skladana na PR #34; dejanske
-odločitve in izmerjeni pogon Porta v §11.4 in §11.5). **PR C je izveden** (4. september
-2026, veja `claude/ldptrace-validation`, PR #36; predaja v §12, dejanske odločitve in
-izmerjeno v §12.5, tabela v `docs/HANDOFF.md` §2.3) — **validacija je zaključena**. Ta
-dokument je bil predaja za eno do tri implementacijske seje, ki
+Stanje ob zapisu: 2. september 2026 (PR #32, ZM-1 LDPTrace, združen v `main`
+2. septembra 2026). **Stanje 4. septembra 2026: validacija je zaključena in vsi štirje
+PR-ji (#33, #34, #35, #36) so združeni v `main` 4. septembra 2026** (z merge commitom, v
+vrstnem redu 33 → 34 → 35 → 36). PR A (metrike) je PR #33; dejanske odločitve so pri
+D-V.7. PR B je razrezan na B1 in B2; **B1 je izveden** (3. september 2026, PR #34;
+predaja v §10) in **B2 je izveden** (3. september 2026, PR #35; dejanske odločitve in
+izmerjeni pogon Porta v §11.4 in §11.5). **PR C je izveden** (4. september 2026, PR #36;
+predaja v §12, dejanske odločitve in izmerjeno v §12.5, tabela v `docs/HANDOFF.md`
+§2.3). Omembe vej in skladanja v predajah §9–§12 spodaj so zgodovinski zapis, kako je
+delo potekalo. Ta dokument je bil predaja za eno do tri implementacijske seje, ki
 uvedejo (a) metrike uporabnosti iz članka LDPTrace, (b) način branja surovih koordinat
 na mreži kot alternativo ujetim zaporedjem odsekov, izbirljiv v konfiguraciji, in
 (c) primerjalni pogon izvirne kode in najinega porta nad istimi podatki. Seja prebere
