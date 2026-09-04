@@ -135,6 +135,33 @@ u20), `docs/RUNNING.md` (odstavek pri §7 ali §7.2), `docs/CODEBASE_STRUCTURE.m
 napadov, meje MVP). `docs/REZULTATI_SHEMA.md` se **ne** spremeni: nove roke ne dodajajo
 stolpcev (`arm_id` in `params` zadostujeta).
 
+### 1.6 Po zaključku vseh štirih korakov: skupni primerjalni zvezek
+
+**Opomba avtorja (4. september 2026).** Ko bodo vsi mehanizmi iz tabele (ZM-1 do ZM-4)
+implementirani in izmerjeni, pripravi **skupen zvezek za primerjavo rezultatov vseh
+mehanizmov** (predlog imena `notebooks/04_mechanisms_comparison.ipynb`, po vzoru
+`notebooks/03_s4_sweep.ipynb`, ki bere samo `results/` in ničesar ne poganja). Zvezek naj:
+
+- prebere vse pogone sestrskih konfiguracij (`geolife_mech_reid_*`, `geolife_mech_mia_*`)
+  in sidra iz S4 (`geolife_geoind_reid_*`, `geolife_synth_mia_*`) prek
+  `reporting/results_io.py`, po stopnjah lestvice vzorcev in po semenih
+  (`repetitions.csv`, kjer obstaja);
+- primerja mehanizme po družinah napadov (reidentifikacija, rekonstrukcija, sklepanje o
+  domu/delu, članstvo) in po uporabnosti (`cell_js_divergence`, `length_dist_error`), z
+  eno vrstico na roko: tveganje proti uporabnosti kot v `reporting/tradeoff.py`, a čez
+  vse mehanizme hkrati;
+- **ne izenačuje ε med mehanizmi**: enote se razlikujejo (geo-ind na 100 m na točko,
+  točkovni LDP na točko nad celico, LDPTrace in RN-LDP-Synth na pot, PrivTrace centralno
+  na pot; 1.2). Primerjava naj gre po izmerjenem tveganju in uporabnosti, ε je oznaka
+  roke, ne skupna os;
+- zapiše, katere roke ponovno ujemanje odvrže (`n_rematch_dropped`), ker imajo take roke
+  reidentifikacijo 0 nad praznim bazenom (točkovni LDP pri stopnji 20, §3);
+- da slike za poročilo (IZV §7, §8) v `reports/`, kot `03_s4_sweep.ipynb` da
+  `reports/s4_figures/`.
+
+To je ločen korak po ZM-4 (lastna seja in PR), ne del nobenega od korakov ZM-1 do ZM-4;
+do takrat vsak korak zapiše svoje vrstice v `HANDOFF.md` §2.3.
+
 ---
 
 ## 2. ZM-1 LDPTrace kot generator (`synthesis/ldptrace.py`, registrsko ime `ldptrace`) — ZAKLJUČEN
