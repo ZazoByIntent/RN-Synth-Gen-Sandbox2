@@ -277,9 +277,9 @@ commiti so v `arhiv/HANDOFF_2026-08-21.md`.
 ### 2.3 Val 4 — širina mehanizmov in LDPTrace
 
 - Mehanizmi iz zasnove §7, ki manjkajo: prostorsko zaokroževanje, časovno redčenje,
-  Gaussov šum, točkovni LDP, SquareWave, segmentna perturbacija, k-anonimnost,
-  kombinacije. Dodajaj po naraščajoči zahtevnosti; segmentna perturbacija zadnja
-  (najbližja RN-LDP-Synth, zato najkoristnejša primerjava).
+  Gaussov šum, SquareWave, segmentna perturbacija, k-anonimnost, kombinacije (točkovni
+  LDP je izveden kot ZM-2, glej spodaj). Dodajaj po naraščajoči zahtevnosti; segmentna
+  perturbacija zadnja (najbližja RN-LDP-Synth, zato najkoristnejša primerjava).
 - **LDPTrace** prednostno: brez njega se razdelek 7.3 poročila primerja samo proti
   nezasebnemu Markovu. Točkovni LDP in LDPTrace gradita na `privacy/ldp.py` (GRR, OUE).
 - **Načrt izvedbe (2. september 2026):** `docs/NACRT_MEHANIZMI.md`. Izbrani so štirje
@@ -484,6 +484,86 @@ Branje po merilih iz `docs/NACRT_LDPTRACE_VALIDACIJA.md` §6:
 Sklep: port je nad istim vhodom funkcionalno enakovreden izvirniku (isti postopek, iste
 metrike do zadnje decimalke, razlike v razponu semen); LDPTrace ostaja kandidat za
 baseline (odločitev D5 je odprta).
+
+**ZM-2 točkovni LDP — zaključen (4. september 2026, veja `claude/zm2-point-ldp`, PR na
+`main`).** Mehanizem `point_ldp` (`src/trajguard/privacy/point_ldp.py`; dejanske
+odločitve v `docs/NACRT_MEHANIZMI.md` §3, uvodni odstavek): vsaka GPS točka se preslika
+v celico mreže 20 × 20 nad bbox zemljevida (k = 400 celic, celica ~1,5 × 1,7 km nad
+Pekingom), celica gre skozi k-arni randomizirani odgovor (prava celica ostane z
+verjetnostjo e^ε/(e^ε + 399): 0,12 / 0,50 / 0,88 pri ε = 4 / 6 / 8, sicer enakomerno
+naključna druga celica), izdana točka je enakomerno naključna točka v poročani celici,
+čas ostane. ε je **na točko** (`spent_budget` = ε · število izdanih točk; bazen u20 ima
+83.849 točk), zato neprimerljiv s per-pot ε pri `ldptrace` in `rn_ldp_synth` in z ε na
+100 m pri geo-ind. Orkestrator vbrizga bbox zemljevida v konstruktor mehanizma po podpisu
+(edina sprememba orkestratorja v tem koraku). Izmerjeno pri stopnji 20 s konfiguracijo
+`config/experiments/geolife_mech_reid_u20.yaml` (sestrska datoteka zamrznjene S4
+konfiguracije `geolife_geoind_reid_u20.yaml`: ista populacija, čiščenje, prag 0,05,
+razrez, napadi in proračun; roke `none`, `geo_indistinguishability` ε = 1 in `point_ldp`
+ε ∈ {4, 6, 8}), ukaz `uv run trajguard run config/experiments/geolife_mech_reid_u20.yaml`
+s `PYTHONHASHSEED=0`, seme 42, commit kode `9f454fc`. Celoten pogon 864 s (14,4 min), kar
+je nad dogovorjenim pragom 10 min na seme, zato brez ponovitev `repeat`;
+`over_budget.attacks` in opozorila so prazni. Bazen `raw`: 238 sledi, 16 od 20
+uporabnikov v galeriji, 237 sond (enako kot v 1.2). Vrednosti iz
+`results/geolife_mech_reid_u20/` (`run.json`, `results.csv`; interval je bootstrap
+95-odstotni interval znotraj pogona; rezultati ostajajo lokalni, `results/` ni v gitu):
+
+| Roka | `n_pool` | `n_rematch_dropped` | `top1_acc` pri k = 3 / 5 / 10 | Čas napada k = 3 / 5 / 10 |
+|------|----------|---------------------|-------------------------------|---------------------------|
+| `raw` | 238 | 0 | 0,283 [0,228; 0,338] / 0,384 [0,325; 0,447] / 0,489 [0,426; 0,557] | 42 / 72 / 138 s |
+| `none` (identiteta) | 238 | 0 | enako kot `raw` | 42 / 70 / 136 s |
+| `geo_indistinguishability` ε = 1 (sidro S4) | 1 | 237 | 0,236 [0,186; 0,291] pri vseh k (degenerirano: ena sled v galeriji, vse sonde dobijo njenega uporabnika) | 0,02–0,04 s |
+| `point_ldp` ε = 4 | 0 | 238 | 0,000 pri vseh k (prazen bazen) | 0,01 s |
+| `point_ldp` ε = 6 | 0 | 238 | 0,000 pri vseh k | 0,01 s |
+| `point_ldp` ε = 8 | 0 | 238 | 0,000 pri vseh k | 0,01 s |
+
+`spent_budget`: 83.849 (geo-ind ε = 1), 335.396 / 503.094 / 670.792 (`point_ldp` ε = 4 /
+6 / 8, tj. ε · 83.849). Vrstici `raw` in `none` se do zadnje decimalke ujemata z zapisom S4
+pri stopnji 20 (`results/geolife_geoind_reid_u20/repetitions.csv`: 0,283 / 0,384 /
+0,489); geo-ind ε = 1 je pri semenu 42 obdržal eno sled (pri semenu 1 v S4 nobene;
+povprečje `top1_acc` čez semena 1–5 v S4 je 0,034).
+
+Ostale družine napadov in uporabnost (ena vrednost na roko):
+
+| Roka | `poi_inference`: `home_error_m` / `work_error_m` / `home_localised` / `work_localised` | `cell_js_divergence` (mreža 20 × 20) | `length_dist_error` (m) |
+|------|------|------|------|
+| `none` | 0 / 0 / 1,00 / 1,00 | 0 | 0 |
+| `geo_indistinguishability` ε = 1 | 14.520 / 2.030 / 0 / 0,21 | 0,0065 | 9,4 · 10⁴ |
+| `point_ldp` ε = 4 | NaN / 720 / 0 / 0 | 0,421 | 5,6 · 10⁶ |
+| `point_ldp` ε = 6 | NaN / 11.120 / 0 / 0 | 0,180 | 4,2 · 10⁶ |
+| `point_ldp` ε = 8 | 10.940 / 4.166 / 0 / 0 | 0,032 | 1,4 · 10⁶ |
+
+Rekonstrukcija teče po zasnovi samo nad geo-ind ε = 1 (ena preživela sled):
+`mean_spatial_error_m` 107 (pod povprečnim premikom mehanizma 200 m), `hausdorff_m` 386,
+15 s. Časi `poi_inference` so 1,1–2,1 s na roko.
+
+Branje:
+
+- **Ponovno ujemanje odvrže vse sledi pri vseh treh ε** (`n_rematch_dropped = 238/238`),
+  kot je načrt napovedal: tudi ko je poročana prava celica, je izdana točka premaknjena
+  za stotine metrov (enakomerno v celici ~1,5 km), daleč nad polmerom ujemanja 50 m;
+  geo-ind pri ε = 1 (povprečni premik 200 m) pri istem pragu obdrži 0–1 sled.
+  Reidentifikacija po ponovnem ujemanju točkovnega LDP na tej mreži zato ne loči od
+  »zaščite z uničenjem izdaje«; roka je v grafu `mechanisms` z vrednostjo 0.
+- **Uporabnost sledi ε natanko po napovedi GRR:** `cell_js_divergence` 0,42 → 0,18 →
+  0,03 pri ε = 4 → 6 → 8 (delež pravih celic 0,12 → 0,50 → 0,88), ker mreža uporabnosti
+  in mreža mehanizma sovpadata. `length_dist_error` (Wassersteinova razdalja med
+  porazdelitvama dolžin, v metrih) je za dva reda velikosti nad geo-ind, ker vsak
+  »napačni« odgovor GRR skoči v naključno celico čez celoten bbox (~16 km na skok);
+  pri ~350 točkah na sled to da tisoče kilometrov navidezne dolžine pri ε = 4 in še
+  vedno ~1.400 km pri ε = 8.
+- **Sklepanje o domu/delu** ne umesti nikogar (`home_localised = work_localised = 0` pri
+  vseh ε); `home_error_m` je NaN pri ε = 4 in 6, ker napad ne najde nobene postajne
+  točke (zaporedne točke v isti celici so razpršene po njej), napake dela 0,7–11 km pa so
+  povprečje nad redkimi uporabniki, ki jih napad sploh umesti, ne populacijska vrednost.
+  Geo-ind ε = 1 za primerjavo umesti 21 % delovnih mest v 200 m.
+- **Praktični sklep:** pri celicah 1,5 km je točkovni LDP v tem okviru uporaben samo za
+  populacijske statistike nad celicami (histogram celic), ne za izdajo sledi; finejša
+  mreža (50 × 50, k = 2.500) bi za isti delež pravih celic zahtevala ε ≳ 10 in bi izdano
+  točko še vedno premaknila za ~300 m. To je pričakovana lastnost LDP na točko, ne napaka
+  izvedbe. Točkovni LDP ostaja kandidat za baseline (odločitev D5 je odprta).
+- Odprto: kopiji konfiguracije za stopnji 50 in 182 (cena je majhna: reidentifikacija nad
+  praznimi bazeni traja ~0,01 s, plača se samo ponovno ujemanje vsake roke, ~1–2 min pri
+  u20) in ponovitve čez semena, če bo poročilo potrebovalo interval čez semena.
 
 ### 2.4 Val 5 — horizont B (2. letnik)
 

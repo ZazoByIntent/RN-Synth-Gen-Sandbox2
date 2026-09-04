@@ -28,7 +28,11 @@ seeds on both sides over all 367,008 trips; the port matches the reference withi
 spread and our metrics reproduce the reference's own printout to the digit — table in
 `docs/HANDOFF.md` §2.3, run guide `docs/RUNNING.md` §9.3, actual decisions
 `docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5).
-ZM-2 … ZM-4 are open.**
+ZM-2 point LDP is implemented (mechanism `point_ldp`, `src/trajguard/privacy/point_ldp.py`;
+the orchestrator injects the map bbox into mechanism constructors that accept `bbox`) and
+measured at the 20-user rung on 4 Sep 2026 with `config/experiments/geolife_mech_reid_u20.yaml`
+(rows in `docs/HANDOFF.md` §2.3, actual decisions in `docs/NACRT_MEHANIZMI.md` §3).
+ZM-3 and ZM-4 are open.**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.
 

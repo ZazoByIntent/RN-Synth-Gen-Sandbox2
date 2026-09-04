@@ -17,7 +17,7 @@ zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) 
 | Korak | Mehanizem | Vmesnik | Garancija | Javna koda | Obseg | Stanje |
 | --- | --- | --- | --- | --- | --- | --- |
 | ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, PR #32, združen v `main`) |
-| ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | odprt |
+| ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | **zaključen** (4. september 2026, veja `claude/zm2-point-ldp`, PR na `main`) |
 | ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | odprt |
 | ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | odprt |
 
@@ -276,7 +276,37 @@ primerljivosti; izvirnik uporablja {0,5, 1, 1,5}.
 
 ---
 
-## 3. ZM-2 Točkovni LDP (`privacy/point_ldp.py`, registrsko ime `point_ldp`)
+## 3. ZM-2 Točkovni LDP (`privacy/point_ldp.py`, registrsko ime `point_ldp`) — ZAKLJUČEN
+
+**Izvedeno 4. septembra 2026** (veja `claude/zm2-point-ldp` iz `main` po združitvi PR
+#33–#37; PR na `main`). Dejanske odločitve, kjer je načrt spodaj puščal izbiro ali kjer se
+je izvedba od njega razlikovala:
+
+- D-2.3: mreža **20 × 20** (k = 400) in ε ∈ {4, 6, 8}, kot priporočeno. Razlogi: ista
+  mreža kot `utility_grid`, zato `cell_js_divergence` meri natanko škodo GRR nad isto
+  mrežo; k = 400 drži ε v berljivem območju (p prave celice 0,12 / 0,50 / 0,88); finejša
+  mreža reidentifikaciji ne pomaga, ker ponovno ujemanje pri celicah ~1,5 km odvrže vse
+  poti (geo-ind pri ε = 1, premik 200 m, jih pri u20 že odvrže vse). Mreža ostaja
+  parameter YAML (`n_rows`, `n_cols` kot skalarja), roka 50 × 50 je ena vrstica.
+- Obratna preslikava indeks celice → meje celice je metoda `Grid.cell_bounds` v
+  `representation/views.py` (ob `cell_of` in `chain`), ne zasebna funkcija mehanizma;
+  ZM-3 (zaokroževanje na središče celice) jo lahko uporabi.
+- `bbox` pod `params` mehanizma je napaka konfiguracije z jasnim sporočilom (orkestrator
+  ga vbrizga iz `map.bbox`), po vzoru zavrnitve nasprotujočih vrednosti v `_generator_ctor`.
+  Vbrizg je edina sprememba orkestratorja (zanka `mech_plans`, ~10 vrstic), ključ
+  predpomnilnika `_protected_hash` že vsebuje bbox zemljevida prek `_version_hash`.
+- Vrstni red naključnosti v `apply`: najprej vsi žrebi GRR (zanka z `grr_perturb`), nato
+  tresenje (vektorizirano), zato `jitter=True` in `jitter=False` z istim semenom poročata
+  iste celice; test »tresena točka leži v poročani celici« to uporabi.
+- Izdane koordinate so pripete na bbox (zaščita pred prekoračitvijo zaradi zaokroževanja
+  na zunanjem robu mreže); `params_hash` vključuje bbox; mreža 1 × 1 je zavrnjena (GRR
+  potrebuje k ≥ 2).
+- Izmerjene vrstice pri stopnji 20 (seme 42, pogon 864 s = 14,4 min, torej nad pragom
+  10 min na seme in brez ponovitev `repeat`): `docs/HANDOFF.md` §2.3. Napoved iz D-2.3 se
+  je potrdila: ponovno ujemanje odvrže vseh 238 sledi pri vseh treh ε (reidentifikacija
+  0 nad praznim bazenom), medtem ko `cell_js_divergence` sledi deležu pravih celic (0,42 /
+  0,18 / 0,03 pri ε = 4 / 6 / 8) in sklepanje o domu/delu ne umesti nikogar. Točkovni
+  LDP ostaja kandidat za baseline (odločitev D5 je odprta).
 
 ### 3.1 Kaj mehanizem počne
 

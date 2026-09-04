@@ -199,7 +199,12 @@ In pipeline order, with the reason each package exists:
   more noise and more privacy); `ldp.py` holds the local-differential-privacy
   randomizers (GRR and OUE — coin-flipping schemes that let a server learn
   population statistics without trusting any individual report) used by the
-  RN-LDP-Synth and LDPTrace generators.
+  RN-LDP-Synth and LDPTrace generators; `point_ldp.py` is the point-level LDP
+  counterpart of geo-ind (baseline candidate): each GPS point becomes a cell of a
+  grid over the map bbox, the cell goes through GRR, and a random point inside the
+  reported cell is released — ε per point, the same naive budget accounting as
+  geo-ind. The orchestrator hands it the map bbox by constructor signature (the one
+  input a mechanism gets besides its YAML params and the seed).
 - **`synthesis/`** — the generators. `markov.py` learns "after road segment A
   comes segment B x% of the time" and generates new trajectories; it is the
   non-private ceiling the private generators are compared against.

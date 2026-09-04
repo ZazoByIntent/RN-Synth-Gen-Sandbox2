@@ -60,6 +60,10 @@ OSM ─► MapSource ─► RoadNetwork (maps/)
   over the per-point cells of `dataset.grid`), cached as `clean.parquet` +
   `chains.parquet`; no road network is loaded, only `membership_inference` runs, and
   generators receive the grid (`bbox`, `n_rows`, `n_cols`) instead of `network`.
+- Mechanism constructors get their YAML params plus `seed`; the one extra input is
+  the map's bbox, injected by signature in the `segments` representation when the
+  constructor accepts `bbox` (`point_ldp`, the per-point LDP over grid cells). `bbox`
+  under a mechanism's `params` is a config error: list-valued params expand into arms.
 
 ## The seven ABCs (design §2.3)
 
