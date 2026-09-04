@@ -11,7 +11,8 @@ of `main` (July 2026); numbers marked "fixture" come from the committed test dat
 §6 baseline reidentification and the population threshold · §7 geo-ind grid,
 reconstruction, POI inference · §7.1 repetitions across seeds · §7.2 membership
 inference · §7.3 runtime budget and scope reduction · §7.4 validation run and the
-threshold history · §7.5 mechanism-breadth perturbation config (point LDP) · §8
+threshold history · §7.5 mechanism-breadth perturbation config (point LDP and the naive
+baselines) · §8
 `trajguard report` · §9 RN-LDP-Synth evidence sweep ·
 §9.1 LDPTrace validation inputs (Porto conversion) · §9.2 membership inference in the
 cells representation (Porto) · §9.3 LDPTrace validation run (reference vs port) · §10
@@ -610,17 +611,19 @@ projection 118). The author's decision (17 Aug 2026): the 182-user reporting
 configs use **0.3**; the u20/u50 configs stay at 0.05 as the measured record of
 those rungs.
 
-## 7.5 Mechanism-breadth sibling config: point LDP (real Geolife, ~15 minutes)
+## 7.5 Mechanism-breadth sibling config: point LDP and the naive baselines (real Geolife)
 
 ```sh
 uv run trajguard run config/experiments/geolife_mech_reid_u20.yaml
 ```
 
 The S4 configs of §7 are frozen, so new perturbation arms live in
-`geolife_mech_reid_u20.yaml` (`docs/NACRT_MEHANIZMI.md` §1.4, §3): the same 20-user
+`geolife_mech_reid_u20.yaml` (`docs/NACRT_MEHANIZMI.md` §1.4, §3, §4): the same 20-user
 population, cleaning, matching threshold 0.05, split, attacks and 300 s budget, with
-the arms `none` and `geo_indistinguishability` at ε = 1 (anchors from S4) and the
-point-LDP mechanism `point_ldp` at ε ∈ {4, 6, 8}. Point LDP (`privacy/point_ldp.py`)
+the arms `none` and `geo_indistinguishability` at ε = 1 (anchors from S4), the
+point-LDP mechanism `point_ldp` at ε ∈ {4, 6, 8} (ZM-2) and the three naive baselines
+of ZM-3 (`privacy/naive.py`, nine arms, see the end of this section). The point-LDP
+part first. Point LDP (`privacy/point_ldp.py`)
 maps every GPS point to a cell of a 20 × 20 grid over the map bbox (k = 400 cells,
 ~1.5 × 1.7 km over Beijing, the same grid as `metrics.utility_grid`), replaces the
 cell by k-ary randomized response — the true cell survives with probability
@@ -646,6 +649,39 @@ re-matching (`n_pool = 0`, reidentification 0.000 in ~0.01 s), `cell_js_divergen
 `docs/HANDOFF.md` §2.3. A finer grid is one YAML line
 (`params: {epsilon: [8.0], n_rows: 50, n_cols: 50}`), but needs a larger ε for the same
 survival probability (k = 2500: 0.54 at ε = 8).
+
+**The naive baselines (ZM-3, same config, same command).** Three mechanisms without a
+formal guarantee (`privacy/naive.py`; `guarantee = "none"`, `spent_budget` None, no ε,
+so the `by_epsilon` plot skips them and the `mechanisms` plot lists them by parameter):
+`spatial_rounding` at `cell_m` ∈ {100, 500, 2000} snaps every point to the centre of a
+`cell_m` × `cell_m` metre cell of a global grid (maximum displacement `cell_m`·√2/2 =
+71 / 354 / 1414 m, mean ≈ 0.38·`cell_m`; consecutive points in one cell become identical
+released points, which the matcher tolerates); `temporal_downsampling` at `interval_s`
+∈ {30, 120, 600} keeps the first point, then one point per interval and the last point
+(cleaning resamples at 5 s, so 30 s keeps ~1/6 of the points and 600 s a handful per
+trajectory); `gaussian_noise` at `sigma_m` ∈ {50, 200, 1000} adds independent N(0, σ²)
+metres per axis (radial RMS σ·√2; σ = 200 m sits in the range of geo-ind at ε = 1).
+Every perturbing arm is re-matched once (~1–2 min at u20, cached under
+`data/protected/`) and then attacked; the raw-pool cache and the ZM-2 protected caches
+are reused, so adding arms costs only their own re-matching and attacks. **Expected
+outcome:** arms with a small displacement (rounding 100 m, downsampling 30 s, Gaussian
+50 m) keep most of the 238 trajectories and reidentify close to the raw pool; arms
+whose displacement exceeds the 50 m matching radius (rounding 500 / 2000 m, Gaussian
+1000 m) drop most or all trajectories at re-matching, exactly like `point_ldp` above;
+downsampling at 600 s leaves too few points for many releases to re-match. As above,
+`n_rematch_dropped` in `run.json` says which happened, and the rows that stay
+informative when the pool empties are `poi_inference` and the utility metrics.
+**Measured on 4 Sep 2026** (seed 42, warm caches for the raw pool and the ZM-2 arms,
+`PYTHONHASHSEED=0`): 1054 s in total (~495 s of it reidentification on `raw` and
+`none`; re-matching all nine new arms took ~75 s together), no attack over budget, and
+the ZM-2 rows reproduced to the digit. Re-matching kept 104 / 32 / 10 of 238
+trajectories for rounding 100 / 500 / 2000 m, 222 / 207 / 212 for downsampling 30 /
+120 / 600 s and 11 / 1 / 0 for Gaussian 50 / 200 / 1000 m — so Gaussian 50 m already
+behaves like geo-ind at ε = 1, not like a "small" perturbation. The surprise that is
+not a bug: **downsampling raises `top1_acc` above the raw pool** (0.49–0.54 at k = 3
+versus 0.28) while keeping almost the whole pool, because the attack's unnormalised
+DTW favours short gallery sequences (a hypothesis recorded, not verified, in
+`docs/HANDOFF.md` §2.3 and §2.5). Rows and the reading: `docs/HANDOFF.md` §2.3.
 
 ## 8. Aggregate risk report
 

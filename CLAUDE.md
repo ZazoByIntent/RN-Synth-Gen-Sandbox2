@@ -32,7 +32,11 @@ ZM-2 point LDP is implemented (mechanism `point_ldp`, `src/trajguard/privacy/poi
 the orchestrator injects the map bbox into mechanism constructors that accept `bbox`) and
 measured at the 20-user rung on 4 Sep 2026 with `config/experiments/geolife_mech_reid_u20.yaml`
 (rows in `docs/HANDOFF.md` §2.3, actual decisions in `docs/NACRT_MEHANIZMI.md` §3).
-ZM-3 and ZM-4 are open.**
+ZM-3 naive baselines are implemented (mechanisms `spatial_rounding`,
+`temporal_downsampling`, `gaussian_noise` in `src/trajguard/privacy/naive.py`, no formal
+guarantee) and measured at the 20-user rung on 4 Sep 2026 with the same config, nine
+arms next to the ZM-2 anchors (rows in `docs/HANDOFF.md` §2.3, actual decisions in
+`docs/NACRT_MEHANIZMI.md` §4). ZM-4 is open.**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.
 

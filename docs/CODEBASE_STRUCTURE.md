@@ -154,7 +154,8 @@ orchestrator cannot find it, the missing import in `builtins.py` is the reason.
 
 Currently registered names (grep for `@register` to refresh this list):
 `osm` (map source); `geolife`, `ldptrace_dat` (datasets); `leuven` (matcher); `none`,
-`geo_indistinguishability` (mechanisms); `markov`, `rn_ldp_synth`, `ldptrace`
+`geo_indistinguishability`, `point_ldp`, `spatial_rounding`, `temporal_downsampling`,
+`gaussian_noise` (mechanisms); `markov`, `rn_ldp_synth`, `ldptrace`
 (generators); `reidentification`, `membership_inference`, `reconstruction`,
 `poi_inference` (attacks); `top_k_accuracy`, `linkage_rate` (metrics).
 
@@ -204,7 +205,13 @@ In pipeline order, with the reason each package exists:
   grid over the map bbox, the cell goes through GRR, and a random point inside the
   reported cell is released — ε per point, the same naive budget accounting as
   geo-ind. The orchestrator hands it the map bbox by constructor signature (the one
-  input a mechanism gets besides its YAML params and the seed).
+  input a mechanism gets besides its YAML params and the seed). `naive.py` holds the
+  three baselines without any guarantee that practice most often uses — rounding
+  coordinates to the centre of a `cell_m` metre cell, keeping one point per
+  `interval_s` (first and last point kept), and Gaussian noise of `sigma_m` metres
+  per axis; they report `guarantee = "none"`, no budget and no ε, so the results
+  table lists their arms by parameter and they give the risk matrix its breadth next
+  to the mechanisms with a guarantee (all of them baseline candidates).
 - **`synthesis/`** — the generators. `markov.py` learns "after road segment A
   comes segment B x% of the time" and generates new trajectories; it is the
   non-private ceiling the private generators are compared against.
