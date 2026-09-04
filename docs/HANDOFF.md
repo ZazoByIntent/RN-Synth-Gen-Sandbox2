@@ -288,9 +288,9 @@ commiti so v `arhiv/HANDOFF_2026-08-21.md`.
   datoteke, testi in prompti za seje so v tistem dokumentu. Nabor baseline-ov za članek
   (odločitev D5 v projektu »Izbirni predmeti«) ostaja odprt; ti mehanizmi so kandidati.
 
-**ZM-1 LDPTrace — zaključen (2. september 2026, veja `claude/zm1-ldptrace`).** Generator
-`ldptrace` (`src/trajguard/synthesis/ldptrace.py`; dejanske odločitve v
-`docs/NACRT_MEHANIZMI.md` §2, uvodni odstavek). Izmerjeno pri stopnji 20 s konfiguracijo
+**ZM-1 LDPTrace — zaključen (2. september 2026, PR #32, združen v `main` 2. septembra
+2026).** Generator `ldptrace` (`src/trajguard/synthesis/ldptrace.py`; dejanske odločitve
+v `docs/NACRT_MEHANIZMI.md` §2, uvodni odstavek). Izmerjeno pri stopnji 20 s konfiguracijo
 `config/experiments/geolife_mech_mia_u20.yaml` (sestrska datoteka zamrznjene S4
 konfiguracije; ista populacija, razrez in napad), ukaz
 `uv run trajguard repeat config/experiments/geolife_mech_mia_u20.yaml --seeds 1 2 3`,
@@ -330,9 +330,12 @@ celic, mediana 3, na mreži 12 × 12):
   v konfiguraciji, primerjalni pogon nad javnim Portom): načrt, predaja in prompt v
   `docs/NACRT_LDPTRACE_VALIDACIJA.md`. Ponovitev številk iz članka ni mogoča (izvirnik
   ne prilaga podatkov in nima semena); cilj je diferencialna primerjava port ↔ izvirnik
-  nad istim vhodom. **Stanje 3. septembra 2026:** PR A (devet metrik članka,
-  `src/trajguard/evaluation/ldptrace_metrics.py`) je oddan kot PR #33 (odprt); PR B je
-  razrezan na B1 in B2. **B1 je izveden** (veja `claude/cells-mode`, skladana na PR #33):
+  nad istim vhodom. **Stanje 4. septembra 2026: vsi štirje PR-ji validacije (#33, #34,
+  #35, #36) so združeni v `main` 4. septembra 2026** (z merge commitom, v vrstnem redu
+  33 → 34 → 35 → 36). PR A (devet metrik članka,
+  `src/trajguard/evaluation/ldptrace_metrics.py`) je PR #33, združeno v `main`
+  4. septembra 2026; PR B je razrezan na B1 in B2. **B1 je izveden** (PR #34, združeno v
+  `main` 4. septembra 2026):
   oblika `sequence` in `as_sequence()` pri `TrajectoryView`, `Grid.chain`, način `bbox`
   generatorja `ldptrace`, nalagalnik `ldptrace_dat` in pretvorba Porta
   (`scripts/porto_to_ldptrace_dat.py`). Današnja pot je nespremenjena: zlati izpis
@@ -343,14 +346,14 @@ celic, mediana 3, na mreži 12 × 12):
   točki), 1.307.144 (zunaj bbox); bbox točk lon −8,64 … −8,600004, lat 41,140008 …
   41,169996, `grid_bbox` = ± 1e-6; 371 s. Izhod `data/interim/porto/` (245 MB `.dat`,
   48 MB `.xz`, `porto_stats.json`) ni v gitu. Prvotno predlagani bbox (−8,69 … −8,55 ×
-  41,13 … 41,19) bi obdržal 81 % poti. **B2 je izveden** (3. september 2026, veja
-  `claude/cells-mode-orchestrator`, PR #35, skladana na PR #34; vrstni red združevanja
-  #33 → #34 → #35): orkestrator pozna
+  41,13 … 41,19) bi obdržal 81 % poti. **B2 je izveden** (3. september 2026, PR #35,
+  združeno v `main` 4. septembra 2026): orkestrator pozna
   `dataset.representation: cells` (mreža iz `dataset.grid`, brez zemljevida in ujemanja,
   samo napad na članstvo), konfiguracija `config/experiments/porto_cells_mia.yaml`, testi
   `tests/test_cells_mode.py`; današnja pot `segments` je nespremenjena (isti hash
   predpomnilnika, zlati izpis pred in po spremembi enak). **PR C je izveden** (4. september
-  2026; tabela z devetimi metrikami × tremi ε in branje sta spodaj).
+  2026, PR #36, združeno v `main` 4. septembra 2026; tabela z devetimi metrikami × tremi ε
+  in branje sta spodaj).
 
 **Porto, napad na članstvo v načinu celic (izmerjeno 3. septembra 2026, commit `829e69f`).**
 Ukaza `uv run trajguard run config/experiments/porto_cells_mia.yaml` in
@@ -390,7 +393,7 @@ generator orkestratorja (`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.2); od PR C or
 Primerjava z izvirno kodo nad istim vhodom je PR C (spodaj).
 
 **Validacija `ldptrace` proti izvirni kodi nad Portom (PR C, izmerjeno 4. septembra 2026,
-veja `claude/ldptrace-validation`, commit kode `5106966`).** Izvirnik: klon
+PR #36, združeno v `main` 4. septembra 2026, commit kode `5106966`).** Izvirnik: klon
 `github.com/zealscott/LDPTrace` (danes preusmerjen na `yuntaod/LDPTrace`), commit
 `2d30e4135db11fd50d1fb98f59a1e84ebc61b218` (13. november 2023), v `external/LDPTrace` (ni
 v gitu), s popravkom `scripts/ldptrace_reference.patch` — samo argument `--seed` namesto
