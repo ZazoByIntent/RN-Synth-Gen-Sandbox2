@@ -598,6 +598,52 @@ def test_perturbing_mechanism_rematches_end_to_end(tmp_path: Path, beijing_maps_
     assert meta["mechanism"] == GEOIND_REF and meta["spent_budget"] > 0
 
 
+POINT_LDP_REF = "point_ldp:epsilon=8.0"
+
+
+def test_point_ldp_arm_gets_the_map_bbox_end_to_end(tmp_path: Path, beijing_maps_dir: Path) -> None:
+    """The orchestrator injects map.bbox into a mechanism whose constructor asks for it."""
+    from trajguard.experiments.orchestrator import _read_clean_table
+
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    # bbox is not in the YAML: the run can only succeed if the orchestrator supplies it
+    cfg["privacy_mechanisms"] = [{"id": "none"}, {"id": "point_ldp", "params": {"epsilon": [8.0]}}]
+    values = run(write_config(tmp_path, cfg))
+
+    prefix = f"reidentification:protected:{POINT_LDP_REF}"
+    assert [v for v in values if v.result_id.startswith(prefix)], "point_ldp arm not attacked"
+    arms = json.loads((tmp_path / "out" / "run.json").read_text())["arms"]
+    arm = arms[f"protected:{POINT_LDP_REF}"]
+    assert arm["spent_budget"] and arm["spent_budget"] > 0
+    assert arm["n_pool"] + arm["n_rematch_dropped"] == 8  # every release re-matched or dropped
+    assert arm["n_probes"] == arms["raw"]["n_probes"]
+    # utility runs over the whole release: the cell histogram is perturbed
+    utility = {(v.result_id, v.name): v.value for v in values if v.result_id.startswith("utility")}
+    assert utility[(f"utility:protected:{POINT_LDP_REF}", "cell_js_divergence")] > 0.0
+
+    # the released points lie inside the map's bbox — the grid the mechanism was given
+    entries = list((tmp_path / "protected").iterdir())
+    assert len(entries) == 1
+    min_lon, min_lat, max_lon, max_lat = cfg["map"]["bbox"]
+    released = _read_clean_table(entries[0] / "clean.parquet")
+    assert len(released) == 8
+    for traj in released.values():
+        assert all(
+            min_lat <= lat <= max_lat and min_lon <= lon <= max_lon for lat, lon, _ in traj.points
+        )
+    meta = json.loads((entries[0] / "meta.json").read_text())
+    assert meta["mechanism"] == POINT_LDP_REF and meta["params"] == {"epsilon": 8.0}
+
+
+def test_mechanism_bbox_in_yaml_is_rejected(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["privacy_mechanisms"] = [
+        {"id": "point_ldp", "params": {"epsilon": 8.0, "bbox": [116.30, 39.98, 116.32, 39.995]}},
+    ]
+    with pytest.raises(ValueError, match="bbox.*map.bbox"):
+        run(write_config(tmp_path, cfg))
+
+
 def test_reconstruction_runs_against_geoind_arms_only(
     tmp_path: Path, beijing_maps_dir: Path
 ) -> None:

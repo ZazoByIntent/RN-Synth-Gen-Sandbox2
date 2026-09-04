@@ -1577,8 +1577,19 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         mech_cls = registry.get("mechanism", mspec.mech_id)
         if not issubclass(mech_cls, PrivacyMechanism):  # pragma: no cover - registry enforces
             raise TypeError(f"mechanism {mspec.mech_id!r} is not a PrivacyMechanism")
+        kwargs = dict(mspec.params)
+        # A grid mechanism (point_ldp) works over the map's bbox. Like network/grid for
+        # generators (_generator_ctor) it is injected by signature, never read from YAML:
+        # a list-valued param there would expand into one arm per coordinate.
+        if "bbox" in kwargs:
+            raise ValueError(
+                f"config: mechanism {mspec.ref!r} sets bbox, which the orchestrator injects "
+                "from map.bbox; drop it"
+            )
+        if "bbox" in inspect.signature(mech_cls).parameters:
+            kwargs["bbox"] = cfg.map_bbox
         try:
-            mech = mech_cls(**dict(mspec.params), seed=cfg.seed)
+            mech = mech_cls(**kwargs, seed=cfg.seed)
         except TypeError as err:
             raise ValueError(f"config: mechanism {mspec.ref!r} rejected its params: {err}") from err
         mech_plans.append((mspec, mech))

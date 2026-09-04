@@ -28,6 +28,21 @@ class Grid:
         col = min(max(col, 0), self.n_cols - 1)
         return row * self.n_cols + col
 
+    def cell_bounds(self, cell: int) -> tuple[float, float, float, float]:
+        """(min_lon, min_lat, max_lon, max_lat) of a row-major cell index; inverse of cell_of."""
+        if not 0 <= cell < self.n_cells:
+            raise ValueError(f"cell {cell} lies outside the {self.n_rows}x{self.n_cols} grid")
+        min_lon, min_lat, max_lon, max_lat = self.bbox
+        row, col = divmod(cell, self.n_cols)
+        width = (max_lon - min_lon) / self.n_cols
+        height = (max_lat - min_lat) / self.n_rows
+        return (
+            min_lon + col * width,
+            min_lat + row * height,
+            min_lon + (col + 1) * width,
+            min_lat + (row + 1) * height,
+        )
+
     def adjacent(self, a: int, b: int) -> bool:
         """True when ``b`` is one of ``a``'s eight neighbours (Chebyshev distance 1)."""
         ra, ca = divmod(a, self.n_cols)

@@ -11,7 +11,8 @@ of `main` (July 2026); numbers marked "fixture" come from the committed test dat
 §6 baseline reidentification and the population threshold · §7 geo-ind grid,
 reconstruction, POI inference · §7.1 repetitions across seeds · §7.2 membership
 inference · §7.3 runtime budget and scope reduction · §7.4 validation run and the
-threshold history · §8 `trajguard report` · §9 RN-LDP-Synth evidence sweep ·
+threshold history · §7.5 mechanism-breadth perturbation config (point LDP) · §8
+`trajguard report` · §9 RN-LDP-Synth evidence sweep ·
 §9.1 LDPTrace validation inputs (Porto conversion) · §9.2 membership inference in the
 cells representation (Porto) · §9.3 LDPTrace validation run (reference vs port) · §10
 caching · §11 troubleshooting.
@@ -608,6 +609,43 @@ By the measured table, 0.4 is the strictest threshold that reaches 100 exactly;
 projection 118). The author's decision (17 Aug 2026): the 182-user reporting
 configs use **0.3**; the u20/u50 configs stay at 0.05 as the measured record of
 those rungs.
+
+## 7.5 Mechanism-breadth sibling config: point LDP (real Geolife, ~15 minutes)
+
+```sh
+uv run trajguard run config/experiments/geolife_mech_reid_u20.yaml
+```
+
+The S4 configs of §7 are frozen, so new perturbation arms live in
+`geolife_mech_reid_u20.yaml` (`docs/NACRT_MEHANIZMI.md` §1.4, §3): the same 20-user
+population, cleaning, matching threshold 0.05, split, attacks and 300 s budget, with
+the arms `none` and `geo_indistinguishability` at ε = 1 (anchors from S4) and the
+point-LDP mechanism `point_ldp` at ε ∈ {4, 6, 8}. Point LDP (`privacy/point_ldp.py`)
+maps every GPS point to a cell of a 20 × 20 grid over the map bbox (k = 400 cells,
+~1.5 × 1.7 km over Beijing, the same grid as `metrics.utility_grid`), replaces the
+cell by k-ary randomized response — the true cell survives with probability
+e^ε/(e^ε + 399): 0.12 / 0.50 / 0.88 at ε = 4 / 6 / 8 — and releases a uniformly
+random point inside the reported cell; timestamps stay. ε is spent per point
+(`spent_budget` = ε × released points), like geo-ind but unlike the per-trajectory ε
+of §7.2. The map bbox is injected by the orchestrator (a mechanism whose constructor
+takes `bbox` receives `map.bbox`); setting `bbox` under `params` is a config error.
+
+**Expected outcome:** `reidentification:protected:point_ldp:epsilon=…` rows at
+k = 3/5/10, `poi_inference` and utility rows per arm; reconstruction rows only for
+the geo-ind arm (the attack skips other mechanisms). **Expected surprise that is not
+a bug:** on this coarse grid every released point is displaced by hundreds of metres
+even when the true cell is reported, so re-matching drops most or all trajectories at
+every ε (`n_rematch_dropped` in `run.json` — the same "protection by destroying the
+release" as geo-ind at ε ≤ 1 in §7); the informative rows are `poi_inference` (it
+reads the released points directly) and `cell_js_divergence` (the perturbed cell
+histogram on the same grid). Measured on 4 Sep 2026 (seed 42, warm raw-pool cache,
+`PYTHONHASHSEED=0`): 864 s in total, of which ~500 s is reidentification on the two
+238-trace pools (`raw`, `none`); every `point_ldp` arm dropped all 238 trajectories at
+re-matching (`n_pool = 0`, reidentification 0.000 in ~0.01 s), `cell_js_divergence`
+0.42 / 0.18 / 0.03 at ε = 4 / 6 / 8, no attack over budget. Rows and the reading:
+`docs/HANDOFF.md` §2.3. A finer grid is one YAML line
+(`params: {epsilon: [8.0], n_rows: 50, n_cols: 50}`), but needs a larger ε for the same
+survival probability (k = 2500: 0.54 at ε = 8).
 
 ## 8. Aggregate risk report
 
