@@ -14,6 +14,8 @@ data/raw/  (immutable source files: Geolife .plt, …)
 RawTrajectory ── cleaning (speed filter, min length/points, resample) ──►
     CleanTrajectory  (data/interim/)   ◄── train/test/shadow/attack split
     │                                      assigned HERE, once, seeded
+    ├── dataset.representation: cells ── Grid.chain(as_cells(grid)) ──► CellChain
+    │      (no map, no matching; membership_inference only)         (data/processed/)
 OSM ─► MapSource ─► RoadNetwork (maps/)
     │                   │
     └───── MapMatcher.match() ──► MatchedTrajectory  (data/processed/)
@@ -51,6 +53,13 @@ OSM ─► MapSource ─► RoadNetwork (maps/)
   chain (consecutive duplicates collapsed, king's walk between non-adjacent cells),
   used by `LDPTraceGenerator` in both of its input modes (`network=` for the segments
   representation, `bbox=` for the cells representation; see the module docstring).
+- The orchestrator runs one of two representations per config
+  (`dataset.representation`, default `segments`). In `cells` the pool is a list of
+  `CellChain(traj_id, user_id, chain)` records cut by `_cell_pool` in
+  `experiments/orchestrator.py` (load → clean → user subsample → split → `Grid.chain`
+  over the per-point cells of `dataset.grid`), cached as `clean.parquet` +
+  `chains.parquet`; no road network is loaded, only `membership_inference` runs, and
+  generators receive the grid (`bbox`, `n_rows`, `n_cols`) instead of `network`.
 
 ## The seven ABCs (design §2.3)
 
@@ -141,11 +150,12 @@ others is fine. Relations: `Experiment 1─* Attack 1─* AttackResult 1─* Met
 | synthetic paths / RN-LDP-Synth only | `ljubljana` | EPSG:3794 (D96/TM) |
 | LDPTrace `.dat` files (`ldptrace_dat`; Porto for the validation run) | `none` | no map — cells representation only |
 
-The orchestrator rejects any config where `map.region != dataset.native_region`.
-Ljubljana is never a target for Geolife attacks (design risk T1). `ldptrace_dat`
-has no map at all (`native_region = "none"`), so the same check rejects it with any
-`map` block; it is meant for the cells representation (`dataset.representation:
-cells`, orchestrator support in PR B2 of `docs/NACRT_LDPTRACE_VALIDACIJA.md`).
+The orchestrator rejects any config where `map.region != dataset.native_region`
+whenever a `map` block is given. Ljubljana is never a target for Geolife attacks
+(design risk T1). `ldptrace_dat` has no map at all (`native_region = "none"`), so the
+same check rejects it with any `map` block; it runs in the cells representation
+(`dataset.representation: cells`, no `map` block), the input of the LDPTrace
+validation (`docs/NACRT_LDPTRACE_VALIDACIJA.md`).
 
 ## Attack families (design §6)
 
@@ -173,6 +183,15 @@ Top-level YAML keys: `experiment`, `map`, `dataset`, `cleaning`, `map_matching`,
 key and seed. Parsed with plain PyYAML + manual validation — no Hydra/OmegaConf.
 Full annotated example: design §8. Entry point: `trajguard run <config>` (argparse,
 registered under `[project.scripts]`).
+
+`dataset.representation` selects the pipeline: `segments` (default; `map` and
+`map_matching` mandatory, the pool is map-matched) or `cells` (`dataset.grid:
+{n_rows, n_cols, bbox: [min_lon, min_lat, max_lon, max_lat]}` mandatory, `map` and
+`map_matching` optional and never built, the pool is the grid-cell chain of every
+clean trajectory). In `cells` only `membership_inference` is accepted,
+`privacy_mechanisms` must be empty, and a generator arm may name `bbox` / `n_rows` /
+`n_cols` only with the grid's own values. The pool-cache hash adds `representation`
+and `grid` in `cells` only, so segments caches keep their keys.
 
 Seeds come in two kinds: `experiment.split_seed` (defaults to `experiment.seed`)
 pins the population — the optional `dataset.max_users` user subsample and the

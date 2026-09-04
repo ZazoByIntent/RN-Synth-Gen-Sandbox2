@@ -123,6 +123,8 @@ class RunConfig:
     dataset_id: str
     dataset_path: Path
     dataset_native_region: str
+    representation: str  # "segments" (matched edge sequences) | "cells" (grid-cell chains)
+    cell_grid: Grid | None  # public grid of the cells representation; None for segments
     max_users: int | None  # keep all trajectories of at most this many users; None = all
     cleaning: CleaningConfig
     matcher_id: str
@@ -144,6 +146,14 @@ class RunConfig:
     attack_time_budget_s: float  # per-invocation runtime budget, report §6.6 (X = 300 s)
     export: tuple[str, ...]
     plots: tuple[str, ...]
+
+    @property
+    def has_map(self) -> bool:
+        """True when a ``map`` block was configured (the cells representation may omit it)."""
+        return self.map_source != ""
+
+
+_REPRESENTATIONS = ("segments", "cells")
 
 
 def _req(d: dict[str, Any], key: str, ctx: str) -> Any:
@@ -326,6 +336,69 @@ def _variant_specs(
     return tuple(specs)
 
 
+def _grid_config(ds: dict[str, Any]) -> Grid:
+    """Validate ``dataset.grid`` of the cells representation: >= 2x2 cells over a proper bbox."""
+    g = _req(ds, "grid", "dataset")
+    if not isinstance(g, dict):
+        raise ValueError("config: dataset.grid must be a mapping {n_rows, n_cols, bbox}")
+    n_rows = int(_req(g, "n_rows", "dataset.grid"))
+    n_cols = int(_req(g, "n_cols", "dataset.grid"))
+    if n_rows < 2 or n_cols < 2:
+        raise ValueError(f"config: dataset.grid must be at least 2x2, got {n_rows}x{n_cols}")
+    bbox = tuple(float(x) for x in _req(g, "bbox", "dataset.grid"))
+    if len(bbox) != 4:
+        raise ValueError("config: dataset.grid.bbox must be [min_lon, min_lat, max_lon, max_lat]")
+    if bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
+        raise ValueError(f"config: dataset.grid.bbox must have min < max, got {list(bbox)}")
+    return Grid(bbox=(bbox[0], bbox[1], bbox[2], bbox[3]), n_rows=n_rows, n_cols=n_cols)
+
+
+def _map_fields(mp: dict[str, Any] | None, grid: Grid | None) -> dict[str, Any]:
+    """RunConfig map fields; blank without a ``map`` block (cells representation only).
+
+    The bbox field is not optional, so a map-less run carries the grid bbox there: the
+    only consumer left is the utility grid, whose loop body never runs without pools.
+    """
+    if mp is None:
+        assert grid is not None  # load_config omits the map only in the cells representation
+        return {
+            "map_source": "",
+            "map_region": "",
+            "map_bbox": grid.bbox,
+            "map_crs": "",
+            "map_dir": Path("maps"),
+        }
+    bbox = tuple(float(x) for x in _req(mp, "bbox", "map"))
+    if len(bbox) != 4:
+        raise ValueError("config: map.bbox must have 4 values")
+    return {
+        "map_source": str(_req(mp, "source", "map")),
+        "map_region": str(_req(mp, "region", "map")),
+        "map_bbox": (bbox[0], bbox[1], bbox[2], bbox[3]),
+        "map_crs": str(_req(mp, "crs", "map")),
+        "map_dir": Path(mp.get("dir", "maps")),
+    }
+
+
+def _matching_fields(mm: dict[str, Any] | None) -> dict[str, Any]:
+    """RunConfig map-matching fields; inert defaults without the block (cells representation)."""
+    if mm is None:
+        return {
+            "matcher_id": "",
+            "radius_m": 50.0,
+            "gps_error_m": 20.0,
+            "k_candidates": 8,
+            "min_match_score": 0.0,
+        }
+    return {
+        "matcher_id": str(_req(mm, "matcher", "map_matching")),
+        "radius_m": float(mm.get("radius_m", 50.0)),
+        "gps_error_m": float(mm.get("gps_error_m", 20.0)),
+        "k_candidates": int(mm.get("k_candidates", 8)),
+        "min_match_score": float(_req(mm, "min_match_score", "map_matching")),
+    }
+
+
 def load_config(path: str | Path) -> RunConfig:
     """Parse and validate an experiment YAML into a RunConfig (manual validation)."""
     raw = yaml.safe_load(Path(path).read_text())
@@ -333,15 +406,31 @@ def load_config(path: str | Path) -> RunConfig:
         raise ValueError("config: top level must be a mapping")
 
     exp = _req(raw, "experiment", "")
-    mp = _req(raw, "map", "")
     ds = _req(raw, "dataset", "")
     cl = _req(raw, "cleaning", "")
-    mm = _req(raw, "map_matching", "")
     sp = _req(raw, "split", "")
     metrics = _req(raw, "metrics", "")
-    bbox = tuple(float(x) for x in _req(mp, "bbox", "map"))
-    if len(bbox) != 4:
-        raise ValueError("config: map.bbox must have 4 values")
+    # The cells representation (docs/NACRT_LDPTRACE_VALIDACIJA.md, D-V.4) walks a public
+    # grid instead of a road network: dataset.grid is required, map and map_matching are
+    # optional. The segments representation keeps both blocks mandatory, as before.
+    representation = str(ds.get("representation", "segments"))
+    if representation not in _REPRESENTATIONS:
+        raise ValueError(
+            f"config: dataset.representation {representation!r} unsupported; "
+            f"expected one of {list(_REPRESENTATIONS)}"
+        )
+    if representation == "cells":
+        cell_grid: Grid | None = _grid_config(ds)
+        mp: dict[str, Any] | None = raw.get("map")
+        mm: dict[str, Any] | None = raw.get("map_matching")
+    else:
+        if "grid" in ds:
+            raise ValueError("config: dataset.grid is only used by dataset.representation: cells")
+        cell_grid = None
+        mp = _req(raw, "map", "")
+        mm = _req(raw, "map_matching", "")
+    map_fields = _map_fields(mp, cell_grid)
+    matching_fields = _matching_fields(mm)
 
     scheme = str(sp.get("scheme", "by_user"))
     if scheme != "by_user":
@@ -421,14 +510,12 @@ def load_config(path: str | Path) -> RunConfig:
         output_dir=Path(exp.get("output_dir", f"results/{exp['id']}")),
         cache_dir=Path(exp.get("cache_dir", "data/processed")),
         protected_dir=Path(exp.get("protected_dir", "data/protected")),
-        map_source=str(_req(mp, "source", "map")),
-        map_region=str(_req(mp, "region", "map")),
-        map_bbox=(bbox[0], bbox[1], bbox[2], bbox[3]),
-        map_crs=str(_req(mp, "crs", "map")),
-        map_dir=Path(mp.get("dir", "maps")),
+        **map_fields,
         dataset_id=str(_req(ds, "id", "dataset")),
         dataset_path=Path(_req(ds, "path", "dataset")),
         dataset_native_region=str(ds.get("native_region", "")),
+        representation=representation,
+        cell_grid=cell_grid,
         max_users=max_users,
         cleaning=CleaningConfig(
             max_speed_kmh=float(_req(cl, "max_speed_kmh", "cleaning")),
@@ -436,11 +523,7 @@ def load_config(path: str | Path) -> RunConfig:
             min_length_m=float(_req(cl, "min_length_m", "cleaning")),
             resample_s=float(_req(cl, "resample_s", "cleaning")),
         ),
-        matcher_id=str(_req(mm, "matcher", "map_matching")),
-        radius_m=float(mm.get("radius_m", 50.0)),
-        gps_error_m=float(mm.get("gps_error_m", 20.0)),
-        k_candidates=int(mm.get("k_candidates", 8)),
-        min_match_score=float(_req(mm, "min_match_score", "map_matching")),
+        **matching_fields,
         fractions={str(k): float(v) for k, v in _req(sp, "fractions", "split").items()},
         mechanisms=mech_specs,
         generators=gen_specs,
@@ -489,14 +572,53 @@ _CLEAN_SCHEMA = pa.schema(
     ]
 )
 
+_CHAINS_SCHEMA = pa.schema(
+    [
+        ("traj_id", pa.string()),
+        ("user_id", pa.string()),
+        ("chain", pa.list_(pa.int64())),
+    ]
+)
+
+
+@dataclass(frozen=True)
+class CellChain:
+    """One trajectory of the cells representation: its 8-connected grid-cell chain.
+
+    The counterpart of ``MatchedTrajectory`` when no road network is involved
+    (``Grid.chain`` over the per-point cells, docs/NACRT_LDPTRACE_VALIDACIJA.md D-V.4).
+    """
+
+    traj_id: str
+    user_id: str
+    chain: tuple[int, ...]
+
+
+_PoolItem = MatchedTrajectory | CellChain
+
+
+def _item_sequence(item: _PoolItem) -> tuple[int, ...]:
+    """The engine sequence of a pool item: edge ids (segments) or cell indices (cells)."""
+    return item.edge_seq if isinstance(item, MatchedTrajectory) else item.chain
+
+
+def _item_view(item: _PoolItem, clean: CleanTrajectory) -> TrajectoryView:
+    """A TrajectoryView over a pool item and its clean form, in either representation."""
+    if isinstance(item, MatchedTrajectory):
+        return TrajectoryView(clean=clean, matched=item)
+    return TrajectoryView(clean=clean, sequence=item.chain)
+
 
 def _built_map_timestamp(cfg: RunConfig) -> str:
     """OSM snapshot timestamp recorded when the network under ``map_dir`` was built.
 
     Folded into the pool-cache key so rebuilding a map in place (fresh OSM data, same
     region/bbox) invalidates the stale processed pool instead of silently reusing it.
-    Returns "" when the map is not yet built (the pipeline then fails later at load()).
+    Returns "" when the map is not yet built (the pipeline then fails later at load()) and
+    when the run has no map at all (cells representation without a ``map`` block).
     """
+    if not cfg.has_map:
+        return ""
     meta = cfg.map_dir / cfg.map_region / "meta.json"
     if not meta.exists():
         return ""
@@ -531,6 +653,13 @@ def _version_hash(cfg: RunConfig) -> str:
         "sample": cfg.max_users,
         "split": [sorted(cfg.fractions.items()), cfg.split_seed],
     }
+    # Only the cells representation adds keys: the segments key stays byte-identical, so
+    # every pool cached before the cells representation existed remains valid.
+    if cfg.representation == "cells":
+        grid = cfg.cell_grid
+        assert grid is not None  # load_config always pairs cells with a grid
+        key["representation"] = "cells"
+        key["grid"] = [grid.n_rows, grid.n_cols, list(grid.bbox)]
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -563,16 +692,8 @@ def _refuse_raw_write(path: Path, key: str) -> None:
         raise ValueError(f"config: {key} {str(path)!r} is under data/raw/, which is immutable")
 
 
-def _write_pool_cache(
-    cache: Path,
-    matched: list[MatchedTrajectory],
-    clean_by_id: dict[str, CleanTrajectory],
-    dropped: int,
-    split_counts: dict[str, int],
-    extra_meta: dict[str, Any] | None = None,
-) -> None:
-    """Persist a trajectory pool as Parquet tables plus a small JSON sidecar."""
-    cache.mkdir(parents=True, exist_ok=True)
+def _write_matched_table(path: Path, matched: list[MatchedTrajectory]) -> None:
+    """Persist a matched pool as ``matched.parquet`` (``_MATCHED_SCHEMA``)."""
     pq.write_table(  # type: ignore[no-untyped-call]
         pa.table(
             {
@@ -586,9 +707,12 @@ def _write_pool_cache(
             },
             schema=_MATCHED_SCHEMA,
         ),
-        cache / "matched.parquet",
+        path,
     )
-    clean = list(clean_by_id.values())
+
+
+def _write_clean_table(path: Path, clean: list[CleanTrajectory]) -> None:
+    """Persist clean trajectories as ``clean.parquet`` (``_CLEAN_SCHEMA``)."""
     pq.write_table(  # type: ignore[no-untyped-call]
         pa.table(
             {
@@ -604,20 +728,55 @@ def _write_pool_cache(
             },
             schema=_CLEAN_SCHEMA,
         ),
-        cache / "clean.parquet",
+        path,
     )
-    # meta.json marks the entry complete and is swapped in atomically: a crash mid-write
-    # leaves only the .tmp file, so a reader never sees a truncated marker (which would
-    # otherwise poison the cache with an unrecoverable JSONDecodeError on every rerun).
-    meta = {"dropped": dropped, "split_counts": split_counts, **(extra_meta or {})}
+
+
+def _write_chains_table(path: Path, chains: list[CellChain]) -> None:
+    """Persist a cells-representation pool as ``chains.parquet`` (``_CHAINS_SCHEMA``)."""
+    pq.write_table(  # type: ignore[no-untyped-call]
+        pa.table(
+            {
+                "traj_id": [c.traj_id for c in chains],
+                "user_id": [c.user_id for c in chains],
+                "chain": [list(c.chain) for c in chains],
+            },
+            schema=_CHAINS_SCHEMA,
+        ),
+        path,
+    )
+
+
+def _write_meta(cache: Path, meta: dict[str, Any]) -> None:
+    """Write ``meta.json``, the marker that a cache entry is complete.
+
+    Swapped in atomically: a crash mid-write leaves only the .tmp file, so a reader
+    never sees a truncated marker (which would otherwise poison the cache with an
+    unrecoverable JSONDecodeError on every rerun).
+    """
     tmp = cache / "meta.json.tmp"
     tmp.write_text(json.dumps(meta))
     os.replace(tmp, cache / "meta.json")
 
 
-def _read_pool_cache(cache: Path) -> _PoolCache:
-    """Rehydrate a trajectory pool written by :func:`_write_pool_cache`."""
-    matched = [
+def _write_pool_cache(
+    cache: Path,
+    matched: list[MatchedTrajectory],
+    clean_by_id: dict[str, CleanTrajectory],
+    dropped: int,
+    split_counts: dict[str, int],
+    extra_meta: dict[str, Any] | None = None,
+) -> None:
+    """Persist a matched trajectory pool as Parquet tables plus a small JSON sidecar."""
+    cache.mkdir(parents=True, exist_ok=True)
+    _write_matched_table(cache / "matched.parquet", matched)
+    _write_clean_table(cache / "clean.parquet", list(clean_by_id.values()))
+    _write_meta(cache, {"dropped": dropped, "split_counts": split_counts, **(extra_meta or {})})
+
+
+def _read_matched_table(path: Path) -> list[MatchedTrajectory]:
+    """Rehydrate ``matched.parquet``."""
+    return [
         MatchedTrajectory(
             traj_id=r["traj_id"],
             user_id=r["user_id"],
@@ -627,11 +786,13 @@ def _read_pool_cache(cache: Path) -> _PoolCache:
             match_score=r["match_score"],
             frac_matched=r["frac_matched"],
         )
-        for r in pq.read_table(  # type: ignore[no-untyped-call]
-            cache / "matched.parquet"
-        ).to_pylist()
+        for r in pq.read_table(path).to_pylist()  # type: ignore[no-untyped-call]
     ]
-    clean_by_id = {
+
+
+def _read_clean_table(path: Path) -> dict[str, CleanTrajectory]:
+    """Rehydrate ``clean.parquet`` keyed by trajectory id."""
+    return {
         r["traj_id"]: CleanTrajectory(
             traj_id=r["traj_id"],
             user_id=r["user_id"],
@@ -643,10 +804,26 @@ def _read_pool_cache(cache: Path) -> _PoolCache:
             cleaning_flags=tuple(r["cleaning_flags"]),
             split=r["split"],
         )
-        for r in pq.read_table(  # type: ignore[no-untyped-call]
-            cache / "clean.parquet"
-        ).to_pylist()
+        for r in pq.read_table(path).to_pylist()  # type: ignore[no-untyped-call]
     }
+
+
+def _read_chains_table(path: Path) -> list[CellChain]:
+    """Rehydrate ``chains.parquet``."""
+    return [
+        CellChain(
+            traj_id=r["traj_id"],
+            user_id=r["user_id"],
+            chain=tuple(int(c) for c in r["chain"]),
+        )
+        for r in pq.read_table(path).to_pylist()  # type: ignore[no-untyped-call]
+    ]
+
+
+def _read_pool_cache(cache: Path) -> _PoolCache:
+    """Rehydrate a matched trajectory pool written by :func:`_write_pool_cache`."""
+    matched = _read_matched_table(cache / "matched.parquet")
+    clean_by_id = _read_clean_table(cache / "clean.parquet")
     meta = json.loads((cache / "meta.json").read_text())
     return matched, clean_by_id, meta
 
@@ -704,6 +881,60 @@ def _matched_pool(
 
     _write_pool_cache(cache, matched, clean_by_id, dropped, split_counts)
     return matched, clean_by_id, dropped, split_counts
+
+
+_CellPool = tuple[list[CellChain], dict[str, CleanTrajectory], dict[str, int]]
+
+
+def _cell_pool(cfg: RunConfig) -> _CellPool:
+    """Load-or-compute the cells-representation pool, cached by version hash.
+
+    Same population recipe as :func:`_matched_pool` (load → clean → user subsample →
+    split), then every trajectory becomes its grid-cell chain instead of being
+    map-matched; nothing is dropped. Cached as ``clean.parquet`` + ``chains.parquet``
+    + ``meta.json`` under the same cache root, disjoint from segments pools because
+    the hash carries the representation and the grid.
+    """
+    grid = cfg.cell_grid
+    assert grid is not None  # load_config always pairs cells with a grid
+    cache = cfg.cache_dir / _version_hash(cfg)
+    if (cache / "meta.json").exists():
+        chains = _read_chains_table(cache / "chains.parquet")
+        clean_by_id = _read_clean_table(cache / "clean.parquet")
+        meta = json.loads((cache / "meta.json").read_text())
+        return chains, clean_by_id, meta["split_counts"]
+
+    loader = registry.get("dataset", cfg.dataset_id)(cfg.dataset_path)
+    cleaned: list[CleanTrajectory] = []
+    for raw in loader.iter_trajectories():
+        c = clean(raw, cfg.cleaning)
+        if c is not None:
+            cleaned.append(c)
+    if cfg.max_users is not None:
+        cleaned = _subsample_users(cleaned, cfg.max_users, cfg.split_seed)
+    labelled = split_by_user(cleaned, cfg.fractions, cfg.split_seed)
+    split_counts: dict[str, int] = {}
+    for t in labelled:
+        split_counts[t.split or "none"] = split_counts.get(t.split or "none", 0) + 1
+
+    chains = [
+        CellChain(t.traj_id, t.user_id, tuple(grid.chain(TrajectoryView(clean=t).as_cells(grid))))
+        for t in labelled
+    ]
+    clean_by_id = {t.traj_id: t for t in labelled}
+    cache.mkdir(parents=True, exist_ok=True)
+    _write_clean_table(cache / "clean.parquet", labelled)
+    _write_chains_table(cache / "chains.parquet", chains)
+    _write_meta(
+        cache,
+        {
+            "dropped": 0,
+            "split_counts": split_counts,
+            "representation": "cells",
+            "grid": {"n_rows": grid.n_rows, "n_cols": grid.n_cols, "bbox": list(grid.bbox)},
+        },
+    )
+    return chains, clean_by_id, split_counts
 
 
 def _subsample_users(
@@ -1045,20 +1276,65 @@ def _poi_inference_values(
 
 
 def _generator_ctor(
-    gen_cls: Callable[..., Any], params: dict[str, Any], cfg: RunConfig, provide: _NetProvider
+    gen_cls: Callable[..., Any],
+    params: dict[str, Any],
+    cfg: RunConfig,
+    provide: _NetProvider,
+    ref: str = "",
 ) -> Callable[[int], Any]:
-    """Seed-offset factory for one generator arm; injects network/seed where accepted.
+    """Seed-offset factory for one generator arm; injects network/grid/seed where accepted.
 
     Generator constructors differ (MarkovGenerator wants neither, RNLDPSynthGenerator
     wants both), so injection is signature-driven: ``network`` comes from the memoized
     provider, ``seed`` is ``cfg.seed + offset``. Offset 0 builds the target generator;
     ``1000 + k`` builds the k-th same-class shadow (the ``rnldp_eval`` convention).
+
+    In the cells representation there is no network: the public grid is injected
+    instead (``bbox``, ``n_rows``, ``n_cols``, whichever the signature accepts), so the
+    generator walks exactly the grid the pool was cut on. A YAML value for one of those
+    keys that contradicts the grid, or a generator that requires ``network`` without
+    accepting ``bbox`` (``rn_ldp_synth``), is a config error raised here, at planning time.
     """
     sig = inspect.signature(gen_cls)
+    fixed = dict(params)
+    if cfg.representation == "cells":
+        grid = cfg.cell_grid
+        assert grid is not None  # load_config always pairs cells with a grid
+        network = sig.parameters.get("network")
+        if (
+            network is not None
+            and network.default is inspect.Parameter.empty
+            and "bbox" not in sig.parameters
+        ):
+            raise ValueError(
+                f"config: generator {ref!r} requires a road network, which the cells "
+                "representation does not have (only grid-walking generators run there)"
+            )
+        grid_values: dict[str, Any] = {
+            "bbox": grid.bbox,
+            "n_rows": grid.n_rows,
+            "n_cols": grid.n_cols,
+        }
+        for key, value in grid_values.items():
+            if key not in sig.parameters:
+                continue
+            given = fixed.get(key)
+            if given is not None:
+                same = (
+                    tuple(float(x) for x in given) == value
+                    if key == "bbox"
+                    else int(given) == value
+                )
+                if not same:
+                    raise ValueError(
+                        f"config: generator {ref!r} sets {key}={given!r}, which contradicts "
+                        f"dataset.grid ({key}={value!r}); drop it or make them agree"
+                    )
+            fixed[key] = value
 
     def make(seed_offset: int) -> Any:
-        kwargs = dict(params)
-        if "network" in sig.parameters:
+        kwargs = dict(fixed)
+        if "network" in sig.parameters and cfg.representation == "segments":
             kwargs["network"] = provide()[0]
         if "seed" in sig.parameters:
             kwargs["seed"] = cfg.seed + seed_offset
@@ -1068,8 +1344,8 @@ def _generator_ctor(
 
 
 def _mia_pool(
-    matched: list[MatchedTrajectory], clean_by_id: dict[str, CleanTrajectory]
-) -> tuple[list[tuple[int, ...]], list[tuple[int, bool]], list[MatchedTrajectory]]:
+    items: Sequence[_PoolItem], clean_by_id: dict[str, CleanTrajectory]
+) -> tuple[list[tuple[int, ...]], list[tuple[int, bool]], list[_PoolItem]]:
     """Strict LiRA inputs from the split pools (fair MIA, design T3).
 
     The shadow pool is the shadow split — the attacker's own background data — plus
@@ -1077,11 +1353,12 @@ def _mia_pool(
     attacker legitimately knows because it queries them. Uniform shadow subsampling
     then lands each candidate inside roughly half the shadows (its IN group) and
     outside the rest (OUT), without the shadows ever seeing non-candidate train data.
-    Returns ``(pool, candidates, train_matched)``.
+    Items are matched trajectories (segments) or cell chains (cells); the sequences
+    are edge ids or cell indices accordingly. Returns ``(pool, candidates, train_items)``.
     """
 
-    def of_split(split: str) -> list[MatchedTrajectory]:
-        return [m for m in matched if clean_by_id[m.traj_id].split == split]
+    def of_split(split: str) -> list[_PoolItem]:
+        return [m for m in items if clean_by_id[m.traj_id].split == split]
 
     train_m, test_m, shadow_m = of_split("train"), of_split("test"), of_split("shadow")
     if not train_m or not test_m:
@@ -1089,9 +1366,9 @@ def _mia_pool(
             f"membership_inference needs matched trajectories in both the train "
             f"(members: {len(train_m)}) and test (non-members: {len(test_m)}) splits"
         )
-    base = [tuple(int(e) for e in m.edge_seq) for m in shadow_m]
-    members = [tuple(int(e) for e in m.edge_seq) for m in train_m]
-    nonmembers = [tuple(int(e) for e in m.edge_seq) for m in test_m]
+    base = [tuple(int(e) for e in _item_sequence(m)) for m in shadow_m]
+    members = [tuple(int(e) for e in _item_sequence(m)) for m in train_m]
+    nonmembers = [tuple(int(e) for e in _item_sequence(m)) for m in test_m]
     n0 = len(base)
     candidates = [(n0 + i, i < len(members)) for i in range(len(members) + len(nonmembers))]
     return base + members + nonmembers, candidates, train_m
@@ -1101,7 +1378,7 @@ def _membership_values(
     cfg: RunConfig,
     spec: AttackSpec,
     attack_cls: Callable[..., Attack],
-    matched: list[MatchedTrajectory],
+    items: Sequence[_PoolItem],
     clean_by_id: dict[str, CleanTrajectory],
     gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]],
 ) -> tuple[list[ResultRow], list[str]]:
@@ -1114,14 +1391,14 @@ def _membership_values(
     ``trajguard repeat``. Returns the rows plus one validity warning per (arm, fpr)
     operating point the non-members cannot resolve (S4-2); those values are NaN.
     """
-    pool, candidates, train_m = _mia_pool(matched, clean_by_id)
+    pool, candidates, train_m = _mia_pool(items, clean_by_id)
     n_members = sum(1 for _, is_member in candidates if is_member)
     n_nonmembers = len(candidates) - n_members
     rows: list[ResultRow] = []
     warnings: list[str] = []
     for gspec, make in gen_plans:
         target = make(0)
-        target.fit([TrajectoryView(clean=clean_by_id[m.traj_id], matched=m) for m in train_m])
+        target.fit([_item_view(m, clean_by_id[m.traj_id]) for m in train_m])
         attack = attack_cls(
             **dict(spec.mia_params),
             shadow_factory=lambda k, _make=make: _make(1000 + k),
@@ -1185,12 +1462,13 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     _refuse_raw_write(cfg.cache_dir, "experiment.cache_dir")
     _refuse_raw_write(cfg.protected_dir, "experiment.protected_dir")
 
-    # Consistency check (design T1): the authoritative region is the loader's.
+    # Consistency check (design T1): the authoritative region is the loader's. A run
+    # without a map (cells representation) has no region to check against.
     loader_cls = registry.get("dataset", cfg.dataset_id)
     if not issubclass(loader_cls, DatasetLoader):  # pragma: no cover - registry enforces
         raise TypeError(f"dataset {cfg.dataset_id!r} is not a DatasetLoader")
     native = loader_cls.native_region
-    if cfg.map_region != native:
+    if cfg.has_map and cfg.map_region != native:
         raise ConsistencyError(
             f"map.region {cfg.map_region!r} != dataset {cfg.dataset_id!r} "
             f"native_region {native!r}; refusing to run (design T1)"
@@ -1200,6 +1478,23 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             f"config dataset.native_region {cfg.dataset_native_region!r} contradicts "
             f"loader {native!r}"
         )
+
+    # The cells representation is a vertical slice for the membership attack: no
+    # map matching means no attacker-side re-matching of protected releases and no
+    # matched pool for the reid-shaped attacks. Refuse both before the pipeline.
+    if cfg.representation == "cells":
+        other = sorted({s.attack_type for s in cfg.attacks} - {"membership_inference"})
+        if other:
+            raise ValueError(
+                f"config: attacks {other} need the segments representation; only "
+                "membership_inference runs under dataset.representation: cells"
+            )
+        if cfg.mechanisms:
+            raise ValueError(
+                "config: privacy_mechanisms need the segments representation (a protected "
+                "release is re-matched on the road network); use an empty list under "
+                "dataset.representation: cells"
+            )
 
     # Resolve attacks and instantiate every mechanism variant before the
     # expensive pipeline (fail fast on unknown names or rejected params).
@@ -1291,9 +1586,20 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             inspect.signature(gen_cls).bind_partial(**dict(gspec.params))
         except TypeError as err:
             raise ValueError(f"config: generator {gspec.ref!r} rejected its params: {err}") from err
-        gen_plans.append((gspec, _generator_ctor(gen_cls, dict(gspec.params), cfg, provide)))
+        gen_plans.append(
+            (gspec, _generator_ctor(gen_cls, dict(gspec.params), cfg, provide, gspec.ref))
+        )
 
-    matched, clean_by_id, dropped, split_counts = _matched_pool(cfg, provide)
+    # The pool: matched edge sequences (segments) or grid-cell chains (cells). Only
+    # the segments pipeline map-matches, so only it can drop trajectories.
+    items: Sequence[_PoolItem]
+    matched: list[MatchedTrajectory]
+    if cfg.representation == "cells":
+        chains, clean_by_id, split_counts = _cell_pool(cfg)
+        matched, dropped, items = [], 0, chains
+    else:
+        matched, clean_by_id, dropped, split_counts = _matched_pool(cfg, provide)
+        items = matched
     metrics = _build_metrics(cfg)
     pools = _target_pools(cfg, matched, clean_by_id, mech_plans, provide)
 
@@ -1319,7 +1625,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             continue
         if spec.attack_type == "membership_inference":
             mia_rows, mia_warnings = _membership_values(
-                cfg, spec, attack_cls, matched, clean_by_id, gen_plans
+                cfg, spec, attack_cls, items, clean_by_id, gen_plans
             )
             all_rows.extend(mia_rows)
             run_warnings.extend(mia_warnings)
@@ -1427,7 +1733,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     _write_results(
         cfg,
         all_rows,
-        matched,
+        items,
         dropped,
         split_counts,
         time.perf_counter() - started,
@@ -1535,7 +1841,7 @@ def _over_budget_attacks(rows: Sequence[ResultRow], budget_s: float) -> list[dic
 def _write_results(
     cfg: RunConfig,
     rows: list[ResultRow],
-    matched: list[MatchedTrajectory],
+    items: Sequence[_PoolItem],
     dropped: int,
     split_counts: dict[str, int],
     runtime_s: float,
@@ -1544,7 +1850,11 @@ def _write_results(
     over_budget: list[dict[str, Any]],
     warnings: list[str],
 ) -> None:
-    """Write the exported formats, results.csv, and run.json under the output directory."""
+    """Write the exported formats, results.csv, and run.json under the output directory.
+
+    ``items`` is the attackable pool: matched trajectories (segments) or cell chains
+    (cells); ``run.json`` records its size as ``n_matched`` in both representations.
+    """
     values = [r.value for r in rows]
     provenance: dict[str, Any] = {
         "exp_id": cfg.exp_id,
@@ -1588,7 +1898,8 @@ def _write_results(
 
     run_record = {
         **provenance,
-        "n_matched": len(matched),
+        "representation": cfg.representation,
+        "n_matched": len(items),
         "n_dropped": dropped,
         "split_counts": split_counts,
         "bootstrap": {"n": cfg.bootstrap_n, "ci": cfg.bootstrap_ci},

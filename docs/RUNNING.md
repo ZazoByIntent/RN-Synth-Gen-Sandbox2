@@ -12,7 +12,8 @@ of `main` (July 2026); numbers marked "fixture" come from the committed test dat
 reconstruction, POI inference · §7.1 repetitions across seeds · §7.2 membership
 inference · §7.3 runtime budget and scope reduction · §7.4 validation run and the
 threshold history · §8 `trajguard report` · §9 RN-LDP-Synth evidence sweep ·
-§9.1 LDPTrace validation inputs (Porto conversion) · §10 caching · §11 troubleshooting.
+§9.1 LDPTrace validation inputs (Porto conversion) · §9.2 membership inference in the
+cells representation (Porto) · §10 caching · §11 troubleshooting.
 
 ## 0. One-time setup
 
@@ -34,7 +35,7 @@ anything manually.
 uv run pytest
 ```
 
-**Expected outcome:** `316 passed` in about a minute (September 2026). The suite runs entirely on
+**Expected outcome:** `333 passed` in about a minute (September 2026). The suite runs entirely on
 small fixture files committed under `tests/fixtures/` — no internet, no dataset, no
 built map required. If this is green, your environment is set up correctly.
 
@@ -702,16 +703,66 @@ one user per trajectory, timestamps 0, 15, 30, … s) and `porto.xz` (48 MB, `lz
 `pickle`, what the reference code loads). `grid_bbox` is the point bbox widened by
 1e-6 on each side (the reference's own rule); it is the bbox to put into the
 cells-mode configuration (PR B2) and into the reference run (PR C) so both sides share
-one grid. All three outputs are regenerable caches and stay out of git. The loader is
-usable on its own today (`LDPTraceDatLoader("data/interim/porto/porto.dat")`); pushing
-it through `trajguard run` needs the cells representation from PR B2, because the
-loader has no map (`native_region = "none"`) and the segments pipeline requires one.
+one grid. All three outputs are regenerable caches and stay out of git. The loader has
+no map (`native_region = "none"`), so `trajguard run` takes it only in the cells
+representation — §9.2.
+
+## 9.2 Membership inference in the cells representation (Porto, ~1 minute)
+
+```sh
+uv run trajguard run config/experiments/porto_cells_mia.yaml
+uv run trajguard repeat config/experiments/porto_cells_mia.yaml --seeds 1 2 3
+```
+
+`dataset.representation: cells` (PR B2 of `docs/NACRT_LDPTRACE_VALIDACIJA.md`) runs the
+pipeline without a road network: no `map` and no `map_matching` block, every clean
+trajectory becomes its chain of cells on `dataset.grid` (here the paper's 6×6 grid over
+`grid_bbox` from §9.1), and the membership attack scores those chains. It is a vertical
+slice for the LDPTrace validation: only `membership_inference` is accepted,
+`privacy_mechanisms` must be empty, and a generator that needs the network
+(`rn_ldp_synth`) is refused before the pipeline; `markov` and `ldptrace` run, the latter
+with the grid injected (`bbox`, `n_rows`, `n_cols` — naming them in the arm's params
+with other values is a config error). `max_users: 2000` keeps 2 000 trips (every trip is
+its own user in the `.dat` loader); delete the key for the whole population.
+
+**Expected outcome** (measured 3 September 2026): the first run takes ~58 s, almost all
+of it reading and cleaning the 367 008 trips before the 2 000 are drawn; the pool cache
+`data/processed/<hash>/` then holds `clean.parquet`, `chains.parquet` and `meta.json` for
+those 2 000 only. Nothing is re-matched here, so `n_rematch_dropped` stays empty in
+`results.csv`. Every later run reads the cache in ~3 s per seed; the attack itself takes
+0.3 s (`markov`) or 0.7 s (`ldptrace`) per arm. The printed table has one
+`membership_inference:synthetic:<arm>` row set per arm with `auc`, `tpr@fpr=0.01` and
+`tpr@fpr=0.1`; `tpr@fpr=0.001` is NaN with a warning (it needs 1 000 non-members, the
+0.2 test split has 400). Aggregate across seeds 1–3 (`repetitions.csv`):
+
+```
+result                                              metric         n      mean  95% CI (repetitions)
+membership_inference:synthetic:markov:order=1       auc            3     0.582  [0.558, 0.607]
+membership_inference:synthetic:markov:order=1       tpr@fpr=0.1    3     0.166  [0.116, 0.216]
+membership_inference:synthetic:ldptrace:epsilon=0.5 auc            3     0.511  [0.471, 0.551]
+membership_inference:synthetic:ldptrace:epsilon=0.5 tpr@fpr=0.1    3     0.096  [0.042, 0.149]
+membership_inference:synthetic:ldptrace:epsilon=1.0 auc            3     0.498  [0.450, 0.547]
+membership_inference:synthetic:ldptrace:epsilon=1.0 tpr@fpr=0.1    3     0.100  [0.081, 0.119]
+membership_inference:synthetic:ldptrace:epsilon=1.5 auc            3     0.496  [0.458, 0.535]
+membership_inference:synthetic:ldptrace:epsilon=1.5 tpr@fpr=0.1    3     0.110  [0.085, 0.136]
+```
+
+Read it against the `markov` ceiling: on a 6×6 grid the chains are short (train chains
+1–25 cells, median 5) and widely shared, so even the memorizing baseline scores only
+0.58, and the `ldptrace` arms sit at chance for every ε. The public length cap L_k of
+`ldptrace` is unstable at this sample size (1 to 7 across seeds and ε; the true maximum
+is 25) — the paper works with the whole population. Measured rows and reading:
+`docs/HANDOFF.md` §2.3.
 
 ## 10. How caching works (read before re-running with changed data)
 
 The expensive pre-attack pipeline (clean + match + split) is cached under
 `data/processed/<hash>/`. The hash covers the config values, the built map's
 timestamp, and the dataset **path** — but **not the dataset's file contents**.
+In the cells representation (§9.2) an entry holds `clean.parquet`, `chains.parquet` and
+`meta.json` instead of the matched table, and the hash additionally covers
+`dataset.representation` and `dataset.grid` (rows, columns, bbox) — only there, so the
+keys of existing segments caches do not change.
 
 **In practice:** if you add, remove, or change files under `data/raw/geolife` and
 re-run, the orchestrator will silently reuse the old cached pool and your results
