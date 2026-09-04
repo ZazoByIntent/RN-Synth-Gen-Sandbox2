@@ -22,7 +22,8 @@ _END = -1
 class MarkovGenerator(SyntheticGenerator):
     """Fits an order-k Markov model over edge-id sequences and samples new ones.
 
-    Segment sequences (``view.as_segments()``) are padded with START/END sentinels;
+    Input sequences (``view.as_sequence()``: matched edge ids, or bare cell indices in
+    the cells representation) are padded with START/END sentinels;
     transition counts get additive (Laplace) smoothing over the observed-edge ∪ {END}
     symbol space, so ``sequence_log_prob`` stays finite for any sequence (the statistic
     the membership-inference attack queries) and generation always terminates. Fits on
@@ -49,7 +50,7 @@ class MarkovGenerator(SyntheticGenerator):
         self._fitted = False
 
     def fit(self, train: Sequence[TrajectoryView]) -> None:
-        """Count padded order-k transitions over the training edge sequences."""
+        """Count padded order-k transitions over the training sequences (``as_sequence()``)."""
         splits = {v.split for v in train if v.split is not None}
         if splits - {"train"}:
             raise ValueError(
@@ -59,7 +60,7 @@ class MarkovGenerator(SyntheticGenerator):
         vocab: set[int] = set()
         map_ids: set[str] = set()
         for view in train:
-            seq = view.as_segments()
+            seq = view.as_sequence()
             map_ids.add(view.map_id)
             vocab.update(seq)
             padded = (_START,) * self.order + tuple(seq) + (_END,)

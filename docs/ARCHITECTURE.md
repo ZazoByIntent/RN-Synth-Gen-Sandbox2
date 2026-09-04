@@ -25,7 +25,7 @@ OSM ─► MapSource ─► RoadNetwork (maps/)
         (data/protected/)     (data/synthetic/)      │
                     └───────────────┼────────────────┘
                                     ▼
-              TrajectoryView (as_gps / as_segments / as_cells / …)
+              TrajectoryView (as_gps / as_segments / as_sequence / as_cells / …)
                                     ▼
                      Attack.run() ──► AttackResult
                                     ▼
@@ -41,6 +41,16 @@ OSM ─► MapSource ─► RoadNetwork (maps/)
 - Design §3 draws the `RawTrajectory` Parquet inside `data/raw/`; that conflicts with
   the raw-immutability golden rule. Treat `data/raw/` as source-files-only and cache
   parsed output under `data/interim/`.
+- `TrajectoryView` wraps the clean and/or matched form, or — for the cells
+  representation and the membership attack's shadow models — a bare integer
+  `sequence` (edge ids in the segments representation, grid-cell indices in the cells
+  representation). Generators and the membership attack read `as_sequence()`, which
+  returns that sequence or falls back to the matched edge sequence, so the segments
+  path is unchanged; `as_segments()` never falls back to a bare sequence. `Grid.chain()`
+  in `representation/views.py` is the single implementation of the LDPTrace cell
+  chain (consecutive duplicates collapsed, king's walk between non-adjacent cells),
+  used by `LDPTraceGenerator` in both of its input modes (`network=` for the segments
+  representation, `bbox=` for the cells representation; see the module docstring).
 
 ## The seven ABCs (design §2.3)
 
@@ -129,9 +139,13 @@ others is fine. Relations: `Experiment 1─* Attack 1─* AttackResult 1─* Met
 | Geolife, T-Drive | `beijing` | EPSG:32650 (UTM 50N) |
 | Porto Taxi | `porto` | EPSG:32629 (UTM 29N) |
 | synthetic paths / RN-LDP-Synth only | `ljubljana` | EPSG:3794 (D96/TM) |
+| LDPTrace `.dat` files (`ldptrace_dat`; Porto for the validation run) | `none` | no map — cells representation only |
 
 The orchestrator rejects any config where `map.region != dataset.native_region`.
-Ljubljana is never a target for Geolife attacks (design risk T1).
+Ljubljana is never a target for Geolife attacks (design risk T1). `ldptrace_dat`
+has no map at all (`native_region = "none"`), so the same check rejects it with any
+`map` block; it is meant for the cells representation (`dataset.representation:
+cells`, orchestrator support in PR B2 of `docs/NACRT_LDPTRACE_VALIDACIJA.md`).
 
 ## Attack families (design §6)
 

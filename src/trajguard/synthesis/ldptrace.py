@@ -33,12 +33,26 @@ clipped noisy length histogram, then a walk whose end weight is scaled by
 ``min(1, alpha + beta·(l − 1))`` (``l`` = cells generated so far); it stops at the
 virtual end, at ``L`` cells, or at a dead end (candidate mass below 1e-5).
 
+Two input modes, chosen by the constructor (exactly one of ``network`` / ``bbox``):
+
+- **Network mode** (``network=``, the benchmark's segments representation): the grid
+  spans the bounding box of the network's projected nodes and each matched edge maps
+  to the cells of its endpoint nodes, so ``fit`` and ``sequence_log_prob`` take edge
+  sequences and score the same domain as ``rn_ldp_synth``; the membership attack then
+  compares like with like.
+- **Bbox mode** (``bbox=(min_lon, min_lat, max_lon, max_lat)``, the cells
+  representation used to validate the port against the reference code on raw
+  coordinates): the grid is a :class:`Grid` over that bbox and the input sequences are
+  already cell indices (one per GPS point, as ``TrajectoryView.as_cells`` gives them).
+  Synthetic trajectories carry an empty ``map_id``.
+
+In both modes the chain fed to the mechanism is ``Grid.chain``: consecutive
+duplicates collapsed and non-adjacent gaps bridged by the reference's king's walk.
+
 Deviations from the public code, all deliberate:
 
-- Cells come from the **public road network**: each matched edge maps to the cells of
-  its endpoint nodes (grid over the bounding box of the network's nodes, not of the
-  raw GPS points), so ``fit`` and ``sequence_log_prob`` score the same domain as
-  ``rn_ldp_synth`` and the membership attack compares like with like.
+- In network mode cells come from the **public road network**, not from the raw GPS
+  points (see above).
 - The end report carries the **true last cell** of the trajectory (as in the paper),
   even when the transition reports stop at ``L_k``; the public code reports the cell
   at the cut. The budget is identical either way.
@@ -49,6 +63,7 @@ Deviations from the public code, all deliberate:
 import itertools
 import math
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -57,7 +72,7 @@ from trajguard.experiments.registry import register
 from trajguard.maps.base import RoadNetwork
 from trajguard.privacy.base import params_hash
 from trajguard.privacy.ldp import oue_estimate, oue_perturb
-from trajguard.representation import TrajectoryView
+from trajguard.representation import Grid, TrajectoryView
 from trajguard.synthesis.base import SyntheticGenerator
 
 _PROB_FLOOR = 1e-12  # keeps sequence_log_prob finite after clipped-to-zero estimates
@@ -86,13 +101,14 @@ class LDPTraceGenerator(SyntheticGenerator):
     All stochastic steps draw from seeded ``np.random.Generator``s: the constructor
     seed drives the device-side randomizers in :meth:`fit` (reproducibility only —
     deployed devices use local entropy), :meth:`generate` is deterministic in its own
-    seed. See the module docstring for the mechanism, the ε unit and the deviations
-    from the reference code.
+    seed. See the module docstring for the mechanism, the ε unit, the two input modes
+    and the deviations from the reference code.
     """
 
     def __init__(
         self,
-        network: RoadNetwork,
+        network: RoadNetwork | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
         epsilon: float = 1.0,
         n_rows: int = 12,
         n_cols: int = 12,
@@ -102,7 +118,9 @@ class LDPTraceGenerator(SyntheticGenerator):
         beta: float = 0.2,
         seed: int = 0,
     ) -> None:
-        """Build the public grid and edge→cell tables from the network; no data is touched."""
+        """Build the public grid (from the network or the bbox); no data is touched."""
+        if (network is None) == (bbox is None):
+            raise ValueError("LDPTraceGenerator needs exactly one of network= or bbox=")
         if epsilon <= 0:
             raise ValueError(f"epsilon must be > 0, got {epsilon}")
         if n_rows < 2 or n_cols < 2:
@@ -122,7 +140,7 @@ class LDPTraceGenerator(SyntheticGenerator):
         self.alpha = float(alpha)
         self.beta = float(beta)
         self.seed = seed
-        self._params = {
+        self._params: dict[str, Any] = {
             "epsilon": self.epsilon,
             "n_rows": n_rows,
             "n_cols": n_cols,
@@ -132,7 +150,16 @@ class LDPTraceGenerator(SyntheticGenerator):
             "beta": self.beta,
             "seed": seed,
         }
-        self._build_public_structures(network)
+        self.bbox: tuple[float, float, float, float] | None = None
+        self._edge_cells: dict[int, tuple[int, int]] = {}
+        if network is not None:
+            self.grid = self._build_edge_cells(network)
+        else:
+            assert bbox is not None
+            self.bbox = _validated_bbox(bbox)
+            self.grid = Grid(bbox=self.bbox, n_rows=n_rows, n_cols=n_cols)
+            self._params["bbox"] = list(self.bbox)  # network-mode params stay as before
+        self._targets = self._build_targets()
         self._rng = np.random.default_rng(seed)
         self._fitted = False
         self._map_id = ""
@@ -146,8 +173,8 @@ class LDPTraceGenerator(SyntheticGenerator):
 
     # -- public grid structures ----------------------------------------------------
 
-    def _build_public_structures(self, network: RoadNetwork) -> None:
-        """Grid bbox, edge → (cell_u, cell_v) and the 8-neighbour table — from the map only."""
+    def _build_edge_cells(self, network: RoadNetwork) -> Grid:
+        """Network mode: grid over the projected nodes' bbox and edge → (cell_u, cell_v)."""
         node_xy: dict[int, tuple[float, float]] = {}
         for row in network.nodes.itertuples(index=False):
             node_xy[int(row.node_id)] = (float(row.x), float(row.y))
@@ -155,11 +182,15 @@ class LDPTraceGenerator(SyntheticGenerator):
         ys = [xy[1] for xy in node_xy.values()]
         self._x0, self._x1 = min(xs), max(xs)
         self._y0, self._y1 = min(ys), max(ys)
-        self._edge_cells: dict[int, tuple[int, int]] = {}
         for row in network.edges.itertuples(index=False):
             u_xy, v_xy = node_xy[int(row.u)], node_xy[int(row.v)]
             self._edge_cells[int(row.edge_id)] = (self._cell(*u_xy), self._cell(*v_xy))
-        # targets[cell, slot] = neighbour cell in that direction, −1 when off the grid.
+        return Grid(
+            bbox=(self._x0, self._y0, self._x1, self._y1), n_rows=self.n_rows, n_cols=self.n_cols
+        )
+
+    def _build_targets(self) -> np.ndarray:
+        """targets[cell, slot] = neighbour cell in that direction, −1 when off the grid."""
         targets = np.full((self.n_cells, _N_SLOTS), -1, dtype=np.int64)
         for cell in range(self.n_cells):
             r, c = divmod(cell, self.n_cols)
@@ -167,10 +198,14 @@ class LDPTraceGenerator(SyntheticGenerator):
                 rr, cc = r + dr, c + dc
                 if 0 <= rr < self.n_rows and 0 <= cc < self.n_cols:
                     targets[cell, slot] = rr * self.n_cols + cc
-        self._targets = targets
+        return targets
 
     def _cell(self, x: float, y: float) -> int:
-        """Row-major grid cell of a projected point; border points clamp inward."""
+        """Row-major grid cell of a projected node (network mode); border points clamp inward.
+
+        Kept separate from ``Grid.cell_of`` (which has no ``1e-9`` offset) so that the
+        measured network-mode results do not move.
+        """
         col = min(int((x - self._x0) / (self._x1 - self._x0 + 1e-9) * self.n_cols), self.n_cols - 1)
         row = min(int((y - self._y0) / (self._y1 - self._y0 + 1e-9) * self.n_rows), self.n_rows - 1)
         return row * self.n_cols + col
@@ -184,47 +219,22 @@ class LDPTraceGenerator(SyntheticGenerator):
             raise ValueError(f"cells {a} and {b} are not 8-adjacent")
         return slot
 
-    def _king_walk(self, a: int, b: int) -> list[int]:
-        """Cells strictly between a and b on the reference greedy king's-move walk.
+    def cell_sequence(self, seq: Sequence[int]) -> list[int]:
+        """8-connected cell chain of an input sequence, no consecutive duplicates.
 
-        Each step moves the row toward the target if it differs and the column toward
-        the target if it differs (diagonal first, then straight), as in the reference
-        ``GridMap.find_shortest_path``.
+        Network mode: ``seq`` is an edge sequence and every edge contributes the cells
+        of its two endpoint nodes. Bbox mode: ``seq`` already is a cell sequence. Both
+        then pass through ``Grid.chain`` (duplicates collapsed, king's walk in gaps).
         """
-        r, c = divmod(a, self.n_cols)
-        rb, cb = divmod(b, self.n_cols)
-        out: list[int] = []
-        while True:
-            if r != rb:
-                r += 1 if rb > r else -1
-            if c != cb:
-                c += 1 if cb > c else -1
-            if (r, c) == (rb, cb):
-                return out
-            out.append(r * self.n_cols + c)
-
-    def cell_sequence(self, edge_seq: Sequence[int]) -> list[int]:
-        """8-connected cell chain of an edge sequence, no consecutive duplicates."""
+        if self.bbox is not None:
+            return self.grid.chain(seq)
         cells: list[int] = []
-        for eid in edge_seq:
+        for eid in seq:
             pair = self._edge_cells.get(int(eid))
             if pair is None:
                 raise ValueError(f"edge {eid} is not part of this generator's road network")
-            for cell in pair:
-                if not cells or cells[-1] != cell:
-                    cells.append(cell)
-        chain: list[int] = []
-        for cell in cells:
-            if chain and not self._adjacent(chain[-1], cell):
-                chain.extend(self._king_walk(chain[-1], cell))
-            chain.append(cell)
-        return chain
-
-    def _adjacent(self, a: int, b: int) -> bool:
-        """True when b is one of a's eight grid neighbours."""
-        ra, ca = divmod(a, self.n_cols)
-        rb, cb = divmod(b, self.n_cols)
-        return (rb - ra, cb - ca) in _SLOT_OF
+            cells.extend(pair)
+        return self.grid.chain(cells)
 
     # -- device simulation + aggregation --------------------------------------------
 
@@ -239,7 +249,7 @@ class LDPTraceGenerator(SyntheticGenerator):
         seqs: list[list[int]] = []
         map_ids: set[str] = set()
         for view in train:
-            cells = self.cell_sequence(view.as_segments())
+            cells = self.cell_sequence(view.as_sequence())
             if not cells:
                 raise ValueError("cannot encode an empty trajectory")
             map_ids.add(view.map_id)
@@ -332,8 +342,10 @@ class LDPTraceGenerator(SyntheticGenerator):
     def sequence_log_prob(self, edge_seq: Sequence[int]) -> float:
         """log P(start) + Σ log P(transition) + log P(end | last cell) under the aggregates.
 
-        No α/β end scaling (that is a generation rule, not part of the estimated
-        model) and no length term; every factor is floored at 1e-12.
+        ``edge_seq`` is an input sequence in the generator's mode (edge ids in network
+        mode, cell indices in bbox mode). No α/β end scaling (that is a generation
+        rule, not part of the estimated model) and no length term; every factor is
+        floored at 1e-12.
         """
         if not self._fitted:
             raise RuntimeError("LDPTraceGenerator.sequence_log_prob called before fit()")
@@ -345,6 +357,16 @@ class LDPTraceGenerator(SyntheticGenerator):
             lp += math.log(max(float(self._rows[a, self._slot(a, b)]), _PROB_FLOOR))
         lp += math.log(max(float(self._rows[cells[-1], _END]), _PROB_FLOOR))
         return lp
+
+
+def _validated_bbox(bbox: Sequence[float]) -> tuple[float, float, float, float]:
+    """``(min_lon, min_lat, max_lon, max_lat)`` as floats; min < max on both axes."""
+    if len(bbox) != 4:
+        raise ValueError(f"bbox needs 4 numbers (min_lon, min_lat, max_lon, max_lat), got {bbox}")
+    min_lon, min_lat, max_lon, max_lat = (float(v) for v in bbox)
+    if not (min_lon < max_lon and min_lat < max_lat):
+        raise ValueError(f"bbox must satisfy min < max on both axes, got {bbox}")
+    return (min_lon, min_lat, max_lon, max_lat)
 
 
 def _quantile_length(raw_estimate: np.ndarray, quantile: float) -> int:

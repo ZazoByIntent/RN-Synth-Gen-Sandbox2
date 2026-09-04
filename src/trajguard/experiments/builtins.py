@@ -6,7 +6,7 @@ that pulls them all in. Importing it is the registration side effect.
 """
 
 from trajguard.attacks import attribute, membership, reconstruction, reidentification
-from trajguard.datasets import geolife
+from trajguard.datasets import geolife, ldptrace_dat
 from trajguard.evaluation import metrics
 from trajguard.maps import osm
 from trajguard.matching import leuven
@@ -20,6 +20,7 @@ _IMPLEMENTATIONS = (
     reconstruction,
     attribute,
     geolife,
+    ldptrace_dat,
     metrics,
     osm,
     leuven,

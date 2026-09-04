@@ -12,7 +12,7 @@ of `main` (July 2026); numbers marked "fixture" come from the committed test dat
 reconstruction, POI inference · §7.1 repetitions across seeds · §7.2 membership
 inference · §7.3 runtime budget and scope reduction · §7.4 validation run and the
 threshold history · §8 `trajguard report` · §9 RN-LDP-Synth evidence sweep ·
-§10 caching · §11 troubleshooting.
+§9.1 LDPTrace validation inputs (Porto conversion) · §10 caching · §11 troubleshooting.
 
 ## 0. One-time setup
 
@@ -34,7 +34,7 @@ anything manually.
 uv run pytest
 ```
 
-**Expected outcome:** `250 passed` in about a minute (September 2026). The suite runs entirely on
+**Expected outcome:** `316 passed` in about a minute (September 2026). The suite runs entirely on
 small fixture files committed under `tests/fixtures/` — no internet, no dataset, no
 built map required. If this is green, your environment is set up correctly.
 
@@ -667,6 +667,45 @@ the columns:
 Useful flags: `--epsilons 0.5 2` and `--n-shadow 4 --n-pop 8` for a faster run,
 `--out sweep.json` to also save the results as JSON. At this fixture scale the
 numbers are noisy evidence, not publishable results.
+
+## 9.1 LDPTrace validation inputs: Porto → reference `.dat` (offline, ~6 minutes)
+
+The `ldptrace` generator is validated against the authors' code on the public Porto
+taxi data (plan and progress: `docs/NACRT_LDPTRACE_VALIDACIJA.md`). One-time input:
+`train.csv` of the Kaggle "Taxi Trajectory Prediction" competition (ECML/PKDD 2015,
+1.94 GB), placed at `data/raw/porto/train.csv` and never modified. Then:
+
+```sh
+uv run python scripts/porto_to_ldptrace_dat.py data/raw/porto/train.csv data/interim/porto
+```
+
+Keeps every trip without `MISSING_DATA`, with at least two points and lying entirely
+inside the central-Porto bbox lon −8.64…−8.60, lat 41.14…41.17 (the default;
+`--bbox MIN_LON MIN_LAT MAX_LON MAX_LAT` overrides it, `--max-trajectories N` stops
+early for a smoke run — 50 000 trips take ~40 s). The bbox was chosen so that the
+count lands near the paper's 361 591 "central areas" trajectories; the plan's first
+proposal (−8.69…−8.55 × 41.13…41.19) kept 81 % of the file.
+
+**Expected outcome** (measured 3 September 2026: 371 s, well under 1 GB of memory):
+the stats are printed as JSON and written to `data/interim/porto/porto_stats.json`:
+
+```
+"n_read": 1710670, "n_kept": 367008,
+"n_dropped": {"missing_data": 10, "too_short": 36508, "outside_bbox": 1307144},
+"n_points": 12136174,
+"bbox": [-8.64, 41.140008, -8.600004, 41.169996],
+"grid_bbox": [-8.640001, 41.140007, -8.600003, 41.169997]
+```
+
+plus `porto.dat` (245 MB — the text format the `ldptrace_dat` dataset loader reads,
+one user per trajectory, timestamps 0, 15, 30, … s) and `porto.xz` (48 MB, `lzma` +
+`pickle`, what the reference code loads). `grid_bbox` is the point bbox widened by
+1e-6 on each side (the reference's own rule); it is the bbox to put into the
+cells-mode configuration (PR B2) and into the reference run (PR C) so both sides share
+one grid. All three outputs are regenerable caches and stay out of git. The loader is
+usable on its own today (`LDPTraceDatLoader("data/interim/porto/porto.dat")`); pushing
+it through `trajguard run` needs the cells representation from PR B2, because the
+loader has no map (`native_region = "none"`) and the segments pipeline requires one.
 
 ## 10. How caching works (read before re-running with changed data)
 
