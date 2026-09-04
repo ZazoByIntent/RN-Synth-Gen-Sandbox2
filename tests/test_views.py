@@ -62,6 +62,19 @@ def test_grid_cell_indices() -> None:
     assert GRID.cell_of(0.0, 0.0) == 0
 
 
+def test_grid_cell_bounds_inverts_cell_of() -> None:
+    # 3x4 grid: cell 0 is the bottom-left 0.005 x 0.005 square, cell 11 the top-right one
+    assert GRID.cell_bounds(0) == pytest.approx((116.30, 39.98, 116.305, 39.985))
+    assert GRID.cell_bounds(11) == pytest.approx((116.315, 39.99, 116.32, 39.995))
+    for cell in range(GRID.n_cells):
+        min_lon, min_lat, max_lon, max_lat = GRID.cell_bounds(cell)
+        assert GRID.cell_of((min_lat + max_lat) / 2, (min_lon + max_lon) / 2) == cell
+    with pytest.raises(ValueError, match="outside"):
+        GRID.cell_bounds(12)
+    with pytest.raises(ValueError, match="outside"):
+        GRID.cell_bounds(-1)
+
+
 def test_as_cells_one_per_point(fixture_clean: CleanTrajectory) -> None:
     cells = TrajectoryView(clean=fixture_clean).as_cells(GRID)
     assert len(cells) == len(fixture_clean.points)

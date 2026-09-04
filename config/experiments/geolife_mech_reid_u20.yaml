@@ -1,0 +1,91 @@
+# Protection-mechanism breadth, perturbation branch (docs/NACRT_MEHANIZMI.md §1.4, §3):
+# reidentification, reconstruction and POI inference against protected releases at the
+# 20-user rung, with the new point-LDP arms next to two anchors from the S4 campaign.
+#
+# Why a sibling file: the S4 configs (geolife_geoind_reid*.yaml) are the frozen,
+# measured record of the sample ladder and must not change. This file copies the
+# u20 population, cleaning, matching, split, attacks and budget verbatim (-> the cached
+# raw pool is shared) and only swaps the mechanism arms.
+#
+# Arms: `none` (identity, upper risk bound), `geo_indistinguishability` at ε = 1
+# (anchor from S4; ε = 1 per 100 m per point) and `point_ldp` at ε ∈ {4.0, 6.0, 8.0}.
+#
+# ε unit for `point_ldp`: ε is spent PER POINT over the cells of a 20 × 20 grid on the
+# map bbox (k = 400 cells, ~1.5 × 1.7 km over Beijing; the mechanism's default grid,
+# identical to metrics.utility_grid). Randomized response keeps the true cell with
+# probability e^ε/(e^ε + 399): 0.12 at ε = 4, 0.50 at ε = 6, 0.88 at ε = 8. The
+# released point is a uniformly random point inside the reported cell, so on this
+# coarse grid every release is displaced by hundreds of metres and re-matching is
+# expected to drop most trajectories at every ε (recorded as n_rematch_dropped).
+# This per-point ε is NOT comparable with the per-trajectory ε of `ldptrace` and
+# `rn_ldp_synth` (geolife_mech_mia_u20.yaml), nor with geo-ind's ε per 100 m.
+# The orchestrator injects the map bbox into `point_ldp` (never set bbox here).
+# Point LDP is a baseline candidate (decision D5 in project Izbirni predmeti is open).
+experiment:
+  id: geolife_mech_reid_u20
+  seed: 42                   # run seed: mechanism noise, attacker knowledge, bootstrap
+  split_seed: 42             # population seed: user subsample + split; pinned across seeds
+  output_dir: results/geolife_mech_reid_u20
+
+map:
+  source: osm
+  region: beijing            # must equal the Geolife native region (orchestrator enforces)
+  bbox: [116.20, 39.75, 116.55, 40.05]
+  crs: EPSG:32650
+
+dataset:
+  id: geolife
+  path: data/raw/geolife
+  native_region: beijing
+  max_users: 20              # design §6.4 sample ladder: 20/50/100/182
+
+cleaning:
+  max_speed_kmh: 200
+  min_points: 20
+  min_length_m: 500
+  resample_s: 5
+
+map_matching:
+  matcher: leuven
+  k_candidates: 8
+  radius_m: 50
+  gps_error_m: 20
+  # S4-1 population threshold, same as the frozen u20 config (docs/RUNNING.md §7.4)
+  min_match_score: 0.05
+
+split:
+  scheme: by_user
+  fractions: {train: 0.5, test: 0.2, shadow: 0.2, attack: 0.1}
+
+privacy_mechanisms:
+  - id: none
+  - id: geo_indistinguishability
+    params: {epsilon: [1.0]}             # S4 anchor: ε per unit_m = 100 m per point
+  - id: point_ldp
+    params: {epsilon: [4.0, 6.0, 8.0]}   # ε per point over 20 x 20 cells (see header)
+
+attacks:
+  - type: reidentification
+    attacker:
+      known_points: [3, 5, 10]   # points the attacker knows about each target
+      distance: dtw
+    target_scope: [raw, protected]
+  - type: reconstruction         # MAP inversion of the geo-ind noise; skips other arms
+    target_scope: [protected]
+  - type: poi_inference          # home/work stay-point inference (design §6.4)
+    target_scope: [protected]
+    attacker: {tz_offset_h: 8}   # Geolife timestamps are GMT, Beijing is UTC+8
+    threshold_m: 200             # a user counts as localised within 200 m
+
+metrics:
+  privacy: [top1_acc, topk_acc, linkage_rate]
+  top_k: 5
+  utility: [cell_js_divergence, length_dist_error]
+  utility_grid: {n_rows: 20, n_cols: 20}
+  bootstrap: {n: 1000, ci: 0.95}
+  memory: false              # as in the S4 u20 config (R0 note there)
+  attack_time_budget_s: 300  # report §6.6, X = 300 s per attack invocation
+
+reporting:
+  export: [csv]
+  plots: [tradeoff, by_epsilon, by_knowledge, mechanisms, runtime]
