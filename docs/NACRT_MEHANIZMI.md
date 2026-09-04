@@ -441,8 +441,12 @@ njega razlikovala:
   11 / 1 / 0 pri Gaussu 50 / 200 / 1000 m. Napoved iz 4.5 se je potrdila za
   zaokroževanje in Gauss (zaščita z uničenjem izdaje kot pri `point_ldp`), redčenje pa je
   presenetilo: reidentifikacija se dvigne **nad** surovo (0,49–0,54 pri k = 3 proti 0,28)
-  ob skoraj nedotaknjenem bazenu — verjetno zaradi dolžinske pristranskosti nenormirane
-  DTW v napadu (hipoteza, zapisana v `HANDOFF.md` §2.5, ni preverjena). Trojica ostaja
+  ob skoraj nedotaknjenem bazenu — zaradi dolžinske pristranskosti nenormirane DTW v
+  napadu, kar je bilo 4. septembra 2026 preverjeno in potrjeno (`HANDOFF.md` §2.5:
+  normirana razdalja surovi bazen dvigne na 0,52 / 0,57 / 0,60, koda napada se ni
+  spremenila, odločitev avtorja je odprta). Kopiji konfiguracije za stopnji 50 in 182
+  (`geolife_mech_reid_u50.yaml` z vsemi rokami, `geolife_mech_reid_u182.yaml` s po eno roko
+  na mehanizem) obstajata od 4. septembra 2026 in nista pognani (4.5). Trojica ostaja
   kandidat za baseline (odločitev D5 je odprta).
 
 ### 4.1 Kaj mehanizmi počnejo

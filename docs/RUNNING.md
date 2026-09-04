@@ -680,8 +680,23 @@ trajectories for rounding 100 / 500 / 2000 m, 222 / 207 / 212 for downsampling 3
 behaves like geo-ind at ε = 1, not like a "small" perturbation. The surprise that is
 not a bug: **downsampling raises `top1_acc` above the raw pool** (0.49–0.54 at k = 3
 versus 0.28) while keeping almost the whole pool, because the attack's unnormalised
-DTW favours short gallery sequences (a hypothesis recorded, not verified, in
-`docs/HANDOFF.md` §2.3 and §2.5). Rows and the reading: `docs/HANDOFF.md` §2.3.
+DTW favours short gallery sequences. That hypothesis was checked on 4 Sep 2026 over
+the cached u20 pools and **confirmed** (`docs/HANDOFF.md` §2.5): a normalised DTW
+(cost divided by the alignment length) lifts the raw pool from 0.28 / 0.38 / 0.49 to
+0.52 / 0.57 / 0.60 at k = 3 / 5 / 10, the level of the downsampled arms, and the
+nearest gallery trace stops being one of the shortest — the attack code is unchanged
+(a normalised attacker distance is an open author decision, since it would change the
+whole S4 record). Rows and the reading: `docs/HANDOFF.md` §2.3.
+
+**Sibling configs for the 50- and 182-user rungs exist and are NOT measured** (created
+4 Sep 2026): `geolife_mech_reid_u50.yaml` carries all u20 arms at threshold 0.05 /
+budget 300 s (the measurement rung decides which arms go on to 182, as in S4), and
+`geolife_mech_reid_u182.yaml` carries the two anchors plus one arm per mechanism
+(`point_ldp` ε = 8, rounding 100 m, downsampling 120 s, Gaussian 50 m) at threshold 0.3 /
+budget 1200 s, the S4 reporting values. Run them with the same `trajguard run` command;
+the cost estimates and the arm rationale are in each file's header (~45 min per seed at
+u50, ~13–14 h at 182 because reidentification on the full pools grows quadratically with
+the gallery and exceeds the budget at 182 exactly as in S4).
 
 ## 8. Aggregate risk report
 

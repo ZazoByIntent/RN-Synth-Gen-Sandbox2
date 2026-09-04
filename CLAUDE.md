@@ -36,7 +36,11 @@ ZM-3 naive baselines are implemented (mechanisms `spatial_rounding`,
 `temporal_downsampling`, `gaussian_noise` in `src/trajguard/privacy/naive.py`, no formal
 guarantee) and measured at the 20-user rung on 4 Sep 2026 with the same config, nine
 arms next to the ZM-2 anchors (rows in `docs/HANDOFF.md` §2.3, actual decisions in
-`docs/NACRT_MEHANIZMI.md` §4). ZM-4 is open.**
+`docs/NACRT_MEHANIZMI.md` §4). The DTW length-bias hypothesis raised by ZM-3 was checked
+on 4 Sep 2026 over the cached u20 pools and confirmed (`docs/HANDOFF.md` §2.5; the attack
+code is unchanged, a normalised attacker distance is an open author decision). Sibling
+configs for the 50- and 182-user rungs (`config/experiments/geolife_mech_reid_u50.yaml`,
+`geolife_mech_reid_u182.yaml`) exist and are not measured. ZM-4 is open.**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.
 

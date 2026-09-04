@@ -639,16 +639,20 @@ Branje:
   od prave točke oddaljeno ≤ 71 m, dvojniki v celici tvorijo »postanke«); šele 2000 m
   pade na 0 / 0. `length_dist_error` je 1–4 km (dvojniki krajšajo, cikcak med središči
   celic daljša), `cell_js_divergence` pri 2000 m (0,18) je primerljiv s `point_ldp` ε = 6.
-- **Redčenje je najbolj presenetljiva roka: reidentifikacija se dvigne nad surovo.** Pri
-  30 / 120 / 600 s preživi 222 / 207 / 212 sledi (vseh 16 uporabnikov), `top1_acc` pri
-  k = 3 pa je 0,49 / 0,54 / 0,49 proti 0,28 nad surovim bazenom, in to pri 20–100-krat
-  krajšem času napada. Verjetna razlaga (v tej seji **ni preverjena**, glej 2.5): napad
-  računa nenormirano DTW razdaljo, ki sešteva po celotni poravnavi, zato dolga sled v
-  galeriji plača ceno sorazmerno s številom svojih točk; redčenje galerijske sledi
-  skrajša 5–50-krat in njihovo dolžino veže na trajanje namesto na gostoto vzorčenja
-  (Geolife jo ima zelo različno), tako da napadalčeve tri točke lažje najdejo pravega
-  uporabnika. Izmerjeno je torej: časovno redčenje pod tem napadalcem **ne ščiti pred
-  povezovanjem**, je vzvod učinkovitosti, ne zasebnosti. Sklepanje o domu/delu: delovna
+- **Redčenje je najbolj presenetljiva roka: reidentifikacija se dvigne nad surovo — a
+  zaradi napadalca, ne mehanizma.** Pri 30 / 120 / 600 s preživi 222 / 207 / 212 sledi
+  (vseh 16 uporabnikov), `top1_acc` pri k = 3 pa je 0,49 / 0,54 / 0,49 proti 0,28 nad
+  surovim bazenom, in to pri 20–100-krat krajšem času napada. Razlaga je **preverjena in
+  potrjena** (4. september 2026; tabela, merilo in odprta odločitev v 2.5): napad računa
+  nenormirano DTW razdaljo, ki sešteva po celotni poravnavi, zato nad surovim bazenom
+  skoraj vedno zmaga ena najkrajših galerijskih sledi (mediana razmerja med dolžino
+  zmagovalca in mediano galerije 0,06 pri k = 3); redčenje galerijske sledi skrajša s
+  povprečno 106 na 21 / 4,7 / 1,4 ujetih točk in to pristranskost odpravi. Z normirano
+  razdaljo (`dtw / L`) je surovi bazen pri 0,52 / 0,57 / 0,60 (k = 3 / 5 / 10), redčene
+  roke pa pri 0,48–0,61, torej na isti ravni ali pod njo (600 s pri k ≥ 5: −0,08 / −0,10).
+  Izmerjeno je torej: časovno redčenje pod tem napadalcem **ne ščiti pred povezovanjem**
+  (kvečjemu rahlo pri 600 s in normiranem napadalcu), njegov navidezni dvig tveganja pa
+  je artefakt nenormirane razdalje, ki velja za ves zapis S4. Sklepanje o domu/delu: delovna
   mesta umeščena pri 57 % / 50 % / 14 %, domovi pri 14 % / 14 % / 0 % (odkrivanje
   postankov potrebuje zadostno pokritost `dwell_s`; pri 600 s večina postankov izgine).
   Uporabnost: `length_dist_error` 0,6–2,8 km (tetivna dolžina se krajša), `cell_js`
@@ -669,12 +673,22 @@ Branje:
   `point_ldp`; redčenje ne uniči ničesar in reidentifikacijo celo poveča. Za sklepanje o
   domu/delu sta zaokroževanje 100 m in Gauss 50 m praktično brez učinka. Vsi trije
   ostajajo kandidati za baseline (odločitev D5 je odprta).
-- Odprto: (1) preveriti hipotezo o dolžinski pristranskosti DTW (2.5) pred interpretacijo
-  redčenja v poročilu; (2) kopiji konfiguracije za stopnji 50 in 182 — avtor odloči,
-  katere od devetih rok gredo naprej (načrt §4.5; smiselni kandidati so po ena roka na
-  mehanizem, ki ohrani bazen: 100 m, 120 s, 50 m); (3) ponovitve čez semena za Gaussov
-  šum, edino roko s semenom (zaokroževanje in redčenje sta deterministična, njuni
-  intervali so samo bootstrap znotraj pogona).
+- Odprto: (1) hipoteza o dolžinski pristranskosti DTW je **preverjena in potrjena** (4.
+  september 2026, 2.5); odprta ostaja avtorjeva odločitev med normirano razdaljo
+  napadalca in kontrolo dolžine v poročilu; (2) kopiji konfiguracije za stopnji 50 in 182
+  **obstajata in nista pognani** (4. september 2026): `config/experiments/geolife_mech_reid_u50.yaml`
+  (vse roke iz u20, prag 0,05, proračun 300 s — merilna stopnja odloči, kaj gre na 182, kot
+  pri S4) in `config/experiments/geolife_mech_reid_u182.yaml` (prag 0,3 in proračun 1.200 s,
+  poročevalski vrednosti S4 z dne 17. avgusta 2026; sidri `none` in geo-ind ε = 1 ter po
+  ena roka na mehanizem: `point_ldp` ε = 8, zaokroževanje 100 m, redčenje 120 s, Gauss
+  50 m — roke, ki pri u20 ohranijo merljiv bazen ali dajo neizrojene vrstice sklepanja o
+  domu/delu in uporabnosti; uničevalne roke so ena vrstica YAML). Pogon je odločitev
+  avtorja; ocena cene v glavi vsake datoteke (~45 min na seme pri u50, ~13–14 h pri 182,
+  ker reidentifikacija nad `raw`/`none` raste kvadratno z bazenom in pri 182 prekorači
+  proračun kot v S4; pri pragu 0,3 bo preživetje zaokroževanja 100 m in Gaussa 50 m nižje
+  kot pri 0,05); (3) ponovitve čez semena za Gaussov šum, edino roko s semenom
+  (zaokroževanje in redčenje sta deterministična, njuni intervali so samo bootstrap
+  znotraj pogona).
 
 ### 2.4 Val 5 — horizont B (2. letnik)
 
@@ -717,15 +731,68 @@ federativni pristopi, diffusion generatorji. Vse se priključi prek obstoječih 
   (`reference_cells` v `experiments/ldptrace_eval.py`) uporablja izvirnikovo pravilo,
   orkestratorjev `_cell_pool` pa še `Grid.cell_of`; za MIA nad Portom to ni pomembno.
   Odprto: ali `_cell_pool` preklopiti na isto pravilo (spremeni hash predpomnilnika).
-- **Dolžinska pristranskost DTW v reidentifikaciji** (ugotovljeno 4. septembra 2026 pri
-  ZM-3, glej 2.3): časovno redčenje izdaje na 30 / 120 / 600 s dvigne `top1_acc` pri
-  k = 3 z 0,28 na 0,49–0,54 ob skoraj celem bazenu. Hipoteza: `geometry.dtw` vrne
-  nenormirano vsoto po poravnavi, zato je razdalja med k znanimi točkami in galerijsko
-  sledjo sorazmerna s številom njenih točk; redčenje dolžine galerijskih sledi izenači po
-  trajanju, zato pravi uporabnik lažje zmaga. Odprto: preveriti (npr. DTW, deljen z
-  dolžino poravnave, ali kontrola s sondami enake dolžine) preden poročilo interpretira
-  redčenje; če se potrdi, je to lastnost napadalca iz zasnove §6.1, ne mehanizma, in
-  velja tudi za surovi bazen (sledi z redkim vzorčenjem so tam v prednosti).
+- **Dolžinska pristranskost DTW v reidentifikaciji — preverjena in potrjena** (ugotovljeno
+  4. septembra 2026 pri ZM-3, preverjeno isti dan na veji `claude/zm3-naive-baselines`,
+  glej 2.3): časovno redčenje izdaje na 30 / 120 / 600 s dvigne `top1_acc` pri k = 3 z
+  0,28 na 0,49–0,54 ob skoraj celem bazenu. Hipoteza: `geometry.dtw` vrne nenormirano
+  vsoto po poravnavi, zato je razdalja med k znanimi točkami in galerijsko sledjo
+  sorazmerna s številom njenih točk in kratke sledi zmagujejo. **Preverba:** skript zunaj
+  repozitorija (koda napada se ni spremenila), ki bere samo predpomnjene bazene u20 s
+  semenom 42 (surovi `data/processed/56dcf747ce5967f6`, 238 sledi, in tri izdaje redčenja
+  v `data/protected/`) in ponovi zanko napada iz `attacks/reidentification.py` (sonde iz
+  surovega bazena, `_evenly_spaced` k točk, galerija brez lastne sledi, ena razdalja na
+  uporabnika) s tremi razdaljami iz enega prehoda dinamičnega programiranja: nenormirana
+  `dtw`, `dtw / L` (L je dolžina optimalne poravnave, vračanje po matriki stroškov) in
+  `dtw / max(n, m)`; `top1_acc` z bootstrapom 1.000 / seme 42 kot v pogonu; 59 s. Nenormirana
+  razdalja reproducira izmerjeni zapis do zadnje decimalke, vključno z intervali (sidro).
+  Napad dela nad ujetimi točkami (`matched_points`), ki jih je v povprečju 106 / 21 / 4,7 /
+  1,4 na sled (mediana 64 / 15 / 4 / 1; največ 601) — manj kot izdanih točk (352 / 74 / 23 /
+  6,5), a z isto težko desno repo.
+
+  | Bazen | k | `dtw` (kot v pogonu) | `dtw / L` | `dtw / max(n, m)` |
+  |---|---|---|---|---|
+  | surovi | 3 | 0,283 [0,228; 0,338] | 0,523 [0,460; 0,586] | 0,523 [0,460; 0,586] |
+  | surovi | 5 | 0,384 [0,325; 0,447] | 0,565 [0,506; 0,624] | 0,565 [0,506; 0,624] |
+  | surovi | 10 | 0,489 [0,426; 0,557] | 0,603 [0,544; 0,667] | 0,603 [0,544; 0,667] |
+  | redčenje 30 s | 3 | 0,485 [0,418; 0,549] | 0,591 [0,523; 0,654] | 0,591 [0,523; 0,654] |
+  | redčenje 30 s | 5 | 0,473 [0,409; 0,536] | 0,612 [0,549; 0,675] | 0,608 [0,544; 0,667] |
+  | redčenje 30 s | 10 | 0,570 [0,506; 0,633] | 0,595 [0,532; 0,658] | 0,586 [0,523; 0,646] |
+  | redčenje 120 s | 3 | 0,544 [0,481; 0,608] | 0,574 [0,511; 0,641] | 0,574 [0,511; 0,641] |
+  | redčenje 120 s | 5 | 0,536 [0,473; 0,599] | 0,570 [0,506; 0,633] | 0,565 [0,502; 0,629] |
+  | redčenje 120 s | 10 | 0,557 [0,494; 0,624] | 0,570 [0,506; 0,637] | 0,557 [0,494; 0,624] |
+  | redčenje 600 s | 3 | 0,485 [0,422; 0,549] | 0,481 [0,418; 0,544] | 0,481 [0,418; 0,544] |
+  | redčenje 600 s | 5 | 0,494 [0,430; 0,557] | 0,489 [0,426; 0,553] | 0,494 [0,430; 0,557] |
+  | redčenje 600 s | 10 | 0,498 [0,430; 0,561] | 0,498 [0,430; 0,561] | 0,498 [0,430; 0,561] |
+
+  Diagnostika nad surovim bazenom (razmerje med številom točk najbližje galerijske sledi
+  in mediano števila točk v galeriji; mediana / povprečje / delež sond, pri katerih je
+  zmagovalec krajši od mediane): nenormirana 0,06 / 0,13 / 1,00 pri k = 3, 0,08 / 0,19 /
+  0,98 pri k = 5, 0,23 / 0,37 / 0,92 pri k = 10 — zmagovalec je skoraj vedno ena najkrajših
+  sledi v galeriji; normirana `dtw / L` 0,59 / 1,03 / 0,66, 0,91 / 1,26 / 0,57, 0,95 /
+  1,58 / 0,51 — razmerje se premakne k 1. Vnaprej določeno merilo je izpolnjeno v vseh
+  treh delih: (a) normirana razdalja surovi bazen dvigne na 0,52 / 0,57 / 0,60, torej na
+  raven redčenih rok pod nenormirano razdaljo (0,47–0,57) ali nad njo; (b) prednost
+  redčenih rok pred surovim bazenom pade v bootstrap interval surovega bazena v šestih od
+  devetih celic, pri 30 s in k = 3 ostane tik nad njim (+0,07; 0,591 proti zgornji meji
+  0,586), pri 600 s in k ≥ 5 se obrne (−0,08 / −0,10: galerija z 1–2 ujetima točkama
+  normiranega napadalca ovira); (c) razmerje dolžin zmagovalcev gre od < 0,25 proti ≈ 1.
+  Razdalji `dtw / L` in `dtw / max(n, m)` dasta praktično isto (pri k ≪ m je dolžina
+  poravnave ≈ m); pri 600 s vse tri sovpadajo, ker galerijska sled z eno točko poravnavo
+  fiksira.
+
+  **Pomen.** Pristranskost je lastnost napadalca iz zasnove §6.1, ne mehanizma: v vsem
+  izmerjenem zapisu S4 (stopnje 20 / 50 / 182, vse roke) nenormirani napadalec razvršča
+  galerijo pretežno po številu ujetih točk in ne po geometriji, zato so vrednosti
+  reidentifikacije nad surovim bazenom **podcenjene** (pri u20 0,28 → 0,52 pri k = 3) in
+  redčenje »pomaga« samo zato, ker to pristranskost odpravi. Koda napada se ni spremenila,
+  ker bi sprememba razdalje spremenila celoten izmerjeni zapis S4. **Odprta odločitev
+  avtorja** z dvema možnostma: (1) normirana razdalja napadalca (`dtw / L` ali `dtw /
+  max(n, m)` v `attacks/reidentification.py`, smiselno kot nova vrednost
+  `attacker.distance`, da `dtw` ostane zapis S4) s ponovnim pogonom lestvice; ali (2)
+  kontrola dolžine v poročilu (napadalec ostane, poleg vrstic pogona se poroča kontrola s
+  sondami oziroma galerijo enake dolžine, redčenje pa se bere kot vzvod, ki napadalcu
+  odpravi pristranskost). Do odločitve poročilo redčenja ne sme brati kot »zaščita, ki
+  poveča tveganje«, temveč kot razkritje pristranskosti napadalca.
 
 ---
 
