@@ -103,6 +103,10 @@ def test_cells_mode_runs_membership_inference_end_to_end(tmp_path: Path) -> None
     assert record["n_matched"] == 8 and record["n_dropped"] == 0
     assert sum(record["split_counts"].values()) == 8
     assert record["warnings"] == []
+    # the fitted ldptrace target's public facts are recorded per arm (PR C); markov has none
+    ldptrace_arm = record["arms"]["synthetic:ldptrace:epsilon=600.0"]
+    assert 1 <= ldptrace_arm["l_k"] <= 36 and ldptrace_arm["report_epsilon"] > 0
+    assert "synthetic:markov:order=1" not in record["arms"]
 
     rows = list(csv.DictReader((tmp_path / "out" / "results.csv").open()))
     assert rows and all(r["family"] == "membership_inference" for r in rows)
