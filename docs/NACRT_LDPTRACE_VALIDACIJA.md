@@ -7,7 +7,7 @@ odločitve so pri D-V.7. PR B je razrezan na B1 in B2; **B1 je izveden** (3. sep
 2026, veja `claude/cells-mode`, PR #34; predaja v §10) in **B2 je izveden** (3. september
 2026, veja `claude/cells-mode-orchestrator`, **PR #35**, skladana na PR #34; dejanske
 odločitve in izmerjeni pogon Porta v §11.4 in §11.5). **PR C je izveden** (4. september
-2026, veja `claude/ldptrace-validation`, PR #⟨PR⟩; predaja v §12, dejanske odločitve in
+2026, veja `claude/ldptrace-validation`, PR #36; predaja v §12, dejanske odločitve in
 izmerjeno v §12.5, tabela v `docs/HANDOFF.md` §2.3) — **validacija je zaključena**. Ta
 dokument je bil predaja za eno do tri implementacijske seje, ki
 uvedejo (a) metrike uporabnosti iz članka LDPTrace, (b) način branja surovih koordinat

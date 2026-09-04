@@ -25,7 +25,7 @@ inference only; `config/experiments/porto_cells_mia.yaml`) is done on branch
 inference measured at 2,000 trips, rows in `docs/HANDOFF.md` §2.3, run guide
 `docs/RUNNING.md` §9.2); PR C (the Porto comparison run: harness `experiments/ldptrace_eval.py`, reference clone
 `2d30e41` patched only for a seed, 3 ε × 5 seeds on both sides over all 367,008 trips) is
-done on branch `claude/ldptrace-validation` (PR #⟨PR⟩, 4 Sep 2026, stacked on PR #35; the
+done on branch `claude/ldptrace-validation` (PR #36, 4 Sep 2026, stacked on PR #35; the
 port matches the reference within the seed spread and our metrics reproduce the reference's
 own printout to the digit — table in `docs/HANDOFF.md` §2.3, run guide `docs/RUNNING.md`
 §9.3, actual decisions `docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5);
