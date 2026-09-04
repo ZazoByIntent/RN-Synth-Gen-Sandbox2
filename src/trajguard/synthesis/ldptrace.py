@@ -23,8 +23,11 @@ Mechanism. Space is a uniform ``n_rows × n_cols`` grid; a trajectory is a chain
 **ε unit: per trajectory, i.e. per device release** (one trajectory per user in the
 paper's model). It is not comparable with geo-indistinguishability's per-point ε.
 
-The collector debiases the bit sums, drops estimates ≤ 0, and normalises each cell's
-row over its eight neighbours plus a virtual *end* state (``row / (Σrow + 1e-8)``).
+The collector debiases the bit sums — each OUE domain divides by the number of reports
+it received (one per trajectory for length/start/end, the total transition count for
+transitions), exactly like the reference server's per-report counter — drops estimates
+≤ 0, and normalises each cell's row over its eight neighbours plus a virtual *end*
+state (``row / (Σrow + 1e-8)``).
 Synthesis follows the paper's Algorithm 1: start ~ start estimate, length ``L`` ~ the
 clipped noisy length histogram, then a walk whose end weight is scaled by
 ``min(1, alpha + beta·(l − 1))`` (``l`` = cells generated so far); it stops at the
@@ -39,8 +42,6 @@ Deviations from the public code, all deliberate:
 - The end report carries the **true last cell** of the trajectory (as in the paper),
   even when the transition reports stop at ``L_k``; the public code reports the cell
   at the cut. The budget is identical either way.
-- OUE debiasing divides by the number of reports actually summed per domain (one per
-  trajectory for start/end/length, the total transition count for transitions).
 - The payload is the cell sequence itself (no decoding to coordinates or edges).
 - All-zero start or length estimates fall back to uniform instead of failing.
 """

@@ -218,9 +218,13 @@ In pipeline order, with the reason each package exists:
 - **`evaluation/`** — turns attack output into honest numbers: `metrics.py`
   (accuracy-style metrics with bootstrap confidence intervals — a resampling
   technique that puts error bars on results from small samples), `roc.py`
-  (tie-safe curves for membership attacks), and `utility.py` (how much a
+  (tie-safe curves for membership attacks), `utility.py` (how much a
   protection damaged the data: spatial-distribution divergence and trip-length
-  distortion). Privacy results without utility results would be meaningless —
+  distortion), and `ldptrace_metrics.py` (the nine utility metrics of the LDPTrace
+  paper, reimplemented verbatim from the authors' code — quirks included — so the
+  `ldptrace` port can be validated against that code on identical input; pure
+  functions over cell chains and point sets, not wired into the orchestrator).
+  Privacy results without utility results would be meaningless —
   deleting all data is perfectly private — so both sides live in this package.
 - **`geometry.py`** — shared trajectory distances (Dynamic Time Warping,
   Hausdorff, mean spatial error). It exists because both the linkage attack

@@ -326,6 +326,15 @@ celic, mediana 3, na mreži 12 × 12):
   brez umerjanja z Dijkstro, zato so kopije konfiguracije za u50 in 182 računsko
   neproblematične. Odprto (ločen PR): dekodiranje celic v odseke in roka `ldptrace` v
   `experiments/rnldp_eval.py`.
+- **Validacija proti izvirni kodi** (metrike članka, način surovih koordinat na mreži
+  v konfiguraciji, primerjalni pogon nad javnim Portom): načrt, predaja in prompt v
+  `docs/NACRT_LDPTRACE_VALIDACIJA.md`. Ponovitev številk iz članka ni mogoča (izvirnik
+  ne prilaga podatkov in nima semena); cilj je diferencialna primerjava port ↔ izvirnik
+  nad istim vhodom. **Stanje 2. septembra 2026 (zvečer):** PR A (devet metrik članka,
+  `src/trajguard/evaluation/ldptrace_metrics.py`) je oddan kot PR #33 (odprt); PR B je
+  razrezan na B1 (predstavitev in vhodi; načrt potrjen, predaja s promptom v tistem
+  dokumentu §10, koda še ni napisana) in B2 (orkestrator); PR C sledi. Rezultati
+  primerjave še niso izmerjeni; tabela z devetimi metrikami × tremi ε pride sem v PR C.
 
 ### 2.4 Val 5 — horizont B (2. letnik)
 
