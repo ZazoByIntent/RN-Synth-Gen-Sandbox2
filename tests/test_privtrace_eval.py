@@ -11,6 +11,7 @@ import pytest
 from trajguard.datasets.ldptrace_dat import read_dat
 from trajguard.evaluation.ldptrace_metrics import METRIC_NAMES
 from trajguard.experiments import privtrace_eval as pe
+from trajguard.experiments.ldptrace_eval import reference_cells
 from trajguard.representation import Grid
 from trajguard.synthesis.adaptive_grid import AdaptiveGrid
 
@@ -81,6 +82,48 @@ def test_write_subset_round_trip(tmp_path: Path) -> None:
     assert raw.count(b"#") == 2
 
 
+# --- chains without the king's walk ----------------------------------------------------------
+
+
+def test_points_to_cell_sequences_drops_only_the_bridging() -> None:
+    """The visited cells with duplicates collapsed; bridging them gives the chain back."""
+    points = _tiny()
+    grid = _eval_grid(points)
+    sequences = pe.points_to_cell_sequences(grid, points)
+    chains = pe.points_to_chains(grid, points)
+
+    for xy, sequence, chain in zip(points, sequences, chains, strict=True):
+        cells = reference_cells(grid, xy)
+        assert sequence == [c for i, c in enumerate(cells) if i == 0 or cells[i - 1] != c]
+        assert grid.chain(sequence) == chain
+    # On the 3x3 grid every tiny.dat step stays inside or next to its cell, so nothing is
+    # bridged and the two representations coincide.
+    assert sequences == chains
+    assert pe.interpolated_share(chains, sequences) == 0.0
+
+    # On a 6x6 grid trajectory 1 — (0.5, 0.5) to (3.5, 1.5) — jumps two columns.
+    fine = Grid(bbox=pe.reference_bbox(points), n_rows=6, n_cols=6)
+    fine_sequences = pe.points_to_cell_sequences(fine, points)
+    fine_chains = pe.points_to_chains(fine, points)
+    assert fine_sequences[1] == [0, 9] and fine_chains[1] == [0, 7, 8, 9]
+    assert len(fine_sequences[1]) < len(fine_chains[1])
+    for sequence, chain in zip(fine_sequences, fine_chains, strict=True):
+        assert fine.chain(sequence) == chain
+    assert pe.interpolated_share(fine_chains, fine_sequences) == pytest.approx(2 / 14)
+
+
+def test_interpolated_share_counts_the_inserted_cells() -> None:
+    assert pe.interpolated_share([[0, 1, 2, 5], [4]], [[0, 5], [4]]) == pytest.approx(2 / 5)
+    assert pe.interpolated_share([[0, 1]], [[0, 1]]) == 0.0
+    assert pe.interpolated_share([], []) == 0.0  # nothing scored, nothing interpolated
+    assert pe.interpolated_share([[]], [[]]) == 0.0
+
+    with pytest.raises(ValueError, match="shorter than its unbridged sequence"):
+        pe.interpolated_share([[0, 1]], [[0, 1, 2]])
+    with pytest.raises(ValueError, match="1 chains but 2 sequences"):
+        pe.interpolated_share([[0]], [[0], [1]])
+
+
 # --- leaf sampling -------------------------------------------------------------------------
 
 
@@ -132,6 +175,13 @@ def test_run_synthesis_records_and_determinism() -> None:
         # cell metrics are always finite; the length/diameter bins can be empty at n = 5
         for name in ("density_error", "trip_error", "coverage_kendall_tau", "pattern_f1"):
             assert math.isfinite(record[name])
+        # the second, unbridged scoring pass stores all nine metrics plus the share
+        assert {f"nobridge_{name}" for name in METRIC_NAMES} <= set(record)
+        assert 0.0 <= record["interpolated_share"] <= 1.0
+        assert record["mask_non_adjacent"] is False
+
+    masked = pe.run_synthesis(points, grid, FIRST_LEVEL_K, [HUGE_EPS], [1], mask_non_adjacent=True)
+    assert masked[EPS_KEY]["1"]["mask_non_adjacent"] is True
 
     again = pe.run_synthesis(points, grid, FIRST_LEVEL_K, [HUGE_EPS], [1, 2])
     strip = lambda r: {k: v for k, v in r.items() if not k.endswith("_s")}  # noqa: E731
@@ -153,7 +203,8 @@ def test_scoring_own_saved_synthesis_reproduces_the_run(tmp_path: Path) -> None:
         assert Path(ran["synthesis_path"]) == Path(got["synthesis_path"])
         assert got["n_synthetic"] == ran["n_synthetic"]
         assert got["synthetic_mean_points"] == ran["synthetic_mean_points"]
-        for name in METRIC_NAMES:
+        assert got["interpolated_share"] == ran["interpolated_share"]
+        for name in (*METRIC_NAMES, *(f"nobridge_{n}" for n in METRIC_NAMES)):
             if math.isnan(ran[name]):
                 assert math.isnan(got[name]), name
             else:
@@ -164,7 +215,11 @@ def test_scoring_own_saved_synthesis_reproduces_the_run(tmp_path: Path) -> None:
 # --- summaries -----------------------------------------------------------------------------
 
 
-def _fake_runs(density: list[float], n_states: list[int] | None = None) -> pe.Runs:
+def _fake_runs(
+    density: list[float],
+    n_states: list[int] | None = None,
+    nobridge_density: list[float] | None = None,
+) -> pe.Runs:
     runs: pe.Runs = {"1.0": {}}
     for i, seed in enumerate(("1", "2")):
         record: dict[str, Any] = dict.fromkeys(METRIC_NAMES, 0.0)
@@ -173,30 +228,55 @@ def _fake_runs(density: list[float], n_states: list[int] | None = None) -> pe.Ru
             record["n_states"] = n_states[i]
             record["n_second_order"] = 2
             record["synthetic_mean_length"] = 3.5
+        if nobridge_density is not None:
+            record.update({f"nobridge_{name}": 0.0 for name in METRIC_NAMES})
+            record["nobridge_density_error"] = nobridge_density[i]
+            record["nobridge_point_query_avre"] = 0.7  # stored, but not a tabulated row
+            record["interpolated_share"] = 0.5
         runs["1.0"][seed] = record
     return runs
 
 
-def test_summarize_covers_metrics_and_port_only_rows() -> None:
-    summary = pe.summarize(_fake_runs([0.1, 0.3], n_states=[4, 6]))["1.0"]
+def test_summarize_covers_metrics_port_only_and_no_bridge_rows() -> None:
+    summary = pe.summarize(_fake_runs([0.1, 0.3], n_states=[4, 6], nobridge_density=[0.4, 0.6]))[
+        "1.0"
+    ]
     assert summary["density_error"] == {"mean": 0.2, "min": 0.1, "max": 0.3, "n": 2}
     assert summary["n_states"] == {"mean": 5.0, "min": 4.0, "max": 6.0, "n": 2}
     assert summary["synthetic_mean_length"]["mean"] == 3.5
-    assert "n_states" not in pe.summarize(_fake_runs([0.1, 0.3]))["1.0"]
+    assert summary["nobridge_density_error"] == {"mean": 0.5, "min": 0.4, "max": 0.6, "n": 2}
+    assert summary["interpolated_share"] == {"mean": 0.5, "min": 0.5, "max": 0.5, "n": 2}
+    # only the six chain metrics of NOBRIDGE_METRICS are summarized, not all nine
+    assert "nobridge_point_query_avre" not in summary
+
+    plain = pe.summarize(_fake_runs([0.1, 0.3]))["1.0"]
+    assert "n_states" not in plain
+    assert "nobridge_density_error" not in plain and "interpolated_share" not in plain
 
 
 def test_compare_table_layout() -> None:
-    port = {"label": "port", "runs": _fake_runs([0.1, 0.3], n_states=[4, 6])}
+    port = {
+        "label": "port",
+        "runs": _fake_runs([0.1, 0.3], n_states=[4, 6], nobridge_density=[0.4, 0.6]),
+    }
     ref = {"label": "reference", "runs": _fake_runs([0.2, 0.2])}
     table = pe.compare_table([port, ref])
     lines = table.splitlines()
     assert lines[0] == "| ε | metric | port | reference |"
-    # header, rule, nine metrics, three port-only rows
-    assert len(lines) == 2 + len(METRIC_NAMES) + 3
+    # header, rule, nine metrics, three port-only rows, six no-bridge rows + the share
+    assert len(lines) == 2 + len(METRIC_NAMES) + 3 + 7
     density = next(line for line in lines if "| density_error |" in line)
     assert density == "| 1.0 | density_error | 0.2000 [0.1000; 0.3000] | 0.2000 |"
-    assert lines[-3] == "| 1.0 | n_states | 5.0 [4.0; 6.0] | — |"
-    assert lines[-1] == "| 1.0 | synthetic_mean_length | 3.5 | — |"
+    assert lines[-10] == "| 1.0 | n_states | 5.0 [4.0; 6.0] | — |"
+    assert lines[-8] == "| 1.0 | synthetic_mean_length | 3.5 | — |"
+    # the no-bridge block comes last, in NOBRIDGE_METRICS order, share included
+    assert [line.split(" | ")[1] for line in lines[-7:]] == [
+        *(f"nobridge_{name}" for name in pe.NOBRIDGE_METRICS),
+        "interpolated_share",
+    ]
+    assert lines[-7] == "| 1.0 | nobridge_density_error | 0.5000 [0.4000; 0.6000] | — |"
+    assert lines[-1] == "| 1.0 | interpolated_share | 0.5000 | — |"
+    assert "nobridge_point_query_avre" not in table
     with pytest.raises(ValueError, match="at least one"):
         pe.compare_table([])
 
@@ -228,12 +308,15 @@ def test_cli_run_score_and_compare(tmp_path: Path, capsys: pytest.CaptureFixture
     ]
     port_json = tmp_path / "port.json"
     pe.main([*common, "--save-synthesis", str(tmp_path / "syn"), "--out", str(port_json)])
-    assert "eval grid 3x3" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "eval grid 3x3" in out and "real interpolated share 0.0000" in out
     port = json.loads(port_json.read_text())
     assert port["label"] == "port" and port["source"]["n_trajectories"] == 5
     assert port["source"]["first_level_k"] == FIRST_LEVEL_K
     assert port["source"]["eval_grid"]["n_rows"] == EVAL_N
     assert port["source"]["bbox"] == port["source"]["eval_grid"]["bbox"]
+    assert port["source"]["real_interpolated_share"] == 0.0  # nothing bridged on the 3x3 grid
+    assert port["source"]["mask_non_adjacent"] is False
     record = port["runs"][EPS_KEY]["1"]
     assert set(METRIC_NAMES) <= set(record) and record["synthesis_path"].endswith("seed_1.txt")
 
@@ -252,9 +335,42 @@ def test_cli_run_score_and_compare(tmp_path: Path, capsys: pytest.CaptureFixture
     capsys.readouterr()
     pe.main(["--compare", str(port_json), str(ref_json)])
     out = capsys.readouterr().out
-    assert out.startswith("| ε | metric | port | scored |")
+    assert out.startswith("real interpolated share (port): 0.0000\n")
+    assert "real interpolated share (scored): 0.0000\n" in out
+    assert "| ε | metric | port | scored |" in out
     assert f"| {EPS_KEY} | density_error |" in out
     assert f"| {EPS_KEY} | n_states |" in out and " | — |" in out  # port-only row
+    assert f"| {EPS_KEY} | nobridge_density_error |" in out
+    assert f"| {EPS_KEY} | interpolated_share |" in out
+
+
+def test_cli_mask_non_adjacent_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The flag reaches the generator and is recorded on both the source and every run."""
+    out_json = tmp_path / "masked.json"
+    pe.main(
+        [
+            "--dat",
+            str(TINY_DAT),
+            "--first-level-k",
+            str(FIRST_LEVEL_K),
+            "--eval-grid",
+            str(EVAL_N),
+            "--epsilons",
+            str(HUGE_EPS),
+            "--seeds",
+            "1",
+            "--mask-non-adjacent",
+            "--label",
+            "port_masked",
+            "--out",
+            str(out_json),
+        ]
+    )
+    capsys.readouterr()
+    masked = json.loads(out_json.read_text())
+    assert masked["label"] == "port_masked"
+    assert masked["source"]["mask_non_adjacent"] is True
+    assert masked["runs"][EPS_KEY]["1"]["mask_non_adjacent"] is True
 
 
 @pytest.mark.parametrize(
@@ -265,6 +381,10 @@ def test_cli_run_score_and_compare(tmp_path: Path, capsys: pytest.CaptureFixture
         (["--compare", "a.json", "--score-synthesis", "x"], "mutually exclusive"),
         (["--dat", str(TINY_DAT), "--eval-grid", "1"], "--eval-grid must be"),
         (["--dat", str(TINY_DAT), "--first-level-k", "1"], "--first-level-k must be"),
+        (
+            ["--dat", str(TINY_DAT), "--score-synthesis", "x", "--mask-non-adjacent"],
+            "means nothing when",
+        ),
     ],
 )
 def test_cli_argument_errors(argv: list[str], match: str) -> None:

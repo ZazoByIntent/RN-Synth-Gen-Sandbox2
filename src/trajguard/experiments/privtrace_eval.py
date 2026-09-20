@@ -21,10 +21,15 @@ produces the exact input file the reference is run on, so the two sides see the 
 **Grid.** The reference's level-1 bounding box (``discretization/grid.py``) is the data
 min/max per axis extended by ``1e-5 × (raw span)`` on *each* side; :func:`reference_bbox`
 reproduces it, and the port is constructed with that box so both adaptive grids cover exactly
-the same area. Its level-1 bins are uniform ``np.arange`` edges and a point exactly on an
-interior edge falls into the **lower** bin, whereas our :class:`AdaptiveGrid` floors and takes
-the upper one; with the 1e-5 extension the edges are not round coordinates, so exact hits do
-not occur in practice and the rule is deliberately not replicated.
+the same area. That box is read straight off the raw data and is therefore **not**
+differentially private — on either side, and in the reference just as much as here. It is
+treated as part of the shared, public-by-assumption experimental setup (the region the data
+live in, fixed before any budget is spent and identical for both columns), not as part of the
+mechanism; a deployment would have to fix the region from public knowledge or pay for it.
+Its level-1 bins are uniform ``np.arange`` edges and a point exactly on an interior edge falls
+into the **lower** bin, whereas our :class:`AdaptiveGrid` floors and takes the upper one; with
+the 1e-5 extension the edges are not round coordinates, so exact hits do not occur in practice
+and the rule is deliberately not replicated.
 
 **Points.** The reference draws exactly one uniform point inside the leaf rectangle of every
 state of a walk, and a one-state walk is first duplicated into two states, i.e. it yields two
@@ -36,6 +41,25 @@ matches ``ldptrace_metrics.sample_points``.
 20 × 20) over :func:`reference_bbox`, which is independent of either adaptive grid, and scored
 with the same nine metrics: cell chains for the cell metrics, the raw GPS points of the real
 side and the sampled synthetic points for the length, diameter and point-query metrics.
+
+Every run is scored **twice**, because the two passes disagree about what a walk that jumps
+between far-apart cells is worth:
+
+1. *bridged* (the nine metrics under their plain names) — the LDPTrace convention, where
+   :meth:`Grid.chain` fills every pair of non-adjacent consecutive cells with a straight
+   king's walk, so a jump is charged as the whole line of cells it flies over;
+2. *unbridged* (the same nine values under ``nobridge_<name>``) — :func:`points_to_cell_sequences`
+   keeps only the cells the trajectory's own points fall in, so a jump is charged as one step.
+
+The port's Algorithm 1 has no adjacency constraint, so its walks jump often and bridging turns
+those jumps into long straight runs of cells that no point ever visited: on Porto 20 000 trips
+two thirds of the port's chain cells at ε = 0.5 are interpolated, against 8 % for the real
+trips. Those runs flatter the cell metrics (they thicken the density map and lengthen trips),
+so the bridged numbers alone would overstate the port. ``interpolated_share`` per run and
+``source["real_interpolated_share"]`` report the size of the effect directly: the fraction of
+chain cells that bridging inserted. ``--mask-non-adjacent`` measures the third variant, the
+port with its optional adjacency mask (D-4.6) switched on, which removes the jumps at the
+source rather than at scoring time.
 
 **Seeds.** For run seed ``s`` the port's noise uses ``s``, synthesis uses
 ``s + 7``, the leaf → point sampling ``s + 11`` and the metric randomness ``s``; the same
@@ -56,6 +80,8 @@ CLI::
         --max-trajectories 20000 --first-level-k 6 --eval-grid 20 \\
         --epsilons 0.5 1.0 2.0 --seeds 1 2 3 4 5 \\
         --out results/privtrace_validation/port.json
+    python -m trajguard.experiments.privtrace_eval --dat … --mask-non-adjacent \\
+        --label port_masked --out results/privtrace_validation/port_masked.json
     python -m trajguard.experiments.privtrace_eval --dat … --max-trajectories 20000 \\
         --score-synthesis "external/PrivTrace/generated_eps_{eps}_seed_{seed}.txt" \\
         --label reference --out results/privtrace_validation/reference.json
@@ -90,6 +116,7 @@ from trajguard.experiments.ldptrace_eval import (
     eps_key,
     expand_pattern,
     points_to_chains,
+    reference_cells,
 )
 from trajguard.experiments.ldptrace_eval import summarize as _metric_summary
 from trajguard.representation import Grid
@@ -99,6 +126,24 @@ from trajguard.synthesis.privtrace import PrivTraceGenerator
 EXTEND_RATIO = 1e-5  # reference Grid.extend_ratio: bbox = data min/max ± ratio · raw span
 COORD_DECIMALS = 6  # the reference writes and reads six decimals
 _EXTRA_ROWS = ("n_states", "n_second_order", "synthetic_mean_length")  # port-only table rows
+
+# The six metrics that read cell chains and therefore change when the king's-walk bridging is
+# removed. ``length_error`` and ``diameter_error`` read points only, and ``point_query_avre``
+# moves only because the real side's per-cell sampling follows the real chains; all nine are
+# stored under ``nobridge_*`` but only these six are tabulated.
+NOBRIDGE_METRICS: tuple[str, ...] = (
+    "density_error",
+    "hotspot_query_error",
+    "coverage_kendall_tau",
+    "trip_error",
+    "pattern_f1",
+    "pattern_support_error",
+)
+# The no-bridge block of the comparison table, in row order.
+_NOBRIDGE_ROWS: tuple[str, ...] = (
+    *(f"nobridge_{name}" for name in NOBRIDGE_METRICS),
+    "interpolated_share",
+)
 
 
 # --- inputs ----------------------------------------------------------------------------
@@ -169,6 +214,52 @@ def write_subset(src: str | Path, dst: str | Path, n: int) -> int:
     return write_points(dst, load_points(src, n))
 
 
+# --- chains without the king's walk -------------------------------------------------------
+
+
+def points_to_cell_sequences(grid: Grid, points: Points) -> Chains:
+    """The same per-point cells as :func:`points_to_chains`, minus the king's-walk bridging.
+
+    Each trajectory becomes the cells its own points fall in (:func:`reference_cells`), with
+    consecutive duplicates collapsed and **nothing** inserted between two non-adjacent cells.
+    A jump therefore costs one step here and a whole straight run of cells under
+    :meth:`Grid.chain`; bridging the result reproduces the bridged chain exactly
+    (``grid.chain(sequence) == grid.chain(cells)``), so this is the same information with the
+    interpolation left out, not a different mapping.
+    """
+    out: Chains = []
+    for xy in points:
+        sequence: list[int] = []
+        for cell in reference_cells(grid, xy):
+            if not sequence or sequence[-1] != cell:
+                sequence.append(cell)
+        out.append(sequence)
+    return out
+
+
+def interpolated_share(chains: Chains, sequences: Chains) -> float:
+    """Fraction of all bridged chain cells that the king's walk inserted; 0.0 when empty.
+
+    ``sum(len(chain) − len(sequence)) / sum(len(chain))`` over the pairs of
+    :func:`points_to_chains` and :func:`points_to_cell_sequences` output for the same
+    trajectories, so 0.0 means every consecutive pair of visited cells was already adjacent
+    and 0.66 means two thirds of the cells the metrics see were never visited by a point.
+    """
+    if len(chains) != len(sequences):
+        raise ValueError(f"{len(chains)} chains but {len(sequences)} sequences")
+    total = 0
+    inserted = 0
+    for i, (chain, sequence) in enumerate(zip(chains, sequences, strict=True)):
+        if len(chain) < len(sequence):
+            raise ValueError(
+                f"trajectory {i}: the bridged chain ({len(chain)} cells) is shorter than its "
+                f"unbridged sequence ({len(sequence)} cells)"
+            )
+        total += len(chain)
+        inserted += len(chain) - len(sequence)
+    return inserted / total if total else 0.0
+
+
 # --- the port side ---------------------------------------------------------------------
 
 
@@ -212,10 +303,15 @@ def run_synthesis(
 
     Per run: ``PrivTraceGenerator(bbox=eval_grid.bbox, epsilon, first_level_k, seed)`` fitted
     on the raw points, ``len(raw_points)`` synthetic walks, one uniform point per leaf state,
-    then :func:`evaluate` against the same real points. ``save_dir`` (optional) receives
+    then :func:`evaluate` against the same real points. Scoring runs twice, once on the bridged
+    chains (the nine plain keys) and once on the unbridged cell sequences (``nobridge_<name>``,
+    see the module docstring); ``interpolated_share`` records how much of the synthetic side's
+    bridged chains was inserted by the king's walk. ``generator_kwargs`` reach the generator
+    unchanged (e.g. ``mask_non_adjacent=True``). ``save_dir`` (optional) receives
     ``syn_<label>_eps_<ε>_seed_<s>.txt`` in the reference's text format.
     """
     real_chains: Chains = points_to_chains(eval_grid, raw_points)
+    real_sequences: Chains = points_to_cell_sequences(eval_grid, raw_points)
     runs: Runs = {}
     for epsilon in epsilons:
         for seed in seeds:
@@ -247,8 +343,21 @@ def run_synthesis(
                 syn_points=syn_points,
             )
             t3 = time.perf_counter()
+            syn_sequences: Chains = points_to_cell_sequences(eval_grid, syn_points)
+            nobridge = evaluate(
+                real_sequences,
+                syn_sequences,
+                eval_grid,
+                np.random.default_rng(seed),
+                real_raw_points=raw_points,
+                syn_points=syn_points,
+            )
+            t4 = time.perf_counter()
             record: dict[str, Any] = {
                 **metrics,
+                **{f"nobridge_{name}": value for name, value in nobridge.items()},
+                "interpolated_share": interpolated_share(syn_chains, syn_sequences),
+                "mask_non_adjacent": bool(gen.mask_non_adjacent),
                 "n_states": int(gen.n_states),
                 "n_second_order": len(gen.second_order_states),
                 "n_split_cells": sum(1 for kappa in gen.grid.kappa if kappa > 1),
@@ -260,6 +369,7 @@ def run_synthesis(
                 "fit_s": round(t1 - t0, 3),
                 "generate_s": round(t2 - t1, 3),
                 "metrics_s": round(t3 - t2, 3),
+                "nobridge_metrics_s": round(t4 - t3, 3),
             }
             if save_dir is not None:
                 out = Path(save_dir) / f"syn_{label}_eps_{eps_key(epsilon)}_seed_{seed}.txt"
@@ -285,10 +395,12 @@ def score_synthesis(
 
     Each file's points are mapped onto ``eval_grid`` (chains for the cell metrics, the points
     themselves for the point metrics), so a synthesis written by the reference and one written
-    by :func:`run_synthesis` are scored the same way.
+    by :func:`run_synthesis` are scored the same way — including the second, unbridged pass
+    (``nobridge_<name>``) and ``interpolated_share``.
     """
     _check_pattern(pattern, epsilons, seeds)
     real_chains: Chains = points_to_chains(eval_grid, raw_points)
+    real_sequences: Chains = points_to_cell_sequences(eval_grid, raw_points)
     runs: Runs = {}
     for epsilon in epsilons:
         for seed in seeds:
@@ -304,8 +416,19 @@ def score_synthesis(
                 real_raw_points=raw_points,
                 syn_points=syn_points,
             )
+            syn_sequences: Chains = points_to_cell_sequences(eval_grid, syn_points)
+            nobridge = evaluate(
+                real_sequences,
+                syn_sequences,
+                eval_grid,
+                np.random.default_rng(seed),
+                real_raw_points=raw_points,
+                syn_points=syn_points,
+            )
             record: dict[str, Any] = {
                 **metrics,
+                **{f"nobridge_{name}": value for name, value in nobridge.items()},
+                "interpolated_share": interpolated_share(syn_chains, syn_sequences),
                 "n_synthetic": len(syn_points),
                 "synthetic_mean_points": float(np.mean([len(p) for p in syn_points])),
                 "metrics_s": round(time.perf_counter() - t0, 3),
@@ -325,11 +448,13 @@ def summarize(
     """Per epsilon: ``mean``/``min``/``max``/``n`` of the nine metrics plus ``extra_rows``.
 
     The metric part is ``ldptrace_eval.summarize``; the extra rows (state counts, mean walk
-    length) exist on the port side only and are summarized the same way.
+    length) exist on the port side only and are summarized the same way. The unbridged pass is
+    summarized too — ``nobridge_<name>`` for the six chain metrics of :data:`NOBRIDGE_METRICS`
+    and ``interpolated_share`` — for every epsilon whose records carry them.
     """
     out = _metric_summary(runs)
     for eps, by_seed in runs.items():
-        for name in extra_rows:
+        for name in (*extra_rows, *_NOBRIDGE_ROWS):
             values = [float(r[name]) for r in by_seed.values() if r.get(name) is not None]
             if not values:
                 continue
@@ -352,7 +477,9 @@ def compare_table(
 
     Same layout as ``ldptrace_eval.compare_table`` — cells are ``mean [min; max]`` over seeds,
     the bare mean when all seeds agree — with the port-only ``extra_rows`` appended per
-    epsilon instead of LDPTrace's ``l_k``.
+    epsilon instead of LDPTrace's ``l_k``, and after them the no-bridge block: the six
+    ``nobridge_<name>`` rows of :data:`NOBRIDGE_METRICS` and ``interpolated_share``. A side
+    that has no value for a row shows ``—``; a row no side has is left out.
     """
     if not results:
         raise ValueError("compare_table needs at least one result")
@@ -364,7 +491,7 @@ def compare_table(
         "|---|---|" + "---|" * len(labels),
     ]
     for eps in eps_keys:
-        for name in (*METRIC_NAMES, *extra_rows):
+        for name in (*METRIC_NAMES, *extra_rows, *_NOBRIDGE_ROWS):
             stats = [s.get(eps, {}).get(name) for s in summaries]
             if all(st is None for st in stats):
                 continue
@@ -391,6 +518,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--epsilons", type=float, nargs="+", default=[0.5, 1.0, 2.0])
     p.add_argument("--seeds", type=int, nargs="+", default=[1, 2, 3, 4, 5])
+    p.add_argument(
+        "--mask-non-adjacent",
+        action="store_true",
+        help="port only: zero transitions between non-adjacent level-1 cells (D-4.6 mask)",
+    )
     p.add_argument("--label", default=None, help="column label in the JSON and tables")
     p.add_argument("--out", default=None, help="JSON output path")
     p.add_argument(
@@ -420,11 +552,20 @@ def main(argv: Sequence[str] | None = None) -> None:
     modes = [m for m in ("compare", "score_synthesis", "write_subset") if getattr(args, m)]
     if len(modes) > 1:
         raise SystemExit("--compare, --score-synthesis and --write-subset are mutually exclusive")
+    if args.mask_non_adjacent and args.score_synthesis:
+        raise SystemExit(
+            "--mask-non-adjacent changes the port's own synthesis and means nothing when "
+            "--score-synthesis only reads saved files"
+        )
 
     if args.compare:
         if args.dat:
             raise SystemExit("--compare reads JSON results only; drop --dat")
         results = [json.loads(Path(p).read_text(encoding="utf-8")) for p in args.compare]
+        for result in results:
+            share = result.get("source", {}).get("real_interpolated_share")
+            if share is not None:
+                print(f"real interpolated share ({result.get('label', '?')}): {float(share):.4f}")
         print(compare_table(results))
         return
 
@@ -444,10 +585,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     t0 = time.perf_counter()
     raw_points = load_points(args.dat, args.max_trajectories)
     eval_grid = Grid(bbox=reference_bbox(raw_points), n_rows=args.eval_grid, n_cols=args.eval_grid)
+    real_share = interpolated_share(
+        points_to_chains(eval_grid, raw_points), points_to_cell_sequences(eval_grid, raw_points)
+    )
     print(
         f"read {len(raw_points)} trajectories, {sum(len(p) for p in raw_points)} points "
         f"in {time.perf_counter() - t0:.1f}s; eval grid "
-        f"{eval_grid.n_rows}x{eval_grid.n_cols} over {list(eval_grid.bbox)}",
+        f"{eval_grid.n_rows}x{eval_grid.n_cols} over {list(eval_grid.bbox)}; "
+        f"real interpolated share {real_share:.4f}",
         flush=True,
     )
     source: dict[str, Any] = {
@@ -461,6 +606,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "n_cols": eval_grid.n_cols,
         },
         "bbox": list(eval_grid.bbox),
+        "real_interpolated_share": real_share,
     }
     if args.score_synthesis:
         label = args.label or "reference"
@@ -478,7 +624,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             args.seeds,
             args.save_synthesis,
             label,
+            mask_non_adjacent=args.mask_non_adjacent,
         )
+        source["mask_non_adjacent"] = bool(args.mask_non_adjacent)
     result = _result(label, source, runs)
 
     print()
