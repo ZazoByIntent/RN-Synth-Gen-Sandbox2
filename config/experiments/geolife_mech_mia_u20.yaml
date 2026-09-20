@@ -9,12 +9,22 @@
 #
 # Arms: `markov` (non-private memorization ceiling), `rn_ldp_synth` at ε = 2 (anchor
 # from S4), `ldptrace` at ε ∈ {0.5, 2.0, 8.0} — the same ε grid as rn_ldp_synth in S4,
-# for comparability; the LDPTrace paper uses {0.5, 1, 1.5}.
+# for comparability; the LDPTrace paper uses {0.5, 1, 1.5} — and `privtrace` at the
+# same ε grid (ZM-4, docs/NACRT_MEHANIZMI.md §5; the PrivTrace paper sweeps 0.2–2.0).
 #
 # ε unit: for both `rn_ldp_synth` and `ldptrace`, ε is spent PER TRAJECTORY (per
 # device release; sequential composition over one device's reports). It is NOT
 # comparable with geo-indistinguishability's per-point ε in the reid configs.
 # LDPTrace is a baseline candidate (decision D5 in project Izbirni predmeti is open).
+#
+# DIFFERENT TRUST MODEL for `privtrace`: PrivTrace is CENTRAL differential privacy —
+# a trusted curator sees every raw trajectory and adds Laplace noise to the grid
+# densities and Markov counts; ε is per trajectory (a neighbouring database differs in
+# one trajectory; a user with m trajectories is covered at m·ε). The LDP arms never
+# reveal a raw trajectory to anyone. Equal nominal ε therefore does NOT mean equal
+# protection: read the `privtrace` rows as an upper bound on the utility a trusted
+# curator can reach, not as a like-for-like competitor (NACRT §5, §1.2). Baseline
+# candidate; decision D5 is open.
 experiment:
   id: geolife_mech_mia_u20
   seed: 42                   # run seed: shadow subsets, generator fit noise
@@ -60,6 +70,10 @@ synthetic_generators:
   - id: ldptrace             # ZM-1 (docs/NACRT_MEHANIZMI.md §2): grid 12x12, quantile 0.9,
     params: {epsilon: [0.5, 2.0, 8.0]}   # length_share 0.1, alpha 0.3, beta 0.2 (defaults);
                                          # same-class shadows share the arm's epsilon
+  - id: privtrace            # ZM-4 (docs/NACRT_MEHANIZMI.md §5): central DP, trusted curator
+    params: {epsilon: [0.5, 2.0, 8.0]}   # (see header); level-1 grid 6x6 over the map's node
+                                         # bbox, budget split 0.2/0.4/0.4, theta2 5, max_len 200
+                                         # (defaults); same-class shadows share the arm's epsilon
 
 attacks:
   - type: membership_inference
