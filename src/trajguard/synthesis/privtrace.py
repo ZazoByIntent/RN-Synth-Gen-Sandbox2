@@ -28,7 +28,9 @@ coordinates: the benchmark scores states, so the reference's last step, one rand
 inside each leaf rectangle, is left out. Scoring an input sequence (the membership-inference
 hook) multiplies exactly those factors -- START to the first state, one per step under the same
 adaptive rule, the last state to END -- each floored at 1e-12 so an unseen step costs a finite
-penalty instead of minus infinity, and adds no length term.
+penalty instead of minus infinity, and adds no length term. When NormCut has emptied the START
+row, both paths fall back to the same uniform start over the ``m`` real states
+(:meth:`PrivTraceGenerator._start_probabilities`), so a walk and its score always agree.
 
 **Trust model.** PrivTrace assumes a TRUSTED CURATOR who sees every raw trajectory; the
 guarantee is trajectory-level eps-differential privacy (neighbouring databases differ in one
@@ -55,7 +57,10 @@ Two input modes, chosen by the constructor (exactly one of ``network`` / ``bbox`
 - **Bbox mode** (``bbox=(min_lon, min_lat, max_lon, max_lat)``): raw ``(lon, lat)`` coordinates
   straight from the clean trajectory, used by the validation harness only. The orchestrator's
   *cells* representation (a bare sequence of grid-cell indices) is **not** supported -- the
-  adaptive grid needs coordinates, not cells someone else has already binned.
+  adaptive grid needs coordinates, not cells someone else has already binned. The box itself
+  comes from the caller: in network mode it is the public road network's node box, while the
+  validation harness derives it from the raw data's min/max (padded by 1e-5 of the span, as the
+  reference does), which is **not** differentially private -- the harness documents that.
 
 Deviations from the paper, all deliberate:
 
@@ -70,12 +75,33 @@ Deviations from the paper, all deliberate:
   least-squares program over all state pairs; this port samples the start from the noisy START
   row instead. The paper itself discards the sampled end ("lambda_end will not be used"), so
   the solver only ever reshapes the start distribution, at a cost of ``m^2`` shortest paths
-  and an ``m x m`` convex program.
+  and an ``m x m`` convex program. The paper's own reason for the solver (section 4.4) is that
+  the ``1 / (L + 1)`` normalisation "over-counts short trajectories and under-counts long
+  trajectories", and the trip distribution is its bias correction -- so dropping it costs a
+  length bias. Measured on Porto (20 000 trips, ``K = 6``, effectively noise-free
+  ``eps = 1e4``): the real trips have 12.0 collapsed states on average, this port's walks 8.6,
+  about 30 per cent short. A trip solver or an explicit length model is an open item.
 - **D-4.3 (walk cap).** A generated walk is capped at ``max_len`` states instead of running
   until the virtual END happens to be drawn.
-- **D-4.4 (states from the network).** In network mode the states come from the public road
-  network's node coordinates, consecutive duplicates are collapsed and gaps are not bridged.
-  ``first_level_k`` and ``|D|`` are treated as public, exactly as the paper's analysis does.
+- **D-4.4 (states from the network; what the split gate may read).** In network mode the states
+  come from the public road network's node coordinates, consecutive duplicates are collapsed
+  and gaps are not bridged.
+  ``first_level_k`` is a public parameter. The paper is **silent** on where the ``|D|`` in the
+  split gate comes from -- the gate itself is the reference code's rule, and the reference
+  reads the true ``|D|`` there -- so this port feeds the gate the sum of the noisy
+  post-NormCut level-1 vector instead. That sum is pure post-processing of the stage-1
+  release (NormCut preserves the total whenever the positive mass covers the negative), so
+  nothing un-noised is read after stage 1 and the port still spends exactly
+  ``eps1 + eps2 + eps3``.
+- **D-4.6 (adjacency mask, off by default).** With ``mask_non_adjacent=True`` a transition
+  between two real states whose level-1 cells are neither the same nor 4-adjacent (Manhattan
+  distance of their level-1 row/column positions above 1) is treated as impossible and zeroed
+  together with the structural zeros -- after the Laplace noise and before NormCut, in the
+  first-order matrix and in every second-order matrix. This is the reference code's adjacency
+  rule (``large_neighbor_or_same_by_subcell_index``) turned into post-processing over the
+  public grid geometry: it consumes no random draws and reads no data, so the spent budget is
+  unchanged. It is **off** by default because the paper's Algorithm 1 has no adjacency
+  constraint; the validation harness measures both variants.
 
 Places where the authors' public code (github.com/DpTrace/PrivTrace, **no licence**, not used
 here) deviates from the paper and this port does **not** follow it: ``K`` derived from the raw
@@ -84,10 +110,14 @@ large out-degree, start weight above two per cent, end weight above two per cent
 second order regardless of the paper's test; second-order counts truncated to integers and
 stored as ``float16``, which destroys everything below 1; ad-hoc end-probability multipliers
 (x1.3, x1.5, x0.8, x0.5, x0.2); rejection sampling that discards long or lingering walks; an
-adjacency check at generation time; and a cvxpy least-squares solver for the trip
-distribution. Several of those steps are also **not private**: ``K`` comes from the raw point
-count, the true ``|D|`` enters the subdivision gate and the solver target, and the transition
-mask is read off the *noiseless* counts -- so the reference as shipped does not meet the eps
+adjacency check at generation time (available here as the opt-in D-4.6 mask); and a cvxpy
+least-squares solver for the trip distribution. Its guidepost end rescale also divides by zero
+whenever a second-order state carries no END mass (the RuntimeWarnings in its logs), which
+casts that END column to ``INT_MIN`` on one or two states per run, 0.7 to 2.5 per cent of the
+out-mass: those states can never end a walk and depend on its dead-end jump instead. Several of
+those steps are also **not private**: ``K`` comes from the raw point count, the true ``|D|``
+enters the subdivision gate and the solver target, and the transition mask is read off the
+*noiseless* counts -- so the reference as shipped does not meet the eps
 it claims, while this port spends exactly ``eps1 + eps2 + eps3``.
 """
 
@@ -228,6 +258,7 @@ class PrivTraceGenerator(SyntheticGenerator):
         budget_split: tuple[float, float, float] = (0.2, 0.4, 0.4),
         theta2: float = 5.0,
         max_len: int = 200,
+        mask_non_adjacent: bool = False,
         seed: int = 0,
     ) -> None:
         """Validate the parameters and fix the level-1 bounding box; no data is touched."""
@@ -257,6 +288,7 @@ class PrivTraceGenerator(SyntheticGenerator):
         self.max_sub_k = int(max_sub_k)
         self.theta2 = float(theta2)
         self.max_len = int(max_len)
+        self.mask_non_adjacent = bool(mask_non_adjacent)
         self.seed = seed
         w1, w2, w3 = (float(share) for share in budget_split)
         total = w1 + w2 + w3
@@ -276,6 +308,7 @@ class PrivTraceGenerator(SyntheticGenerator):
             "budget_split": list(self.budget_split),
             "theta2": self.theta2,
             "max_len": self.max_len,
+            "mask_non_adjacent": self.mask_non_adjacent,
             "seed": seed,
         }
         self._network_mode = network is not None
@@ -294,7 +327,6 @@ class PrivTraceGenerator(SyntheticGenerator):
         self.second_order_states: tuple[int, ...] = ()
         self._order1 = np.zeros((0, 0))
         self._order2: dict[int, np.ndarray] = {}
-        self._n_trajectories = 0
 
     # -- public geometry ----------------------------------------------------------------
 
@@ -378,14 +410,25 @@ class PrivTraceGenerator(SyntheticGenerator):
         k = self.first_level_k
 
         # Stage 1 (eps1): length-normalised level-1 densities, noised, repaired, subdivided.
+        # The split gate is measured against the sum of the noisy vector, not against the true
+        # trajectory count: post-processing of the stage-1 release only (D-4.4).
         density = level1_density(points, self.bbox, k)
         noisy_density = normcut(density + self._rng.laplace(0.0, 1.0 / eps1, k * k))
         self.grid = AdaptiveGrid.build(
-            self.bbox, k, noisy_density, n, self.split_scale, self.split_gate, self.max_sub_k
+            self.bbox,
+            k,
+            noisy_density,
+            float(noisy_density.sum()),
+            self.split_scale,
+            self.split_gate,
+            self.max_sub_k,
         )
         m = self.grid.n_states
         start, end = m + _START_OFFSET, m + _END_OFFSET
         seqs = [self.grid.sequence_of(trajectory) for trajectory in points]
+        # D-4.6: the optional adjacency mask, read off the public grid geometry (no data, no
+        # random draws), applied together with the structural zeros below.
+        allowed = _adjacency_allowed(self.grid, m) if self.mask_non_adjacent else None
 
         # Stage 2 (eps2): the first-order matrix. Nothing can enter START or leave END, and
         # every trajectory has at least one state, so START -> END is impossible as well.
@@ -394,6 +437,8 @@ class PrivTraceGenerator(SyntheticGenerator):
         order1[:, start] = 0.0
         order1[end, :] = 0.0
         order1[start, end] = 0.0
+        if allowed is not None:
+            order1[~allowed] = 0.0
         order1 = _normcut_rows(order1)
 
         # Stage 3 (eps3): one [previous, next] matrix per adaptively selected state.
@@ -406,16 +451,20 @@ class PrivTraceGenerator(SyntheticGenerator):
                 f"{_MAX_SECOND_ORDER_CELLS:.3g} cap; lower first_level_k "
                 f"(now {self.first_level_k}) or max_sub_k (now {self.max_sub_k})"
             )
-        self._order2 = self._fit_second_order(seqs, m, selected, eps3)
+        self._order2 = self._fit_second_order(seqs, m, selected, eps3, allowed)
 
         self._order1 = order1
         self.n_states = m
         self.second_order_states = tuple(selected)
-        self._n_trajectories = n
         self._fitted = True
 
     def _fit_second_order(
-        self, seqs: Sequence[Sequence[int]], m: int, selected: Sequence[int], eps3: float
+        self,
+        seqs: Sequence[Sequence[int]],
+        m: int,
+        selected: Sequence[int],
+        eps3: float,
+        allowed: np.ndarray | None = None,
     ) -> dict[int, np.ndarray]:
         """Noisy ``[previous, next]`` matrix per selected state, built in ascending state order.
 
@@ -423,6 +472,10 @@ class PrivTraceGenerator(SyntheticGenerator):
         state, and the Laplace draws follow the ascending state order, so the whole stage is
         deterministic in the constructor seed. The counts stay float64: the reference casts
         them to integers, which destroys every count below 1 and is not in the paper.
+
+        ``allowed`` is the D-4.6 adjacency mask or None: when given, the matrix of state
+        ``s`` keeps entry ``[p, n]`` only if ``p`` is START or a neighbour of ``s`` and ``n``
+        is END or a neighbour of ``s``.
         """
         order2: dict[int, np.ndarray] = {}
         if not selected:
@@ -444,6 +497,15 @@ class PrivTraceGenerator(SyntheticGenerator):
             matrix = matrix + self._rng.laplace(0.0, 1.0 / eps3, matrix.shape)
             matrix[:, start] = 0.0
             matrix[end, :] = 0.0
+            if allowed is not None:
+                near = allowed[:m, :m]
+                previous_ok = np.zeros(size, dtype=bool)
+                previous_ok[:m] = near[:, state]
+                previous_ok[start] = True  # a walk may always enter the state from START
+                next_ok = np.zeros(size, dtype=bool)
+                next_ok[:m] = near[state]
+                next_ok[end] = True  # and may always end in it
+                matrix[~(previous_ok[:, None] & next_ok[None, :])] = 0.0
             order2[state] = _normcut_rows(matrix)
         return order2
 
@@ -458,16 +520,24 @@ class PrivTraceGenerator(SyntheticGenerator):
 
     # -- synthesis ----------------------------------------------------------------------
 
-    def _start_weights(self) -> np.ndarray:
-        """Noisy START row over the ``m`` real states; the caller normalises it.
+    def _start_probabilities(self) -> np.ndarray:
+        """Start distribution over the ``m`` real states: the normalised noisy START row.
 
-        A copy, so no caller can reach into the fitted matrix. The mass is 0 when NormCut has
-        emptied the row, which is why every caller needs a fallback.
+        NormCut can empty that row -- every entry of it may be paid out to cover the negative
+        noise -- and then there is nothing left to sample a first state from, so the fallback
+        is the uniform distribution over the ``m`` states. Synthesis and scoring both go
+        through this method, so a walk that was generated under the fallback is scored under
+        the same fallback. The result is a fresh array; no caller reaches into the fitted
+        matrix.
         """
-        weights: np.ndarray = np.array(
+        weights = np.array(
             self._order1[self.n_states + _START_OFFSET, : self.n_states], dtype=np.float64
         )
-        return weights
+        mass = float(weights.sum())
+        if mass <= 0.0:
+            return np.full(self.n_states, 1.0 / self.n_states)
+        probabilities: np.ndarray = weights / mass
+        return probabilities
 
     def _context_row(self, previous: int, current: int) -> np.ndarray:
         """Next-state weights of ``current``: its second-order row when usable, else first order.
@@ -510,17 +580,11 @@ class PrivTraceGenerator(SyntheticGenerator):
     def _sample_walk(self, rng: np.random.Generator) -> list[int]:
         """Start ~ the noisy START row, then adaptive steps until END, ``max_len`` or a dead end.
 
-        START is never drawn again because its column is zero everywhere; an all-zero start row
-        falls back to the uniform distribution over the states.
+        START is never drawn again because its column is zero everywhere; an emptied START row
+        falls back to the uniform start of :meth:`_start_probabilities`, exactly as scoring does.
         """
         start, end = self.n_states + _START_OFFSET, self.n_states + _END_OFFSET
-        weights = self._start_weights()
-        mass = float(weights.sum())
-        if mass > 0.0:
-            probabilities = weights / mass
-        else:
-            probabilities = np.full(self.n_states, 1.0 / self.n_states)
-        current = int(rng.choice(self.n_states, p=probabilities))
+        current = int(rng.choice(self.n_states, p=self._start_probabilities()))
         previous = start
         states = [current]
         while len(states) < self.max_len:
@@ -550,9 +614,7 @@ class PrivTraceGenerator(SyntheticGenerator):
             raise RuntimeError("PrivTraceGenerator.sequence_log_prob called before fit()")
         states = self._states_to_score(edge_seq)
         start, end = self.n_states + _START_OFFSET, self.n_states + _END_OFFSET
-        weights = self._start_weights()
-        mass = float(weights.sum())
-        first = float(weights[states[0]]) / mass if mass > 0.0 else 0.0
+        first = float(self._start_probabilities()[states[0]])
         log_prob = math.log(max(first, _PROB_FLOOR))
         for i in range(1, len(states)):
             row = self._context_row(states[i - 2] if i >= 2 else start, states[i - 1])
@@ -584,6 +646,23 @@ def _validated_bbox(bbox: Sequence[float]) -> Bbox:
     if not (x0 < x1 and y0 < y1):
         raise ValueError(f"bbox must satisfy min < max on both axes, got {bbox}")
     return (x0, y0, x1, y1)
+
+
+def _adjacency_allowed(grid: AdaptiveGrid, n_states: int) -> np.ndarray:
+    """D-4.6 mask: ``(m + 2, m + 2)`` booleans, True where a transition may keep its mass.
+
+    Two real states may be connected when their level-1 cells are the same or 4-adjacent,
+    i.e. when the Manhattan distance between the cells' ``(row, col)`` positions is at most 1;
+    the diagonal (a state to itself) is always allowed. Everything that touches START or END
+    stays True here, so the structural zeros applied next remain the only rule for the virtual
+    states. The mask is built from the public grid geometry alone -- no data, no random draws.
+    """
+    cells = np.array([grid.state_level1(state) for state in range(n_states)], dtype=np.int64)
+    rows, cols = cells // grid.k, cells % grid.k
+    distance = np.abs(rows[:, None] - rows[None, :]) + np.abs(cols[:, None] - cols[None, :])
+    allowed = np.ones((n_states + _N_VIRTUAL, n_states + _N_VIRTUAL), dtype=bool)
+    allowed[:n_states, :n_states] = distance <= 1
+    return allowed
 
 
 def _first_order_counts(seqs: Sequence[Sequence[int]], n_states: int) -> np.ndarray:
