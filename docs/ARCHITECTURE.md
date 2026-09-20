@@ -248,5 +248,10 @@ must keep running on baseline mechanisms without it. The first external baseline
 candidate is in: `LDPTraceGenerator` (registered as `ldptrace`, plan in
 `docs/NACRT_MEHANIZMI.md` §2) synthesizes grid-cell walks under per-trajectory
 ε-LDP and emits cell indices, not edge sequences — decoding cells back to roads is a
-separate, later step. Everything else attaches later through the existing ABCs
-without touching the core — that is the point of the interfaces.
+separate, later step. The second one, `PrivTraceGenerator` (registered as
+`privtrace`, plan in `docs/NACRT_MEHANIZMI.md` §5), is the central-DP counterpart: a
+trusted curator noises a two-layer adaptive grid (`synthesis/adaptive_grid.py`) and
+first-/second-order Markov counts over its leaf cells and emits leaf-cell walks; its
+ε is per trajectory under a trusted curator, so it bounds utility from above rather
+than competing with the LDP generators. Everything else attaches later through the
+existing ABCs without touching the core — that is the point of the interfaces.

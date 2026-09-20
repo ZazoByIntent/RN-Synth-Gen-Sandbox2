@@ -155,7 +155,7 @@ orchestrator cannot find it, the missing import in `builtins.py` is the reason.
 Currently registered names (grep for `@register` to refresh this list):
 `osm` (map source); `geolife`, `ldptrace_dat` (datasets); `leuven` (matcher); `none`,
 `geo_indistinguishability`, `point_ldp`, `spatial_rounding`, `temporal_downsampling`,
-`gaussian_noise` (mechanisms); `markov`, `rn_ldp_synth`, `ldptrace`
+`gaussian_noise` (mechanisms); `markov`, `rn_ldp_synth`, `ldptrace`, `privtrace`
 (generators); `reidentification`, `membership_inference`, `reconstruction`,
 `poi_inference` (attacks); `top_k_accuracy`, `linkage_rate` (metrics).
 
@@ -226,6 +226,16 @@ In pipeline order, with the reason each package exists:
   collector synthesizes cell walks from the aggregates. Its output is a cell
   sequence, not road segments; the module docstring lists where it deviates
   from the authors' public code and why.
+  `privtrace.py` is the second external baseline candidate (PrivTrace, Wang et
+  al. 2023) and the one with a different trust model: a *trusted curator* sees
+  every raw trajectory and releases a Laplace-noised two-layer grid
+  (`adaptive_grid.py`: a coarse grid whose busy cells are split again) plus
+  first- and second-order Markov counts over its leaf cells, repaired with the
+  paper's NormCut step; the guarantee is central, trajectory-level ε-DP, so its
+  rows are an upper bound on what a curator can reach, not a like-for-like
+  competitor of the LDP generators. The port follows the paper; the module
+  docstring lists where the authors' unlicensed public code departs from the
+  paper and why none of that is replicated.
 - **`attacks/`** — the four adversary families, one file each:
   `reidentification.py` ("whose trajectory is this?"), `membership.py` ("was
   this person's data used for training?"), `reconstruction.py` ("can the

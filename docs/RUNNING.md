@@ -511,6 +511,25 @@ For both `rn_ldp_synth` and `ldptrace` ε is spent per trajectory (per device),
 not per point, so these rows are not comparable with the geo-indistinguishability
 ε of §7. Measured rows: `docs/HANDOFF.md` §2.3.
 
+The same file also carries the `privtrace` arm (ZM-4, `docs/NACRT_MEHANIZMI.md`
+§5) at ε ∈ {0.5, 2.0, 8.0}: PrivTrace (Wang et al. 2023) is a *central*
+differential-privacy generator — a trusted curator sees every raw trajectory, lays a
+6×6 grid over the map's node bounding box, splits its busy cells, and releases
+Laplace-noised first- and second-order Markov counts over the leaf cells — so its ε
+is per trajectory under a different trust model than the LDP arms and its rows read
+as an upper bound on utility, not as a competitor (see the config header). The arm
+is as cheap as `ldptrace` (about 7–8 s per seed for 17 fits at the 20-user rung). At
+this rung the grid never splits and no state qualifies for the second-order model
+(36 states, training chains of about two cells): the split gate `0.05·|D|/K²` and
+the selection threshold `√2·m/ε₂` both sit far above the mass 90 trajectories can
+supply, so PrivTrace here is a noised first-order Markov model over 36 cells — the
+expected behaviour of a central-DP method at a sample size two orders of magnitude
+below the paper's, not a defect. Reproduce those facts with a refit of the target
+generator (`PrivTraceGenerator(network=..., epsilon=ε, seed=<run seed>)` on the
+train-split pool items in cache order, as `_membership_values` does); `run.json` does
+not record them. Measured rows: `docs/HANDOFF.md` §2.3; the differential validation
+of the port against the authors' code is §9.4.
+
 ## 7.3 Computational budget and scope reduction (report §6.6)
 
 Every attack invocation has a runtime budget, configurable as
