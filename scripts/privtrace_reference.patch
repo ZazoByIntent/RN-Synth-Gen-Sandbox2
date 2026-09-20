@@ -1,0 +1,210 @@
+diff --git a/config/parameter_carrier.py b/config/parameter_carrier.py
+index 7b5d497..ff04f59 100644
+--- a/config/parameter_carrier.py
++++ b/config/parameter_carrier.py
+@@ -5,6 +5,7 @@ class ParameterCarrier:
+         self.total_epsilon = args['total_epsilon']
+         self.epsilon_partition = args['epsilon_partition']
+         self.trajectory_number_to_generate = args['trajectory_number_to_generate']
++        self.level1_k = args['level1_k']
+ 
+ 
+ 
+diff --git a/config/parameter_setter.py b/config/parameter_setter.py
+index d950963..1576ad9 100644
+--- a/config/parameter_setter.py
++++ b/config/parameter_setter.py
+@@ -17,6 +17,11 @@ class ParSetter:
+         parser.add_argument('--epsilon_partition', type=np.ndarray, default=np.array([0.2, 0.4, 0.4]))
+         # this parameter indicates how many trajectories to generate
+         parser.add_argument('--trajectory_number_to_generate', type=int, default=-1)
++        # random seed for numpy and random; the code otherwise uses unseeded global state
++        parser.add_argument('--seed', type=int, default=2022)
++        # force the level-1 grid to K x K cells; 0 keeps the original K rule
++        parser.add_argument('--level1_k', type=int, default=0)
++        parser.add_argument('--output_file', type=str, default=fname.result_file_name)
+         args = vars(parser.parse_args())
+         if epsilon is not False:
+             args['total_epsilon'] = epsilon
+diff --git a/data_preparation/trajectory.py b/data_preparation/trajectory.py
+index 52a7845..31444aa 100644
+--- a/data_preparation/trajectory.py
++++ b/data_preparation/trajectory.py
+@@ -11,7 +11,7 @@ class Trajectory:
+         # calculate number of  points in a trajctory
+         self.point_number = 0
+         # define a list to store index of cells and subcells that points are in in the trajectory
+-        self.trajectory_cell_list = np.array([], dtype=np.int)
++        self.trajectory_cell_list = np.array([], dtype=int)
+         self.level1_cell_index_sequence = np.array([], dtype=int)
+         self.level2_cell_index_sequence = np.array([], dtype=int)
+         self.cell_sequence = np.array([], dtype=int)
+diff --git a/discretization/divide.py b/discretization/divide.py
+index 65419e9..205a0b1 100644
+--- a/discretization/divide.py
++++ b/discretization/divide.py
+@@ -15,14 +15,18 @@ class Divide:
+         bot = border2[1]
+         lef = border2[2]
+         rig = border2[3]
+-        para = np.floor(np.sqrt(total_density / initial_parameter))
+-        assert para > 1, 'need no dividing'
+-        if para > divide_threshold:
+-            para = divide_threshold
++        forced_k = getattr(self.cc, 'level1_k', 0)
++        if forced_k > 0:
++            para = forced_k
++        else:
++            para = np.floor(np.sqrt(total_density / initial_parameter))
++            assert para > 1, 'need no dividing'
++            if para > divide_threshold:
++                para = divide_threshold
+         x_divide_number = para
+         y_divide_number = para
+-        x_divide_number = np.int(x_divide_number)
+-        y_divide_number = np.int(y_divide_number)
++        x_divide_number = int(x_divide_number)
++        y_divide_number = int(y_divide_number)
+         x_increase = 1 / x_divide_number * (rig - lef)
+         y_increase = 1 / y_divide_number * (top - bot)
+         divide_parameter1 = np.array([x_divide_number, y_divide_number, x_increase, y_increase])
+@@ -30,7 +34,7 @@ class Divide:
+ 
+     def subdividing_parameter(self, noisy_density):
+         initial_parameter = 200
+-        subdivide_parameter1 = np.int(np.ceil(np.sqrt(noisy_density / initial_parameter)))
++        subdivide_parameter1 = int(np.ceil(np.sqrt(noisy_density / initial_parameter)))
+         return subdivide_parameter1
+ 
+ 
+diff --git a/discretization/grid.py b/discretization/grid.py
+index 4078709..e9fc1c2 100644
+--- a/discretization/grid.py
++++ b/discretization/grid.py
+@@ -438,7 +438,7 @@ class Grid:
+         subdividing_parameter = self.get_level2_parameter()
+         subdividing_cell_number = subdividing_parameter ** 2
+         cell_number = np.sum(subdividing_cell_number)
+-        cell_number = np.int(cell_number)
++        cell_number = int(cell_number)
+         self.initializing_subdividing_parameter(cell_number)
+         subcell_index = 0
+         for level1_cell_index in range(subdividing_parameter.size):
+diff --git a/generator/trajectory_generator.py b/generator/trajectory_generator.py
+index 9a2e764..cc872c5 100644
+--- a/generator/trajectory_generator.py
++++ b/generator/trajectory_generator.py
+@@ -137,7 +137,7 @@ class Generator:
+         grid = self.markov_model.grid
+         level1_state_number = grid.level1_cell_number
+         level1_para = np.sqrt(level1_state_number)
+-        threshold = np.int(np.floor(level1_para * 0.8))
++        threshold = int(np.floor(level1_para * 0.8))
+         if threshold < 0:
+             threshold = 0
+         self.level1_length_threshold_value = threshold
+@@ -146,7 +146,7 @@ class Generator:
+         # grid = self.markov_model.grid
+         average_subdividing_number = self.average_subdividing_number
+         # whole_threshold = np.int(np.ceil(average_subdividing_number)) * 1.5
+-        whole_threshold = np.int(np.ceil(average_subdividing_number))
++        whole_threshold = int(np.ceil(average_subdividing_number))
+         if whole_threshold < level1_len_threshold:
+             whole_threshold = level1_len_threshold
+         self.simple_level2_length_threshold_value = whole_threshold
+@@ -335,9 +335,9 @@ class Generator:
+             neighbors_of_this_step = grid.subcell_neighbors_usable_index[this_step]
+             weights = self.total_in_degree[neighbors_of_this_step]
+             if np.sum(weights) == 0:
+-                this_step1 = np.int(gt1.random_pick_element(neighbors_of_this_step))
++                this_step1 = int(gt1.random_pick_element(neighbors_of_this_step))
+             else:
+-                this_step1 = np.int(np.random.choice(neighbors_of_this_step, p=weights / np.sum(weights)))
++                this_step1 = int(np.random.choice(neighbors_of_this_step, p=weights / np.sum(weights)))
+         else:
+             this_step1 = gt1.draw_by_probability_without_an_element(candidates, probability, -2)
+         pass
+diff --git a/main.py b/main.py
+index cb9b686..d6e6e9e 100644
+--- a/main.py
++++ b/main.py
+@@ -9,12 +9,16 @@ from config.parameter_setter import ParSetter
+ from tools.data_writer import DataWriter
+ from data_preparation.data_preparer import DataPreparer
+ import datetime
++import random
++import numpy as np
+ 
+ if __name__ == "__main__":
+     writer = DataWriter()
+     print('begin all')
+     print(datetime.datetime.now())
+     par = ParSetter().set_up_args()
++    np.random.seed(par['seed'])
++    random.seed(par['seed'])
+     pc = ParameterCarrier(par)
+     data_preparer = DataPreparer(par)
+     trajectory_set = data_preparer.get_trajectory_set()
+@@ -28,7 +32,7 @@ if __name__ == "__main__":
+     st_tra_list = sg1.generate_tra(mo1)
+     rlt1 = RealLocationTranslator(pc)
+     real_tra_list = rlt1.translate_trajectories(grid, st_tra_list)
+-    writer.save_trajectory_data_in_list_to_file(real_tra_list, fname.result_file_name)
++    writer.save_trajectory_data_in_list_to_file(real_tra_list, par['output_file'])
+     print('end all')
+     print(datetime.datetime.now())
+     pass
+\ No newline at end of file
+diff --git a/primarkov/guidepost.py b/primarkov/guidepost.py
+index fb324ab..fb49ec7 100644
+--- a/primarkov/guidepost.py
++++ b/primarkov/guidepost.py
+@@ -98,7 +98,7 @@ class GuidePost:
+         noisy_matrix[:, self.start_state] = np.zeros(self.all_state_number)
+         noisy_matrix[self.end_state, :] = np.zeros(self.all_state_number)
+         noisy_matrix = noise1.positive_regulation_for_markov_matrix(noisy_matrix)
+-        self.order2_trans_matrix = noisy_matrix.astype(np.int)
++        self.order2_trans_matrix = noisy_matrix.astype(int)
+ 
+     #
+     def give_total_ends_value(self):
+diff --git a/primarkov/start_end_calibrator.py b/primarkov/start_end_calibrator.py
+index 39bb5b0..94942f2 100644
+--- a/primarkov/start_end_calibrator.py
++++ b/primarkov/start_end_calibrator.py
+@@ -6,8 +6,12 @@ import config.folder_and_file_names as config
+ # from tools.object_store import ObjectStore
+ from tools.general_tools import GeneralTools
+ from config.parameter_carrier import ParameterCarrier
+-import torch
+-import torch.optim as optim
++try:
++    import torch
++    import torch.optim as optim
++except ImportError:  # torch is only needed by the unused optimiser variants below
++    torch = None
++    optim = None
+ import cvxpy as cp
+ 
+ 
+diff --git a/tools/data_writer.py b/tools/data_writer.py
+index 74bb88e..0816241 100644
+--- a/tools/data_writer.py
++++ b/tools/data_writer.py
+@@ -7,7 +7,6 @@ from os import walk
+ import datetime
+ import config.folder_and_file_names as config
+ import os
+-import fcntl
+ 
+ 
+ class DataWriter:
+@@ -25,7 +24,7 @@ class DataWriter:
+                 for j in range(tr.shape[0]):
+                     x = tr[j, 0]
+                     y = tr[j, 1]
+-                    file_object.write('%.2f' % x + ',' + '%.2f' % y + ';')
++                    file_object.write('%.6f' % x + ',' + '%.6f' % y + ';')
+                 file_object.write('\n')
+         file_object.close()
+ 

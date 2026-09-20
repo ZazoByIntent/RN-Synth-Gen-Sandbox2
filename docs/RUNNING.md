@@ -15,8 +15,8 @@ threshold history · §7.5 mechanism-breadth perturbation config (point LDP and 
 baselines) · §8
 `trajguard report` · §9 RN-LDP-Synth evidence sweep ·
 §9.1 LDPTrace validation inputs (Porto conversion) · §9.2 membership inference in the
-cells representation (Porto) · §9.3 LDPTrace validation run (reference vs port) · §10
-caching · §11 troubleshooting.
+cells representation (Porto) · §9.3 LDPTrace validation run (reference vs port) · §9.4
+PrivTrace validation run (reference vs port) · §10 caching · §11 troubleshooting.
 
 ## 0. One-time setup
 
@@ -524,11 +524,16 @@ this rung the grid never splits and no state qualifies for the second-order mode
 the selection threshold `√2·m/ε₂` both sit far above the mass 90 trajectories can
 supply, so PrivTrace here is a noised first-order Markov model over 36 cells — the
 expected behaviour of a central-DP method at a sample size two orders of magnitude
-below the paper's, not a defect. Reproduce those facts with a refit of the target
+below the paper's, not a defect. The `|D|` in that gate is the **sum of the noisy,
+post-NormCut level-1 densities**, not the true trajectory count (pure post-processing
+of the stage-1 release), so the threshold wobbles with the noise; at this rung it
+changes nothing, because `κ = ⌈√(d/200)⌉` stays 1 anyway and the cell is not split
+either way. Reproduce those facts with a refit of the target
 generator (`PrivTraceGenerator(network=..., epsilon=ε, seed=<run seed>)` on the
 train-split pool items in cache order, as `_membership_values` does); `run.json` does
-not record them. Measured rows: `docs/HANDOFF.md` §2.3; the differential validation
-of the port against the authors' code is §9.4.
+not record them. The measured rows were re-run on 20 September 2026 from the committed
+tree (`run.json`: `git_commit b0a7dae`) after the review fixes; see `docs/HANDOFF.md`
+§2.3; the differential validation of the port against the authors' code is §9.4.
 
 ## 7.3 Computational budget and scope reduction (report §6.6)
 
@@ -945,6 +950,174 @@ prints a table with one row per (ε, metric) and `mean [min; max]` over the seed
 `trajectory_point2grid` and the harness give the same chain for the first 20 000 trips
 once the closed-interval cell rule is used — is recorded in
 `docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5.
+
+## 9.4 PrivTrace validation run: the authors' code vs the `privtrace` port (Porto, ~1 hour)
+
+ZM-4 of `docs/NACRT_MEHANIZMI.md` §5: both implementations synthesize the same first
+20 000 Porto trips (§9.1 conversion) with the level-1 grid forced to 6×6 on both sides and
+are scored with the nine LDPTrace-paper metrics (`evaluation/ldptrace_metrics.py`) on one
+uniform 20×20 evaluation grid over the reference's own bounding box. That bounding box is the
+raw data's min/max per axis extended by 1e-5 of the span, which is **not** differentially
+private — on either side: the reference reads it off the raw data just as the harness does, and
+both columns treat the region as part of the shared, public-by-assumption setup rather than as
+part of the mechanism. The reference prints no metrics of its own, so every column is scored by
+the harness `experiments/privtrace_eval.py`: port (the paper), port with the optional D-4.6
+adjacency mask, and the reference — mean and range over seeds 1–5 at ε ∈ {0.5, 1.0, 2.0}, each
+run scored twice (with and without king's-walk bridging). Measured table and reading:
+`docs/HANDOFF.md` §2.3.
+
+**One-time setup of the reference code** (kept out of git; `external/` is ignored). The
+authors' repository has **no licence**, so nothing from it is copied into the package; the
+patch is the only artefact in this repository:
+
+```sh
+git clone https://github.com/DpTrace/PrivTrace external/PrivTrace     # commit b06cef7 was used
+cd external/PrivTrace && git apply ../../scripts/privtrace_reference.patch && cd ../..
+uv pip install cvxpy      # the reference's trip solver; not a project dependency, not in pyproject
+uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
+    --max-trajectories 20000 --write-subset external/PrivTrace/datasets/porto_20k.dat
+```
+
+The patch makes the 2022 code run on this stack (`np.int` → `int` at 11 sites, the
+POSIX-only `import fcntl` removed, the dead `import torch` guarded) and adds three knobs:
+`--seed` (the code had none; every draw is global numpy/random state), `--level1_k` (forces
+the level-1 grid size; the original rule `K = min(60, ⌊√(N_points/600)⌋)` would give K = 32
+here and thousands of states, which never finishes) and `--output_file` (the output name,
+written with six decimals instead of the original two). The algorithm — noise, NormCut,
+subdivision, the adaptive rule, the end-probability multipliers, the rejection filters and the
+cvxpy trip solver — is untouched, because the comparison is against the code as it is. `cvxpy`
+is installed into the existing `uv` environment for the reference only (`uv run` keeps it);
+it has no ECOS, so the code's bare `except:` lands on SCS, silently.
+
+**Reference side** — 15 runs from `external/PrivTrace/` (the reader resolves
+`datasets/<name>` relative to the working directory), one log per run, sequentially
+(one run ≈ 75–90 s alone, longer when the port runs concurrently):
+
+```powershell
+# from external\PrivTrace, PowerShell or cmd; the project interpreter runs the reference
+foreach ($eps in "0.5", "1.0", "2.0") { foreach ($seed in 1..5) {
+  ..\..\.venv\Scripts\python.exe main.py --dataset_file_name porto_20k.dat --total_epsilon $eps `
+      --seed $seed --level1_k 6 --output_file generated_eps_${eps}_seed_${seed}.txt `
+      > ..\..\results\privtrace_validation\reference\eps${eps}_seed${seed}.log 2>&1
+} }
+```
+
+Each run writes `external/PrivTrace/generated_eps_<ε>_seed_<s>.txt` (the reference's text
+format, one trajectory per input trip, one point per state) and prints only phase
+timestamps plus two known `RuntimeWarning`s (a division by zero in its end-column rescale;
+they do not abort the run). Those warnings are worth reading rather than ignoring: the rescale
+divides by the END mass of a second-order state, and when that mass is zero the END column of
+the state is cast to `INT_MIN`. One or two states per run end up in that condition (0.7 to
+2.5 per cent of the out-mass); they can never end a walk and depend on the reference's
+dead-end jump instead. With the no-OR patch below the reference selects far fewer second-order
+states and the warnings disappear entirely.
+
+**Port side, scoring and the table** — the harness reads the first 20 000 records of the
+`.dat` directly (0.9 s; no orchestrator cache, no split), fits the port in bbox mode on the
+reference's bounding box, synthesizes 20 000 walks per (ε, seed), draws one uniform point per
+leaf, and scores; then it scores the reference's 15 output files the same way:
+
+```sh
+uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
+    --max-trajectories 20000 --first-level-k 6 --eval-grid 20 --epsilons 0.5 1.0 2.0 \
+    --seeds 1 2 3 4 5 --label port --out results/privtrace_validation/port.json \
+    --save-synthesis results/privtrace_validation/port_synthesis
+uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
+    --max-trajectories 20000 --first-level-k 6 --eval-grid 20 --epsilons 0.5 1.0 2.0 \
+    --seeds 1 2 3 4 5 --mask-non-adjacent --label port_masked \
+    --out results/privtrace_validation/port_masked.json
+uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
+    --max-trajectories 20000 --eval-grid 20 --epsilons 0.5 1.0 2.0 --seeds 1 2 3 4 5 \
+    --label reference \
+    --score-synthesis "external/PrivTrace/generated_eps_{eps}_seed_{seed}.txt" \
+    --out results/privtrace_validation/reference.json
+uv run python -m trajguard.experiments.privtrace_eval --compare \
+    results/privtrace_validation/port.json results/privtrace_validation/port_masked.json \
+    results/privtrace_validation/reference.json
+```
+
+`--compare` takes any number of result files and prints one column per file, in the order
+given. `--mask-non-adjacent` is the second port variant (deviation D-4.6): a transition
+between two states whose level-1 cells are neither the same nor 4-adjacent is zeroed with the
+structural zeros, after the noise and before NormCut. It changes the port's own synthesis, so
+it is meaningless together with `--score-synthesis` and the harness refuses that combination.
+
+**The two scoring passes.** Every run is scored twice. The nine metrics under their plain
+names use the LDPTrace convention, where `Grid.chain` bridges a jump between non-adjacent
+cells with a straight king's walk, so the jump is charged as the whole line of cells it flies
+over. The same values under `nobridge_<name>` keep only the cells the trajectory's own points
+fall in. Only six of the nine repeat: the point queries, the diameter and the length are
+computed from points and bridging cannot touch them. The extra row `interpolated_share` is the
+fraction of chain cells that bridging inserted, and the header line
+`real interpolated share (<label>)` is the same fraction for the real trips — read the two
+together, because a side whose share is far above the real one is being flattered by the
+bridged numbers.
+
+`{eps}` and `{seed}` are placeholders filled from `--epsilons` / `--seeds` (`{eps}` as
+Python's float repr, `1.0`, exactly as the reference was told on its command line).
+`--save-synthesis DIR` keeps the port's synthetic points in the reference's text format (the
+test suite scores such a file and gets the run's values back up to the six decimals).
+The port-only rows `n_states`, `n_second_order` and `synthetic_mean_length` come from the
+fitted generator; the reference exposes nothing comparable.
+
+**Diagnostic: the reference without its three OR conditions.** This is a one-off diagnostic
+*outside* the main comparison, not part of the measured table. The reference forces a state
+into its second-order model when any of three extra conditions holds (very large out-degree,
+start weight above two per cent, end weight above two per cent), on top of the paper's own
+rule; `scripts/privtrace_reference_no_or.patch` removes those three `np.logical_or` lines from
+`find_sensitive_state`, so only the paper's rule selects. Apply it on top of the main patch,
+run the two seeds at ε = 0.5 exactly like the main runs, revert it, and score the output as a
+separate label next to a like-for-like control (the main reference outputs scored over seeds
+1–2 only):
+
+```sh
+git -C external/PrivTrace apply ../../scripts/privtrace_reference_no_or.patch
+```
+
+```powershell
+# from external\PrivTrace, as above
+foreach ($seed in 1..2) {
+  ..\..\.venv\Scripts\python.exe main.py --dataset_file_name porto_20k.dat --total_epsilon 0.5 `
+      --seed $seed --level1_k 6 --output_file generated_noor_eps_0.5_seed_${seed}.txt `
+      > ..\..\results\privtrace_validation\reference_no_or\eps0.5_seed${seed}.log 2>&1
+}
+```
+
+```sh
+git -C external/PrivTrace apply -R ../../scripts/privtrace_reference_no_or.patch
+uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
+    --max-trajectories 20000 --eval-grid 20 --epsilons 0.5 --seeds 1 2 \
+    --label reference_no_or \
+    --score-synthesis "external/PrivTrace/generated_noor_eps_{eps}_seed_{seed}.txt" \
+    --out results/privtrace_validation/reference_no_or.json
+uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
+    --max-trajectories 20000 --eval-grid 20 --epsilons 0.5 --seeds 1 2 \
+    --label reference_s12 \
+    --score-synthesis "external/PrivTrace/generated_eps_{eps}_seed_{seed}.txt" \
+    --out results/privtrace_validation/reference_s12.json
+uv run python -m trajguard.experiments.privtrace_eval --compare \
+    results/privtrace_validation/port.json results/privtrace_validation/port_masked.json \
+    results/privtrace_validation/reference_s12.json \
+    results/privtrace_validation/reference_no_or.json
+```
+
+Revert the patch before any further main run, otherwise the reference column stops being the
+reference. The two no-OR runs take 138 s and 119 s and print no `RuntimeWarning` at all.
+
+**Expected outcome** (measured 20 September 2026; table, timings and the full reading in
+`docs/HANDOFF.md` §2.3). The sides agree on the grid (159–164 leaf states on both) and on the
+trend: every error falls with ε in all three columns, and at ε = 2 the density, the hot spots
+and the Kendall coefficient overlap within the seed spread. They do **not** agree on trips,
+diameter, point queries and patterns, where the port is better — but read the `nobridge_*`
+block before quoting that: two thirds of the port's chain cells at ε = 0.5 are inserted by
+bridging against 8 per cent for the real trips, and without bridging the port's pattern
+metrics lose most of their lead (its pattern F1 at ε = 1 falls inside the reference's seed
+spread), while density, hot spots, Kendall, trips and pattern support stay ahead. The
+reference is better on length at ε ≥ 1, but only because its walks are uniformly too short
+(4.2–7.1 points against real trips of 12.0 collapsed states), not because it controls length.
+Timings: the port's 15 runs take 8.3 minutes (8.5 with the mask), scoring the reference's 15
+syntheses 5.2 minutes, and the reference's own 15 runs 33 minutes. Output stays out of git
+(`results/privtrace_validation/`).
 
 ## 10. How caching works (read before re-running with changed data)
 

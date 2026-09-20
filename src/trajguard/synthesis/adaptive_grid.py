@@ -10,8 +10,11 @@ adds its own Laplace noise under its own budget, and hands the noisy vector to
 :meth:`AdaptiveGrid.build`.
 
 **Subdivision rule.** A level-1 cell is split only when its noisy density exceeds
-``split_gate * n_trajectories / k**2`` (five per cent of the uniform share), and then
-``kappa_i = ceil(sqrt(density_i / split_scale))``, clamped to ``[1, max_sub_k]``. This
+``split_gate * total_density / k**2`` (five per cent of the uniform share), and then
+``kappa_i = ceil(sqrt(density_i / split_scale))``, clamped to ``[1, max_sub_k]``. The
+``total_density`` in that gate is whatever total the caller hands in; the caller is
+expected to pass the sum of the *noisy* density vector, never a true trajectory count,
+so that the gate reads nothing but the differentially private release. The rule
 follows the authors' code (``discretization/divide.py``, ``discretization/grid.py``)
 rather than the paper, because the paper gives the rule twice and the two versions
 disagree by a factor of 1000: section 5.1 has ``kappa_i = sqrt(d_i * K * pop / 2e7)``
@@ -28,6 +31,7 @@ count (and with it the quadratic work downstream) past what this benchmark can r
 the geometry, the densities and the state count are identical.
 """
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
@@ -105,23 +109,29 @@ class AdaptiveGrid:
         bbox: Bbox,
         k: int,
         noisy_density: np.ndarray,
-        n_trajectories: int,
+        total_density: float,
         split_scale: float = 200.0,
         split_gate: float = 0.05,
         max_sub_k: int = 8,
     ) -> "AdaptiveGrid":
         """Apply the reference subdivision rule to a noisy level-1 density.
 
-        Cell ``i`` is split only when ``noisy_density[i] > split_gate * n_trajectories /
+        Cell ``i`` is split only when ``noisy_density[i] > split_gate * total_density /
         k**2``; then ``kappa_i = ceil(sqrt(noisy_density[i] / split_scale))`` clamped to
         ``[1, max_sub_k]``, otherwise ``kappa_i = 1``. Negative and NaN densities never
         pass the gate, so they count as "not split".
+
+        ``total_density`` is the overall mass the gate is measured against -- a finite,
+        non-negative float supplied by the caller, who is expected to hand in the sum of
+        the noisy density vector rather than a true trajectory count, so that the gate is
+        pure post-processing of the differentially private release.
         """
         checked = _validated_bbox(bbox)
         if k < 2:
             raise ValueError(f"the level-1 grid must be at least 2x2, got k={k}")
-        if n_trajectories < 1:
-            raise ValueError(f"n_trajectories must be >= 1, got {n_trajectories}")
+        total = float(total_density)
+        if not math.isfinite(total) or total < 0.0:
+            raise ValueError(f"total_density must be a finite number >= 0, got {total_density}")
         density = np.asarray(noisy_density, dtype=np.float64)
         if density.shape != (k * k,):
             raise ValueError(
@@ -135,7 +145,7 @@ class AdaptiveGrid:
             raise ValueError(f"max_sub_k must be >= 1, got {max_sub_k}")
 
         finite = np.where(np.isnan(density), -np.inf, density)
-        threshold = split_gate * n_trajectories / float(k * k)
+        threshold = split_gate * total / float(k * k)
         split = finite > threshold
         kappa = np.ones(k * k, dtype=np.int64)
         sub_k = np.ceil(np.sqrt(finite[split] / split_scale)).astype(np.int64)

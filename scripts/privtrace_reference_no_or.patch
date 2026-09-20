@@ -1,0 +1,14 @@
+diff --git a/primarkov/sensitive_filter.py b/primarkov/sensitive_filter.py
+index 384ee4f..db1f996 100644
+--- a/primarkov/sensitive_filter.py
++++ b/primarkov/sensitive_filter.py
+@@ -28,9 +28,6 @@ class Filter:
+         begin_indicator = self.begin_sensitivity(markov_matrix)
+         end_indicator = self.end_sensitivity(markov_matrix)
+         final_indicator = np.logical_and(degree_amount_indicator, degree_distribution_indicator)
+-        final_indicator = np.logical_or(final_indicator, extremely_large_degree_indicator)
+-        final_indicator = np.logical_or(final_indicator, begin_indicator)
+-        final_indicator = np.logical_or(final_indicator, end_indicator)
+         self.sensitivity_indicator = final_indicator
+         return final_indicator
+ 

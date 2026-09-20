@@ -3,6 +3,8 @@
 import inspect
 import itertools
 import math
+from collections.abc import Sequence
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -29,7 +31,7 @@ BBOX = (0.0, 0.0, 10.0, 20.0)
 def _grid() -> AdaptiveGrid:
     """2x2 level-1 grid with kappa = (1, 3, 5, 1): one cell per split state of the rule."""
     density = np.array([0.5, 1000.0, 5000.0, -3.0])
-    return AdaptiveGrid.build(BBOX, 2, density, n_trajectories=100)
+    return AdaptiveGrid.build(BBOX, 2, density, total_density=100.0)
 
 
 # --- NormCut ---------------------------------------------------------------------------
@@ -124,21 +126,26 @@ def test_build_splits_dense_cells_and_leaves_sparse_ones_alone() -> None:
     assert grid.kappa == (1, 3, 5, 1)  # ceil(sqrt(1000/200)) = 3, ceil(sqrt(5000/200)) = 5
 
 
-def test_build_gate_blocks_cells_below_five_percent_of_the_uniform_share() -> None:
+def test_build_gate_moves_with_the_total_density_handed_in() -> None:
+    """The gate is a share of the caller's total, so the same density can split or not."""
     density = np.array([0.5, 1000.0, 5000.0, -3.0])
-    # threshold = 0.05 * 100000 / 4 = 1250, so the 1000-density cell no longer splits.
-    grid = AdaptiveGrid.build(BBOX, 2, density, n_trajectories=100_000)
-    assert grid.kappa == (1, 1, 5, 1)
+    # threshold = split_gate * total / k**2: 0.05 * 100 / 4 = 1.25 lets the 1000-density cell
+    # split, while 0.05 * 100000 / 4 = 1250 blocks it. The density vector is identical.
+    assert AdaptiveGrid.build(BBOX, 2, density, total_density=100.0).kappa == (1, 3, 5, 1)
+    assert AdaptiveGrid.build(BBOX, 2, density, total_density=100_000.0).kappa == (1, 1, 5, 1)
+    # The total is a float, not a count: 0.05 * 79999.5 / 4 = 999.99 is just under 1000.
+    assert AdaptiveGrid.build(BBOX, 2, density, total_density=79_999.5).kappa == (1, 3, 5, 1)
+    assert AdaptiveGrid.build(BBOX, 2, density, total_density=80_000.5).kappa == (1, 1, 5, 1)
 
 
 def test_build_treats_nan_density_as_not_split() -> None:
     density = np.array([np.nan, 1000.0, 5000.0, -3.0])
-    assert AdaptiveGrid.build(BBOX, 2, density, n_trajectories=100).kappa == (1, 3, 5, 1)
+    assert AdaptiveGrid.build(BBOX, 2, density, total_density=100.0).kappa == (1, 3, 5, 1)
 
 
 def test_build_clamps_kappa_to_max_sub_k() -> None:
     density = np.array([0.5, 1000.0, 5000.0, -3.0])
-    grid = AdaptiveGrid.build(BBOX, 2, density, n_trajectories=100, max_sub_k=2)
+    grid = AdaptiveGrid.build(BBOX, 2, density, total_density=100.0, max_sub_k=2)
     assert grid.kappa == (1, 2, 2, 1)
 
 
@@ -223,7 +230,11 @@ def test_build_rejects_bad_arguments() -> None:
     with pytest.raises(ValueError):
         AdaptiveGrid.build(BBOX, 2, np.zeros(5), 100)  # wrong density length
     with pytest.raises(ValueError):
-        AdaptiveGrid.build(BBOX, 2, density, 0)  # no trajectories
+        AdaptiveGrid.build(BBOX, 2, density, -1.0)  # negative total
+    with pytest.raises(ValueError):
+        AdaptiveGrid.build(BBOX, 2, density, float("nan"))  # not a finite total
+    with pytest.raises(ValueError):
+        AdaptiveGrid.build(BBOX, 2, density, float("inf"))  # not a finite total
     with pytest.raises(ValueError):
         AdaptiveGrid.build(BBOX, 2, density, 100, split_scale=0.0)
     with pytest.raises(ValueError):
@@ -768,3 +779,263 @@ def test_constructor_signature_matches_the_orchestrator_injection(
         signature.bind_partial(epsilonn=2.0)  # a misspelled YAML param is a config error
     gen = PrivTraceGenerator(network=fixture_network, epsilon=2.0, seed=7)  # the injection
     assert gen.seed == 7 and gen.epsilon == 2.0 and gen.bbox[0] < gen.bbox[2]
+    bound_mask = signature.bind_partial(mask_non_adjacent=True)  # the D-4.6 YAML switch binds
+    assert bound_mask.arguments == {"mask_non_adjacent": True}
+
+
+# --- Noise accounting, the empty START row, the dead end and the D-4.6 mask -------------
+
+_HUB_K = 3
+_HUB_EPS = 200.0
+
+
+def _cell_point(cell: int, rng: np.random.Generator) -> tuple[float, float]:
+    """A jittered point well inside level-1 cell ``cell`` of a _HUB_K x _HUB_K grid over BBOX."""
+    row, col = divmod(cell, _HUB_K)
+    x0, y0, x1, y1 = BBOX
+    width, height = (x1 - x0) / _HUB_K, (y1 - y0) / _HUB_K
+    jitter = rng.uniform(-0.25, 0.25, size=2)
+    return (x0 + (col + 0.5 + jitter[0]) * width, y0 + (row + 0.5 + jitter[1]) * height)
+
+
+def _hub_points(n: int = 90, seed: int = 20260920) -> list[np.ndarray]:
+    """``n`` three-point trajectories through the hub cell 4 of a 3x3 level-1 grid.
+
+    Three patterns in equal shares: ``1 -> 4 -> 7`` and ``3 -> 4 -> 5``, whose steps are
+    4-adjacent, and ``0 -> 4 -> 8``, whose steps are diagonal so the D-4.6 mask has real mass to
+    remove. The hub's busiest successors are then within a factor of 5 of each other and its
+    outgoing mass is far above theta1, so the paper's rule gives cell 4 a second-order matrix.
+    Cell 4 reaches a density of 30 and the rest 10, all far below ``split_scale = 200``, so no
+    cell is subdivided and the 9 leaf states are the 9 level-1 cells.
+    """
+    patterns = ([1, 4, 7], [3, 4, 5], [0, 4, 8])
+    rng = np.random.default_rng(seed)
+    return [
+        np.array([_cell_point(cell, rng) for cell in patterns[i % 3]], dtype=np.float64)
+        for i in range(n)
+    ]
+
+
+def _hub_generator(mask_non_adjacent: bool = False, seed: int = 4) -> PrivTraceGenerator:
+    """A fitted bbox-mode generator over :func:`_hub_points`, optionally under the D-4.6 mask."""
+    gen = PrivTraceGenerator(
+        bbox=BBOX,
+        epsilon=_HUB_EPS,
+        first_level_k=_HUB_K,
+        mask_non_adjacent=mask_non_adjacent,
+        seed=seed,
+    )
+    gen.fit_points(_hub_points())
+    return gen
+
+
+def _level1_distance(grid: AdaptiveGrid, a: int, b: int) -> int:
+    """Manhattan distance between the level-1 (row, col) positions of two leaf states."""
+    row_a, col_a = divmod(grid.state_level1(a), grid.k)
+    row_b, col_b = divmod(grid.state_level1(b), grid.k)
+    return abs(row_a - row_b) + abs(col_a - col_b)
+
+
+class _LaplaceRecorder:
+    """A stand-in for the generator's ``Generator``: logs every Laplace draw and nothing else.
+
+    ``__getattr__`` catches every other attribute of the real Generator, so a test can assert
+    that the fit reached for no other source of randomness.
+    """
+
+    def __init__(self, seed: int) -> None:
+        self.rng = np.random.default_rng(seed)
+        self.draws: list[tuple[float, object]] = []
+        self.other_calls: list[str] = []
+
+    def laplace(self, *args: Any, **kwargs: Any) -> np.ndarray:
+        scale = float(kwargs["scale"]) if "scale" in kwargs else float(args[1])
+        size = kwargs["size"] if "size" in kwargs else args[2]
+        self.draws.append((scale, size))
+        drawn: np.ndarray = self.rng.laplace(*args, **kwargs)
+        return drawn
+
+    def __getattr__(self, name: str) -> Any:
+        self.other_calls.append(name)
+        return getattr(self.rng, name)
+
+
+def _independent_walk_probability(
+    gen: PrivTraceGenerator, walk: Sequence[int]
+) -> tuple[float, bool]:
+    """Probability of a state walk recomputed from the fitted matrices, and whether order 2 ran.
+
+    Deliberately re-implements the adaptive rule instead of calling ``_context_row``: at every
+    step the row is the second-order ``[previous]`` row of the current state when that state has
+    a matrix and the row carries mass, and the first-order row otherwise.
+    """
+    m = gen.n_states
+    start, end = m, m + 1
+    start_row = gen._order1[start, :m]
+    start_mass = float(start_row.sum())
+    probability = float(start_row[walk[0]]) / start_mass if start_mass > 0.0 else 1.0 / m
+    used_second = False
+
+    def row_of(previous: int, current: int) -> np.ndarray:
+        nonlocal used_second
+        second = gen._order2.get(current)
+        if second is not None and float(second[previous].sum()) > 0.0:
+            used_second = True
+            second_row: np.ndarray = second[previous]
+            return second_row
+        first_row: np.ndarray = gen._order1[current]
+        return first_row
+
+    previous, current = start, int(walk[0])
+    for step in walk[1:]:
+        row = row_of(previous, current)
+        probability *= float(row[step]) / float(row.sum())
+        previous, current = current, int(step)
+    last = row_of(previous, current)
+    probability *= float(last[end]) / float(last.sum())
+    return probability, used_second
+
+
+def test_the_hub_fit_has_nine_unsplit_states_and_a_second_order_hub() -> None:
+    """Pins what the other hub tests rely on: 9 unsplit states and cell 4 in the order-2 set."""
+    gen = _hub_generator()
+    assert gen.n_states == _HUB_K * _HUB_K == 9
+    assert gen.grid.kappa == (1,) * 9
+    assert 4 in gen.second_order_states  # measured: the rule selects exactly (4,) on this fit
+
+
+def test_fit_draws_one_laplace_batch_per_stage_at_the_stage_scale() -> None:
+    """Privacy accounting in code: three stages, one draw each, at 1/eps_stage, nothing else."""
+    gen = PrivTraceGenerator(bbox=BBOX, epsilon=_HUB_EPS, first_level_k=_HUB_K, seed=4)
+    recorder = _LaplaceRecorder(4)
+    gen._rng = recorder  # type: ignore[assignment]
+    gen.fit_points(_hub_points())
+    eps1, eps2, eps3 = gen.stage_epsilons
+    size = (gen.n_states + 2, gen.n_states + 2)
+    assert gen.second_order_states  # the third stage really runs on this fit
+    assert recorder.draws == [(1.0 / eps1, _HUB_K * _HUB_K), (1.0 / eps2, size)] + [
+        (1.0 / eps3, size)
+    ] * len(gen.second_order_states)
+    assert recorder.other_calls == []  # nothing else touches the generator's randomness
+
+
+def test_generated_walks_score_exactly_as_the_model_assigned_them() -> None:
+    """The membership hook must return the probability the sampler actually used."""
+    gen = _hub_generator()
+    checked, with_second_order = 0, 0
+    for syn in gen.generate(50, seed=17):
+        walk = list(syn.payload)
+        if len(walk) >= gen.max_len:
+            continue
+        probability, used_second = _independent_walk_probability(gen, walk)
+        if probability == 0.0:
+            continue  # the final row has no END mass, so the score floors that factor instead
+        checked += 1
+        with_second_order += int(used_second)
+        assert math.exp(gen.sequence_log_prob(walk)) == pytest.approx(probability, rel=1e-9)
+    # Measured on this fit: 50 of the 50 walks are checked, 49 of them step through a
+    # second-order row; the two counts below are floors, not the measurement.
+    assert checked >= 10
+    assert with_second_order >= 1
+
+
+def test_a_dead_end_stops_the_walk_and_floors_the_impossible_step() -> None:
+    """A state whose row carries no mass ends the walk; scoring pays 1e-12 for the same step."""
+    gen = _hub_generator()
+    m = gen.n_states
+    start, end = m, m + 1
+    dead = 0
+    target = next(
+        s for s in range(m) if s != dead and s not in gen._order2 and gen._order1[s, end] > 0.0
+    )
+    gen._order1[dead, :] = 0.0
+    gen._order2.pop(dead, None)
+    gen._order1[start, :] = 0.0
+    gen._order1[start, dead] = 1.0  # force the walk to begin in the dead state
+    assert gen._sample_walk(np.random.default_rng(0)) == [dead]
+    row = gen._order1[target]
+    expected = math.log(1.0) + math.log(1e-12) + math.log(float(row[end]) / float(row.sum()))
+    assert math.isfinite(expected)
+    assert gen.sequence_log_prob([dead, target]) == pytest.approx(expected, rel=1e-12)
+
+
+def test_an_empty_start_row_falls_back_to_a_uniform_start_in_both_paths() -> None:
+    """NormCut can empty the START row; sampling and scoring must then agree on 1/m."""
+    gen = _hub_generator()
+    m = gen.n_states
+    end = m + 1
+    gen._order1[m, :] = 0.0
+    assert gen._start_probabilities().tolist() == pytest.approx([1.0 / m] * m)
+    state = next(s for s in range(m) if s not in gen._order2 and gen._order1[s, end] > 0.0)
+    row = gen._order1[state]
+    expected = math.log(1.0 / m) + math.log(float(row[end]) / float(row.sum()))
+    assert gen.sequence_log_prob([state]) == pytest.approx(expected, rel=1e-12)
+    walk = gen._sample_walk(np.random.default_rng(1))
+    assert 1 <= len(walk) <= gen.max_len
+    assert all(0 <= s < m for s in walk)
+
+
+def test_the_fitted_grid_is_the_gate_applied_to_the_noisy_total() -> None:
+    """The split gate reads the noisy post-NormCut total, never the true trajectory count."""
+    seed = 4
+    points = _hub_points()
+    gen = _hub_generator(seed=seed)
+    eps1 = gen.stage_epsilons[0]
+    noisy = normcut(
+        level1_density(points, BBOX, _HUB_K)
+        + np.random.default_rng(seed).laplace(0.0, 1.0 / eps1, _HUB_K * _HUB_K)
+    )
+    assert gen.grid == AdaptiveGrid.build(
+        gen.bbox,
+        _HUB_K,
+        noisy,
+        float(noisy.sum()),
+        gen.split_scale,
+        gen.split_gate,
+        gen.max_sub_k,
+    )
+    # Measured: the noisy total is 90.115 where the true trajectory count is 90, so the gate
+    # demonstrably reads the release and not the data.
+    assert float(noisy.sum()) != float(len(points))
+
+
+def test_the_adjacency_mask_zeroes_every_non_adjacent_transition() -> None:
+    """D-4.6: only same-or-4-adjacent level-1 steps keep their mass; the virtual ones survive."""
+    masked = _hub_generator(mask_non_adjacent=True)
+    plain = _hub_generator()
+    m = masked.n_states
+    start, end = m, m + 1
+    assert masked.grid == plain.grid  # the mask lands after stage 1, so the grid is unchanged
+    assert masked._params["mask_non_adjacent"] is True
+    assert plain._params["mask_non_adjacent"] is False
+    assert masked.spent_budget() == pytest.approx(_HUB_EPS)  # post-processing costs nothing
+
+    far = [(a, b) for a in range(m) for b in range(m) if _level1_distance(masked.grid, a, b) > 1]
+    near = [(a, b) for a in range(m) for b in range(m) if _level1_distance(masked.grid, a, b) <= 1]
+    assert far and near  # the 3x3 grid has both kinds of pair, diagonal moves included
+    # Measured: 9 of the 48 non-adjacent pairs carry mass without the mask, 15.2 of the 45.3
+    # real-to-real mass (34%), the diagonal training moves 0 -> 4 and 4 -> 8 at ~7.5 each.
+    assert [(a, b) for a, b in far if plain._order1[a, b] > 0.0]  # the default really keeps them
+    assert all(masked._order1[a, b] == 0.0 for a, b in far)
+    assert any(masked._order1[a, b] > 0.0 for a, b in near)
+    assert float(masked._order1[start, :m].sum()) > 0.0  # START -> real survives
+    assert float(masked._order1[:m, end].sum()) > 0.0  # real -> END survives
+
+    assert masked.second_order_states  # the second-order branch of the mask really runs
+    for state, matrix in masked._order2.items():
+        for other in range(m):
+            if _level1_distance(masked.grid, other, state) > 1:
+                assert np.all(matrix[other] == 0.0)  # an impossible predecessor
+            if _level1_distance(masked.grid, state, other) > 1:
+                assert np.all(matrix[:, other] == 0.0)  # an impossible successor
+        assert float(matrix[start].sum()) > 0.0  # entering the state from START survives
+        assert float(matrix[:, end].sum()) > 0.0  # and so does ending the walk in it
+
+
+def test_walks_under_the_mask_never_leave_the_level1_neighbourhood() -> None:
+    masked = _hub_generator(mask_non_adjacent=True)
+    steps = [
+        pair for syn in masked.generate(200, seed=21) for pair in itertools.pairwise(syn.payload)
+    ]
+    assert len(steps) >= 100  # measured: 439 steps over the 200 walks
+    assert all(_level1_distance(masked.grid, a, b) <= 1 for a, b in steps)
