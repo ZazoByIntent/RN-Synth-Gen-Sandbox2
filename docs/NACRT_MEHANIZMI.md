@@ -19,7 +19,7 @@ zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) 
 | ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, PR #32, združen v `main`) |
 | ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | **zaključen** (4. september 2026, PR #38, veja `claude/zm2-point-ldp`) |
 | ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | **zaključen** (4. september 2026, PR #39, veja `claude/zm3-naive-baselines`) |
-| ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | **zaključen** (20. september 2026, veja `claude/zm4-privtrace`; validacija `claude/zm4-privtrace-validation`) |
+| ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | **zaključen** (20. september 2026, PR #40 veja `claude/zm4-privtrace`; validacija PR #41 veja `claude/zm4-privtrace-validation`, skladan) |
 
 Vrstni red je hkrati prioriteta: LDPTrace je edini celovit sintetizator pod lokalno DP in
 edina primerjava, ki jo poglavje 7.3 poročila zares potrebuje; točkovni LDP je poceni
@@ -508,8 +508,8 @@ perturbacijskih rok; pred tem avtor odloči, katere vrednosti gredo naprej od u5
 
 ## 5. ZM-4 PrivTrace kot generator (`synthesis/privtrace.py`, registrsko ime `privtrace`) — ZAKLJUČEN
 
-**Izvedeno 20. septembra 2026** (veja `claude/zm4-privtrace`; validacija proti izvirniku v
-ločenem, skladanem PR-ju, veja `claude/zm4-privtrace-validation`). Dejanske odločitve, kjer
+**Izvedeno 20. septembra 2026** (PR #40, veja `claude/zm4-privtrace`; validacija proti izvirniku
+v ločenem, skladanem PR #41, veja `claude/zm4-privtrace-validation`). Dejanske odločitve, kjer
 je načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
 
 - **Port sledi članku, ne kodi avtorjev** (odločitev avtorja 20. septembra 2026 po

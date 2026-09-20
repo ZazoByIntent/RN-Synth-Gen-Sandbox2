@@ -691,8 +691,8 @@ Branje:
   (zaokroževanje in redčenje sta deterministična, njuni intervali so samo bootstrap
   znotraj pogona).
 
-**ZM-4 PrivTrace — zaključen (20. september 2026, veja `claude/zm4-privtrace`; validacija
-proti izvirniku v skladanem PR-ju, veja `claude/zm4-privtrace-validation`, tabela spodaj).**
+**ZM-4 PrivTrace — zaključen (20. september 2026, PR #40, veja `claude/zm4-privtrace`; validacija
+proti izvirniku v skladanem PR #41, veja `claude/zm4-privtrace-validation`, tabela spodaj).**
 Generator `privtrace` (`src/trajguard/synthesis/privtrace.py`, dvoplastna mreža v
 `src/trajguard/synthesis/adaptive_grid.py`; dejanske odločitve v `docs/NACRT_MEHANIZMI.md`
 §5, uvodni odstavek). **Model zaupanja je drugačen od vseh drugih rok:** PrivTrace je
@@ -764,8 +764,8 @@ Branje:
   zapisuje dejstev PrivTrace (`n_states`, stanja 2. reda) — dobijo se s ponovno
   prilagoditvijo, kot L_k pri LDPTrace pred PR C.
 
-**Validacija `privtrace` proti izvirni kodi nad Portom (izmerjeno 20. septembra 2026, veja
-`claude/zm4-privtrace-validation`, skladana na `claude/zm4-privtrace`).** Izvirnik: klon
+**Validacija `privtrace` proti izvirni kodi nad Portom (izmerjeno 20. septembra 2026, PR #41, veja
+`claude/zm4-privtrace-validation`, skladana na PR #40 `claude/zm4-privtrace`).** Izvirnik: klon
 `github.com/DpTrace/PrivTrace`, commit `b06cef7d8df0305b10f309e8b75660949946f22a` (9. december
 2022, **brez licence**; v paket ni prekopirano nič), v `external/PrivTrace` (ni v gitu), s
 popravkom `scripts/privtrace_reference.patch` (edini artefakt izvirnika v gitu): `np.int` →
