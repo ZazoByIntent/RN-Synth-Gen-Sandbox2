@@ -691,6 +691,79 @@ Branje:
   (zaokroževanje in redčenje sta deterministična, njuni intervali so samo bootstrap
   znotraj pogona).
 
+**ZM-4 PrivTrace — zaključen (20. september 2026, veja `claude/zm4-privtrace`; validacija
+proti izvirniku v skladanem PR-ju, veja `claude/zm4-privtrace-validation`, tabela spodaj).**
+Generator `privtrace` (`src/trajguard/synthesis/privtrace.py`, dvoplastna mreža v
+`src/trajguard/synthesis/adaptive_grid.py`; dejanske odločitve v `docs/NACRT_MEHANIZMI.md`
+§5, uvodni odstavek). **Model zaupanja je drugačen od vseh drugih rok:** PrivTrace je
+centralna diferencialna zasebnost — zaupanja vreden zbiralec vidi vse surove poti in
+Laplaceov šum doda gostotam mreže 6 × 6 nad bbox vozlišč zemljevida (ε₁ = 0,2ε), števcem
+Markovovega modela 1. reda (ε₂ = 0,4ε) in 2. reda (ε₃ = 0,4ε), negativne vrednosti popravi
+NormCut; ε je **na pot pri zaupanja vrednem zbiralcu** (soseda zbirka se razlikuje za eno
+pot; uporabnik z m potmi je pokrit z m·ε), zato je enak nominalni ε kot pri `ldptrace` in
+`rn_ldp_synth` (ε na pot na napravi, brez zaupanja) neprimerljiv in vrstice `privtrace`
+berejo kot **zgornjo mejo uporabnosti**, ne kot enakovrednega tekmeca. Port sledi članku
+(Wang et al., USENIX Security 2023, arXiv 2210.00581); avtorjeva javna koda
+(`github.com/DpTrace/PrivTrace`, commit `b06cef7`, brez licence) od članka odstopa na več
+mestih in ima nezasebne korake, port tega ne posnema (seznam v docstringu modula in v
+`NACRT_MEHANIZMI.md` §5). Orkestrator se ni spremenil. Izmerjeno pri stopnji 20 z
+`config/experiments/geolife_mech_mia_u20.yaml` (ista populacija, razrez in napad kot pri
+ZM-1; nova roka `privtrace` ε ∈ {0,5, 2, 8} ob sidrih `markov`, `rn_ldp_synth` ε = 2 in
+`ldptrace`), ukaza `uv run trajguard run …` (seme 42) in `uv run trajguard repeat … --seeds 1 2 3`
+s `PYTHONHASHSEED=0`, commit kode iz veje `claude/zm4-privtrace`. Bazen napada: 90 članov,
+15 nečlanov (`n_pool = 105`). Cel pogon 94–136 s na seme; roka `privtrace` 7,3–8,9 s na
+seme za 17 prilagajanj (16 senčnih + tarča). **Regresija:** vseh 20 vrstic starih rok v
+`repetitions.csv` (markov, rn_ldp_synth, ldptrace; povprečje in interval) je do zadnje
+decimalke enakih zapisu ZM-1 zgoraj. Vrednosti iz `results/geolife_mech_mia_u20/repetitions.csv`
+(povprečje in Studentov 95-odstotni interval čez semena 1–3; v oklepaju vrednost pogona s
+semenom 42; `tpr@fpr` 0,001 in 0,01 sta NaN z opozorilom S4-2 pri 15 nečlanih;
+`over_budget.attacks` prazen v vseh štirih pogonih; rezultati ostajajo lokalni):
+
+| Roka | AUC | `tpr@fpr = 0,1` | Čas napada na seme |
+|------|-----|------------------|--------------------|
+| `markov` (strop memorizacije) | 0,996 [0,985; 1,007] | 0,989 [0,961; 1,016] | 0,2 s |
+| `rn_ldp_synth` ε = 2 (sidro S4) | 0,572 [0,376; 0,768] | 0,107 [−0,169; 0,384] | 21,9 s |
+| `ldptrace` ε = 0,5 / 2 / 8 | 0,432 / 0,484 / 0,528 (kot pri ZM-1) | 0,063 / 0,107 / 0,156 | 9,9–10,5 s |
+| `privtrace` ε = 0,5 | 0,483 [0,276; 0,691] (0,541) | 0,133 [−0,093; 0,359] (0,167) | 7,4–8,6 s |
+| `privtrace` ε = 2 | 0,540 [0,514; 0,566] (0,690) | 0,048 [−0,021; 0,118] (0,167) | 7,3–8,9 s |
+| `privtrace` ε = 8 | 0,571 [0,325; 0,816] (0,636) | 0,270 [0,166; 0,375] (0,267) | 7,6–8,8 s |
+
+Po semenih 1 / 2 / 3: AUC 0,550 / 0,390 / 0,511 (ε = 0,5), 0,541 / 0,529 / 0,550 (ε = 2),
+0,492 / 0,539 / 0,681 (ε = 8).
+
+Branje:
+
+- **Pri tej velikosti vzorca je PrivTrace zašumljen Markov 1. reda nad 36 celicami.**
+  Ponovna prilagoditev ciljnih generatorjev (kot orkestrator: učne poti iz predpomnilnika,
+  seme pogona) pri vseh ε in semenih 42 / 1 / 2 / 3 da 36 stanj, **nič razdeljenih celic in
+  nič stanj 2. reda**: bbox vozlišč zemljevida meri 30 × 33 km, celica 5,0 × 5,6 km, učne
+  verige so dolge povprečno 2,06 stanja; vrata delitve (0,05·90/36 = 0,125 na celico) so
+  pri tako grobi mreži res presežena, a κ = ⌈√(d/200)⌉ pri gostotah ≤ 90 ostane 1, prag
+  2. reda θ₁ = √2·36/(0,4ε) = 127/ε pa daleč presega maso, ki jo 90 poti lahko da eni
+  vrstici. Šum prevlada nad števci: vsota matrike 1. reda po NormCut je 770 / 256 / 128
+  pri ε = 0,5 / 2 / 8 (prava masa 90), vrstica začetka pri ε = 0,5 in semenu 3 ostane brez
+  mase (enakomerni začetek). To je pričakovano vedenje centralne DP pri vzorcu dva reda
+  velikosti pod obsegom članka (17.621 poti Geolife), ne napaka izvedbe; pri stopnjah 50
+  in 182 je pričakovati prve delitve, 2. red pa šele pri tisočih poti na celico.
+- **Napad na članstvo memorizacije ne zazna:** vsi trije intervali AUC čez semena
+  vsebujejo 0,5 ali se ga dotikajo (pri ε = 2 je interval ozek, 0,51–0,57, ker so tri
+  semena po naključju blizu); povprečje raste z ε (0,48 → 0,54 → 0,57), kar je pričakovana
+  smer in enaka kot pri `ldptrace` (0,43 → 0,48 → 0,53). Pri 15 nečlanih je `tpr@fpr = 0,1`
+  kvantiziran na korake 1/15, zato so njegovi intervali široki in vrednost 0,27 pri ε = 8
+  ni razlika, ki bi jo bilo mogoče trditi. Vrednost pogona s semenom 42 pri ε = 2 (0,690)
+  je osamelec enega semena, ne lastnost mehanizma — zato poročamo povprečje čez semena.
+- **Napovedana asimetrija (§5.5 načrta: nižja AUC in boljša uporabnost kot LDP roke) se
+  pri stopnji 20 ne vidi**, ker sta obe strani na ravni naključja in uporabnost sinteze v
+  orkestratorju ni priključena (2.5); primerjava uporabnosti je narejena nad Portom v
+  ogrodju validacije (spodaj), kjer PrivTrace dela z 20.000 potmi in mreža zares deli.
+- Odprto: (1) šum na diagonali matrike 1. reda (prava vrednost 0, ker so zaporedni
+  dvojniki strnjeni) da ~0,1 % samoprehodov v sintezi; ničenje diagonale bi bilo brezplačno
+  naknadno procesiranje, a ga ne članek ne izvirnik ne delata — odločitev avtorja;
+  (2) roka z gostejšo mrežo (npr. `first_level_k: 12`, kot `ldptrace`) in kopiji
+  konfiguracije za stopnji 50 in 182 (roka je poceni: ~8 s na seme); (3) `run.json` ne
+  zapisuje dejstev PrivTrace (`n_states`, stanja 2. reda) — dobijo se s ponovno
+  prilagoditvijo, kot L_k pri LDPTrace pred PR C.
+
 ### 2.4 Val 5 — horizont B (2. letnik)
 
 A1 polni klasifikator lastnosti (Geolife nima demografskih oznak), M4 ujemanje

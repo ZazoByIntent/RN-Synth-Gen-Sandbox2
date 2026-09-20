@@ -40,7 +40,7 @@ arms next to the ZM-2 anchors (rows in `docs/HANDOFF.md` §2.3, actual decisions
 on 4 Sep 2026 over the cached u20 pools and confirmed (`docs/HANDOFF.md` §2.5; the attack
 code is unchanged, a normalised attacker distance is an open author decision). Sibling
 configs for the 50- and 182-user rungs (`config/experiments/geolife_mech_reid_u50.yaml`,
-`geolife_mech_reid_u182.yaml`) exist and are not measured. ZM-4 is open.**
+`geolife_mech_reid_u182.yaml`) exist and are not measured. ZM-4 PrivTrace is implemented (generator `privtrace`, `src/trajguard/synthesis/privtrace.py` + `adaptive_grid.py`; central DP, trusted curator, trajectory-level ε — an upper bound on utility, not a like-for-like competitor of the LDP arms) and measured at the 20-user rung on 20 Sep 2026 with `config/experiments/geolife_mech_mia_u20.yaml` (rows in `docs/HANDOFF.md` §2.3; at this rung it degenerates to a noised first-order Markov model over 36 cells, as expected); the port follows the paper and its differential validation against the authors' unlicensed code (harness `experiments/privtrace_eval.py`, Porto 20,000 trips, K = 6, 3 ε × 5 seeds) is the stacked PR on `claude/zm4-privtrace-validation` (table in `docs/HANDOFF.md` §2.3, run guide `docs/RUNNING.md` §9.4, actual decisions `docs/NACRT_MEHANIZMI.md` §5). Next: the shared comparison notebook (`docs/NACRT_MEHANIZMI.md` §1.6).**
 Whoever changes the project state (a new
 run, a closed item, a new component) updates this line in the same PR.
 

@@ -19,7 +19,7 @@ zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) 
 | ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, PR #32, združen v `main`) |
 | ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | **zaključen** (4. september 2026, PR #38, veja `claude/zm2-point-ldp`) |
 | ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | **zaključen** (4. september 2026, PR #39, veja `claude/zm3-naive-baselines`) |
-| ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | odprt |
+| ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | **zaključen** (20. september 2026, veja `claude/zm4-privtrace`; validacija `claude/zm4-privtrace-validation`) |
 
 Vrstni red je hkrati prioriteta: LDPTrace je edini celovit sintetizator pod lokalno DP in
 edina primerjava, ki jo poglavje 7.3 poročila zares potrebuje; točkovni LDP je poceni
@@ -506,7 +506,58 @@ perturbacijskih rok; pred tem avtor odloči, katere vrednosti gredo naprej od u5
 
 ---
 
-## 5. ZM-4 PrivTrace kot generator (`synthesis/privtrace.py`, registrsko ime `privtrace`)
+## 5. ZM-4 PrivTrace kot generator (`synthesis/privtrace.py`, registrsko ime `privtrace`) — ZAKLJUČEN
+
+**Izvedeno 20. septembra 2026** (veja `claude/zm4-privtrace`; validacija proti izvirniku v
+ločenem, skladanem PR-ju, veja `claude/zm4-privtrace-validation`). Dejanske odločitve, kjer
+je načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
+
+- **Port sledi članku, ne kodi avtorjev** (odločitev avtorja 20. septembra 2026 po
+  raziskavi izvirnika `github.com/DpTrace/PrivTrace`, commit `b06cef7`, 9. december 2022,
+  brez licence): koda odstopa od članka na več mestih — K iz števila točk namesto |D|
+  (K = min(60, ⌊√(N_točk/600)⌋)), trije dodatni pogoji »ALI« v adaptivnem pravilu, števci
+  2. reda po šumu odrezani na cela števila (float16), množilniki verjetnosti konca
+  (×1,3, ×1,5, ×0,8, ×0,5, ×0,2), zavračanje dolgih ali »postopajočih« hoj in preverjanje
+  sosednosti pri sintezi, reševalec `cvxpy` za porazdelitev začetek–konec, in več
+  korakov brez šuma (K iz surovih točk, pravi |D| v vratih delitve in v cilju reševalca,
+  maska prehodov iz nezašumljenih števcev), tako da izvirnik ne izpolnjuje ε, ki ga
+  trdi. Port teh korakov ne posnema; docstring modula jih našteje. NormCut se v kodi z
+  Algoritmom 2 ujema (vektorizirana, enakovredna oblika) in je prevzet.
+- **D-4.1:** pravilo delitve iz kode izvirnika, ker si formula članka sama nasprotuje
+  za faktor 1000 (§5.1: 2·10⁷, dodatek E: 20 000): celica se deli le, če zašumljena
+  gostota preseže `split_gate`·|D|/K² (0,05), na κ × κ podcelic s κ = ⌈√(d/`split_scale`)⌉
+  (200); `max_sub_k` = 8 je naša varovalka (izvirnik je nima). Brez parametra
+  prebivalstva; `first_level_k` je parameter (privzeto 6, vrednost članka za Geolife).
+  Mreža je v ločenem modulu `synthesis/adaptive_grid.py` (`AdaptiveGrid`), ker bi
+  `privtrace.py` sicer presegel ~500 vrstic (ima jih ~660, od tega ~110 docstringa).
+- **D-4.2:** brez reševalca; začetek se vzorči iz zašumljene vrstice navideznega začetka
+  (po NormCut), konec se ne vzorči. **D-4.3:** `max_len` = 200. **D-4.4:** točke poti so
+  koordinate vozlišč odsekov (`u`, če ni enako zadnjemu dodanemu, nato `v`), zaporedni
+  dvojniki strnjeni, brez interpolacije; način `bbox` (surove koordinate) obstaja samo za
+  ogrodje validacije, način celic orkestratorja **ni podprt** (PrivTrace potrebuje
+  koordinate; pogled brez `clean` da jasen `ValueError`).
+- **D-4.5:** `PrivTraceGenerator(network=None, bbox=None, epsilon=1.0, first_level_k=6,
+  split_scale=200.0, split_gate=0.05, max_sub_k=8, budget_split=(0.2, 0.4, 0.4),
+  theta2=5.0, max_len=200, seed=0)`; `spent_budget()` = ε po `fit`; `fit_points` je
+  javno jedro za ogrodje. Štetje kot v izvirniku: 1. red 1/(L+1) na prehod (START →
+  s₀, koraki, s_zadnji → END), 2. red 1/L na pojav stanja; po šumu stolpec START in
+  vrstica END na 0, NormCut po vrsticah; adaptivno pravilo natanko po članku (2. red
+  tedaj in le tedaj, ko N_sum ≥ √2·m/ε₂ in N₂ > 0 in N₁/N₂ < θ₂), odločeno enkrat na
+  stanje; pri sintezi in točkovanju se vrstica 2. reda uporabi po paru (prejšnje,
+  trenutno) — če jo NormCut izprazni, se uporabi 1. red. Varovalka pomnilnika:
+  n_izbranih·(m+2)² ≤ 3·10⁸.
+- **Pri stopnji 20** (90 učnih poti, mreža 6 × 6 nad bbox vozlišč 30 × 33 km, celice
+  5,0 × 5,6 km, učne verige povprečno 2,06 stanja) se pri vseh ε ∈ {0,5, 2, 8} in semenih
+  42, 1, 2, 3 **nobena celica ne deli in nobeno stanje ne dobi 2. reda** (36 stanj): vrata
+  delitve (0,125) in prag θ₁ = 127/ε presegajo maso, ki jo 90 poti lahko da. PrivTrace je
+  tu zašumljen Markov 1. reda nad 36 celicami — pričakovano vedenje pri vzorcu dva reda
+  velikosti pod obsegom članka, ne napaka. Izmerjene vrstice: `docs/HANDOFF.md` §2.3.
+- **Validacija proti izvirniku** (`experiments/privtrace_eval.py`, `scripts/privtrace_reference.patch`,
+  `docs/RUNNING.md` §9.4): isti podvzorec Porta (prvih 20.000 poti), K = 6 na obeh
+  straneh, ε ∈ {0,5, 1, 2}, semena 1–5, devet metrik iz `evaluation/ldptrace_metrics.py`
+  nad mrežo 20 × 20; izvirnik metrik nima. Popravek izvirnika je samo »da teče« (numpy 2,
+  `fcntl`, `torch` mrtva koda) plus `--seed`, `--level1_k`, `--output_file` in šest decimalk
+  v izpisu; algoritem nespremenjen. Tabela in branje: `docs/HANDOFF.md` §2.3.
 
 ### 5.1 Kaj mehanizem počne (Wang et al., USENIX Security 2023; koda `DpTrace/PrivTrace`)
 
