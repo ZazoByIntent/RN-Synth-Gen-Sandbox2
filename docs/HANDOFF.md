@@ -764,6 +764,127 @@ Branje:
   zapisuje dejstev PrivTrace (`n_states`, stanja 2. reda) — dobijo se s ponovno
   prilagoditvijo, kot L_k pri LDPTrace pred PR C.
 
+**Validacija `privtrace` proti izvirni kodi nad Portom (izmerjeno 20. septembra 2026, veja
+`claude/zm4-privtrace-validation`, skladana na `claude/zm4-privtrace`).** Izvirnik: klon
+`github.com/DpTrace/PrivTrace`, commit `b06cef7d8df0305b10f309e8b75660949946f22a` (9. december
+2022, **brez licence**; v paket ni prekopirano nič), v `external/PrivTrace` (ni v gitu), s
+popravkom `scripts/privtrace_reference.patch` (edini artefakt izvirnika v gitu): `np.int` →
+`int` na 11 mestih, odstranjen `import fcntl` (samo POSIX), `import torch` mrtve kode v
+`try/except`, ter trije parametri `--seed` (koda semena ni imela; vse naključje je globalno
+stanje numpy/random), `--level1_k` (izvirnikovo pravilo K = min(60, ⌊√(N_točk/600)⌋) bi tu
+dalo K = 32 in tisoče stanj, kar ne konča) in `--output_file` (šest decimalk namesto dveh).
+Algoritem — šum, NormCut, delitev, adaptivno pravilo, množilniki konca, zavračanje hoj,
+reševalec `cvxpy` — je nespremenjen. `cvxpy` je enkratno nameščen v obstoječe okolje `uv`
+(ni v `pyproject.toml`; brez ECOS, zato izvirnikova gola `except:` pristane na SCS). Vhod:
+**prvih 20.000 poti** `porto.dat` (640.519 točk, 32 na pot) v izvirnikovem tekstovnem
+formatu (`--write-subset`), bbox po izvirnikovem pravilu (min/max ± 10⁻⁵ razpona), **K = 6 na
+obeh straneh**, ε ∈ {0,5, 1, 2}, semena 1–5, brez razreza in podvzorčenja. Ocena: obe strani
+z devetimi metrikami članka LDPTrace (`evaluation/ldptrace_metrics.py`) nad enotno mrežo
+20 × 20 nad istim bbox (izvirnik lastnih metrik nima; ena enakomerna točka na list na obeh
+straneh). Ukazi in časi: `docs/RUNNING.md` §9.4; ogrodje `experiments/privtrace_eval.py`;
+izhod `results/privtrace_validation/` (ni v gitu).
+
+Preverba pred meritvijo: obe strani zgradita **enako mrežo** — izvirnik 159–164 listnih stanj
+(24 od 36 celic razdeljenih, κ 1–5; iz pilota), port 161–164 (23–24 razdeljenih, κ ≤ 5),
+enak bbox; delna primerjava pilota na 2.000 poteh (39 stanj) je bila skladna.
+
+Časi: port bere 20.000 poti v 1,5 s, na (ε, seme) prilagoditev 2,5–3,7 s, sinteza 20.000 hoj
+10–14 s, devet metrik 10–13 s; 15 pogonov 7 min. Izvirnik 70–90 s na pogon sam (3,5 min, ko
+je vzporedno tekel port), 15 pogonov 33 min; ocena njegovih 15 sintez 3 min.
+
+Tabela (povprečje [najmanj; največ] čez pet semen; sedem metrik so napake, nižje je bolje;
+Kendall in F1 sta oceni, višje je bolje; zadnje tri vrstice so dejstva porta, izvirnik jih ne
+izpisuje):
+
+| ε | metric | port (naše metrike) | izvirnik (naše metrike) |
+|---|---|---|---|
+| 0.5 | density_error | 0.0630 [0.0586; 0.0679] | 0.1522 [0.1103; 0.1885] |
+| 0.5 | hotspot_query_error | 0.1133 [0.0035; 0.3056] | 0.4532 [0.0131; 1.0000] |
+| 0.5 | point_query_avre | 0.5436 [0.5108; 0.5828] | 0.6743 [0.6546; 0.6834] |
+| 0.5 | coverage_kendall_tau | 0.5886 [0.5730; 0.6009] | 0.3897 [0.3194; 0.4701] |
+| 0.5 | trip_error | 0.5461 [0.5385; 0.5534] | 0.6062 [0.5908; 0.6216] |
+| 0.5 | diameter_error | 0.1108 [0.0944; 0.1291] | 0.2551 [0.1817; 0.3015] |
+| 0.5 | length_error | 0.1468 [0.1389; 0.1579] | 0.1690 [0.1091; 0.2062] |
+| 0.5 | pattern_f1 | 0.3540 [0.3100; 0.4300] | 0.1640 [0.1000; 0.2600] |
+| 0.5 | pattern_support_error | 0.6740 [0.5889; 0.7282] | 0.8983 [0.8620; 0.9213] |
+| 0.5 | n_states | 162.8 [161.0; 164.0] | — |
+| 0.5 | n_second_order | 0.0 | — |
+| 0.5 | synthetic_mean_length | 7.1 [6.2; 7.6] | — |
+| 1.0 | density_error | 0.0569 [0.0534; 0.0652] | 0.0709 [0.0565; 0.0862] |
+| 1.0 | hotspot_query_error | 0.0802 [0.0235; 0.1937] | 0.1541 [0.0235; 0.3106] |
+| 1.0 | point_query_avre | 0.3386 [0.2430; 0.4370] | 0.5772 [0.4720; 0.6307] |
+| 1.0 | coverage_kendall_tau | 0.6143 [0.5995; 0.6234] | 0.5564 [0.5330; 0.5991] |
+| 1.0 | trip_error | 0.5030 [0.4917; 0.5134] | 0.5483 [0.5380; 0.5550] |
+| 1.0 | diameter_error | 0.0960 [0.0871; 0.1015] | 0.1947 [0.1597; 0.2303] |
+| 1.0 | length_error | 0.1598 [0.1465; 0.1693] | 0.1149 [0.0920; 0.1296] |
+| 1.0 | pattern_f1 | 0.4160 [0.3300; 0.4700] | 0.3320 [0.2300; 0.3800] |
+| 1.0 | pattern_support_error | 0.5815 [0.5228; 0.6543] | 0.8309 [0.7980; 0.8511] |
+| 1.0 | n_states | 164.0 | — |
+| 1.0 | n_second_order | 0.0 | — |
+| 1.0 | synthetic_mean_length | 10.5 [8.6; 11.7] | — |
+| 2.0 | density_error | 0.0482 [0.0457; 0.0504] | 0.0539 [0.0488; 0.0631] |
+| 2.0 | hotspot_query_error | 0.0294 [0.0131; 0.0595] | 0.0788 [0.0235; 0.1630] |
+| 2.0 | point_query_avre | 0.3272 [0.2930; 0.3720] | 0.5402 [0.4863; 0.5630] |
+| 2.0 | coverage_kendall_tau | 0.6407 [0.6305; 0.6540] | 0.6220 [0.5980; 0.6361] |
+| 2.0 | trip_error | 0.4844 [0.4742; 0.4898] | 0.5196 [0.5157; 0.5226] |
+| 2.0 | diameter_error | 0.0863 [0.0836; 0.0877] | 0.1754 [0.1623; 0.1815] |
+| 2.0 | length_error | 0.1446 [0.1350; 0.1527] | 0.0861 [0.0756; 0.0913] |
+| 2.0 | pattern_f1 | 0.4780 [0.4600; 0.4900] | 0.3860 [0.3700; 0.4000] |
+| 2.0 | pattern_support_error | 0.5906 [0.5637; 0.6183] | 0.8030 [0.7954; 0.8129] |
+| 2.0 | n_states | 164.0 | — |
+| 2.0 | n_second_order | 5.4 [4.0; 7.0] | — |
+| 2.0 | synthetic_mean_length | 10.4 [9.8; 11.1] | — |
+
+Dolžina sintetičnih poti (točk na pot): izvirnik 4,7 / 6,1 / 7,0 pri ε = 0,5 / 1 / 2, port
+7,3 / 10,6 / 10,6 (stanj 7,1 / 10,5 / 10,4). Port brez šuma (ε = 10⁴, dve semeni; spodnja meja,
+ki jo določa struktura modela, ne zasebnost): gostota 0,034, vroče točke 0,013, AvRE 0,46,
+Kendall 0,69, potovanja 0,47, premer 0,088, dolžina 0,093, F1 0,53, podpora vzorcev 0,67,
+133 stanj 2. reda, 8,6 stanja na pot.
+
+Branje (merila kot pri LDPTrace, `docs/NACRT_LDPTRACE_VALIDACIJA.md` §6):
+
+1. **Mreža in trend se ujemata.** Obe strani dobita isto delitev (isto število stanj do
+   nekaj enot, kar je žreb šuma) in pri obeh vse napake padajo in oceni rasteta z ε (edina
+   izjema je portova dolžina, ki je ravna pri 0,15, glej 3). Pri ε = 2 so gostota (0,048
+   proti 0,054), vroče točke (0,03 proti 0,08 pri široki razpršenosti) in Kendall (0,64 proti
+   0,62) **znotraj razpona semen** — to je del mehanizma, ki ga članek določa (zašumljena
+   mreža in Markov 1. reda), in tam se strani strinjata; pri ε = 1 se gostota in Kendall
+   ravno še prekrivata, pri ε = 0,5 ne več.
+2. **Sicer se strani ne ujemata znotraj razpršenosti semen: port je sistematično boljši.**
+   Pri ε = 0,5 pri vseh devetih metrikah (pri sedmih zunaj razpona semen: gostota 0,063 proti
+   0,152, Kendall 0,59 proti 0,39, premer 0,11 proti 0,26, F1 0,35 proti 0,16, podpora 0,67
+   proti 0,90, AvRE 0,54 proti 0,67, potovanja 0,55 proti 0,61), pri ε = 1 in ε = 2 pri sedmih
+   od devetih (potovanja, premer, AvRE, F1, podpora vzorcev vedno zunaj razpona); izvirnik je
+   boljši samo pri **dolžini** pri ε ≥ 1 (0,115 in 0,086 proti 0,160 in 0,145) — pri ε = 2
+   celo pod portovo mejo brez šuma (0,093).
+3. **Razlike so skladne z dokumentiranimi odstopanji izvirnika od Algoritma 1 v fazi
+   sinteze, ne z oceno modela.** Izvirnikove hoje so krajše (4,7–7,0 točk proti 7,3–10,6) in
+   z manjšim premerom kljub primerljivi ali boljši skupni dolžini, kar je slika hoj, ki se
+   zadržujejo med sosednjimi celicami: preverjanje sosednosti pri sintezi z zavračanjem hoj
+   (dolge hoje so pogosteje zavržene, ker prej vsebujejo nesosednji korak), skoki v naključno
+   sosednjo celico v slepi ulici, in množilniki konca, vezani na napovedano dolžino iz
+   reševalca (×0,2, dokler hoja ne doseže polovice napovedane dolžine — to je nadzor dolžine,
+   ki ga Algoritem 1 nima, in pojasni, zakaj je izvirnik pri dolžini boljši). Odrez števcev
+   2. reda na cela števila pri ε ≤ 1 ne igra vloge (port tam nima stanj 2. reda; pri ε = 2 jih
+   ima 4–7). Portova ravna dolžinska napaka (0,15 tudi pri ε = 2 in 0,09 brez šuma) je
+   lastnost Algoritma 1 brez nadzora dolžine: hoja konča, ko je izžreban navidezni konec, in
+   njena dolžina je pri šumu pristranska navzgor (10,5 stanja proti 8,6 brez šuma).
+4. **Kar ta primerjava ne dokaže.** Ker sta obe strani ocenjeni z istimi metrikami nad isto
+   mrežo in isto delitvijo, je primerjava merilo za *sintezo*, ne za oceno modela; matrik
+   izvirnika brez dodatnega popravka ni mogoče izpisati, zato trditev iz 3 (razlika je v
+   sintezi) ostaja skladna razlaga, ne meritev. Dokončni pripis bi zahteval pogon izvirnika z
+   izklopljenim preverjanjem sosednosti in množilniki (poseg v njegov algoritem, ki ga je
+   avtor 20. septembra 2026 izključil) — odprta postavka. Port je pri ε = 2 blizu svoje meje
+   brez šuma (gostota 0,048 proti 0,034, potovanja 0,48 proti 0,47, premer 0,086 proti 0,088,
+   F1 0,48 proti 0,53), kar pove, da preostale napake pri ε = 2 določa model (Markovova hoja
+   po 164 listih brez para začetek–konec), ne šum.
+
+Sklep: port in izvirnik nad istim vhodom delita mrežo, smer z ε in populacijske statistike
+pri ε = 2; v sintezi izvirnik odstopa od članka in je pri tem slabši pri sedmih od devetih
+metrik in boljši pri dolžini. Port je zvesta izvedba članka, ne kode; PrivTrace ostaja
+kandidat za baseline (odločitev D5 je odprta), v poročilu kot zgornja meja uporabnosti pri
+zaupanja vrednem zbiralcu.
+
 ### 2.4 Val 5 — horizont B (2. letnik)
 
 A1 polni klasifikator lastnosti (Geolife nima demografskih oznak), M4 ujemanje

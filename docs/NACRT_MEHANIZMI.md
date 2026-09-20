@@ -557,7 +557,12 @@ je načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
   straneh, ε ∈ {0,5, 1, 2}, semena 1–5, devet metrik iz `evaluation/ldptrace_metrics.py`
   nad mrežo 20 × 20; izvirnik metrik nima. Popravek izvirnika je samo »da teče« (numpy 2,
   `fcntl`, `torch` mrtva koda) plus `--seed`, `--level1_k`, `--output_file` in šest decimalk
-  v izpisu; algoritem nespremenjen. Tabela in branje: `docs/HANDOFF.md` §2.3.
+  v izpisu; algoritem nespremenjen. **Izid (20. september 2026):** obe strani zgradita isto
+  mrežo (159–164 stanj) in se z ε izboljšujeta; pri ε = 2 se gostota, vroče točke in
+  Kendall ujemajo znotraj razpona semen, pri potovanjih, premeru, poizvedbah in vzorcih je
+  port sistematično boljši, izvirnik pa samo pri dolžini (ε ≥ 1) — skladno z izvirnikovimi
+  odstopanji od Algoritma 1 v sintezi (zavračanje hoj, sosednost, množilniki konca z
+  napovedano dolžino). Tabela in branje: `docs/HANDOFF.md` §2.3.
 
 ### 5.1 Kaj mehanizem počne (Wang et al., USENIX Security 2023; koda `DpTrace/PrivTrace`)
 

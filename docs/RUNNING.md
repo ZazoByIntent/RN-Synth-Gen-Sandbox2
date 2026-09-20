@@ -15,8 +15,8 @@ threshold history · §7.5 mechanism-breadth perturbation config (point LDP and 
 baselines) · §8
 `trajguard report` · §9 RN-LDP-Synth evidence sweep ·
 §9.1 LDPTrace validation inputs (Porto conversion) · §9.2 membership inference in the
-cells representation (Porto) · §9.3 LDPTrace validation run (reference vs port) · §10
-caching · §11 troubleshooting.
+cells representation (Porto) · §9.3 LDPTrace validation run (reference vs port) · §9.4
+PrivTrace validation run (reference vs port) · §10 caching · §11 troubleshooting.
 
 ## 0. One-time setup
 
@@ -945,6 +945,90 @@ prints a table with one row per (ε, metric) and `mean [min; max]` over the seed
 `trajectory_point2grid` and the harness give the same chain for the first 20 000 trips
 once the closed-interval cell rule is used — is recorded in
 `docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5.
+
+## 9.4 PrivTrace validation run: the authors' code vs the `privtrace` port (Porto, ~30 minutes)
+
+ZM-4 of `docs/NACRT_MEHANIZMI.md` §5: both implementations synthesize the same first
+20 000 Porto trips (§9.1 conversion) with the level-1 grid forced to 6×6 on both sides and
+are scored with the nine LDPTrace-paper metrics (`evaluation/ldptrace_metrics.py`) on one
+uniform 20×20 evaluation grid over the reference's own bounding box. The reference prints no
+metrics of its own, so the table has two columns — port and reference, both scored by the
+harness `experiments/privtrace_eval.py` — as mean and range over seeds 1–5 at
+ε ∈ {0.5, 1.0, 2.0}. Measured table and reading: `docs/HANDOFF.md` §2.3.
+
+**One-time setup of the reference code** (kept out of git; `external/` is ignored). The
+authors' repository has **no licence**, so nothing from it is copied into the package; the
+patch is the only artefact in this repository:
+
+```sh
+git clone https://github.com/DpTrace/PrivTrace external/PrivTrace     # commit b06cef7 was used
+cd external/PrivTrace && git apply ../../scripts/privtrace_reference.patch && cd ../..
+uv pip install cvxpy      # the reference's trip solver; not a project dependency, not in pyproject
+uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
+    --max-trajectories 20000 --write-subset external/PrivTrace/datasets/porto_20k.dat
+```
+
+The patch makes the 2022 code run on this stack (`np.int` → `int` at 11 sites, the
+POSIX-only `import fcntl` removed, the dead `import torch` guarded) and adds three knobs:
+`--seed` (the code had none; every draw is global numpy/random state), `--level1_k` (forces
+the level-1 grid size; the original rule `K = min(60, ⌊√(N_points/600)⌋)` would give K = 32
+here and thousands of states, which never finishes) and `--output_file` (the output name,
+written with six decimals instead of the original two). The algorithm — noise, NormCut,
+subdivision, the adaptive rule, the end-probability multipliers, the rejection filters and the
+cvxpy trip solver — is untouched, because the comparison is against the code as it is. `cvxpy`
+is installed into the existing `uv` environment for the reference only (`uv run` keeps it);
+it has no ECOS, so the code's bare `except:` lands on SCS, silently.
+
+**Reference side** — 15 runs from `external/PrivTrace/` (the reader resolves
+`datasets/<name>` relative to the working directory), one log per run, sequentially
+(one run ≈ 75–90 s alone, longer when the port runs concurrently):
+
+```powershell
+# from external\PrivTrace, PowerShell or cmd; the project interpreter runs the reference
+foreach ($eps in "0.5", "1.0", "2.0") { foreach ($seed in 1..5) {
+  ..\..\.venv\Scripts\python.exe main.py --dataset_file_name porto_20k.dat --total_epsilon $eps `
+      --seed $seed --level1_k 6 --output_file generated_eps_${eps}_seed_${seed}.txt `
+      > ..\..\results\privtrace_validation\reference\eps${eps}_seed${seed}.log 2>&1
+} }
+```
+
+Each run writes `external/PrivTrace/generated_eps_<ε>_seed_<s>.txt` (the reference's text
+format, one trajectory per input trip, one point per state) and prints only phase
+timestamps plus two known `RuntimeWarning`s (a division by zero in its end-column rescale;
+they do not abort the run).
+
+**Port side, scoring and the table** — the harness reads the first 20 000 records of the
+`.dat` directly (0.9 s; no orchestrator cache, no split), fits the port in bbox mode on the
+reference's bounding box, synthesizes 20 000 walks per (ε, seed), draws one uniform point per
+leaf, and scores; then it scores the reference's 15 output files the same way:
+
+```sh
+uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
+    --max-trajectories 20000 --first-level-k 6 --eval-grid 20 --epsilons 0.5 1.0 2.0 \
+    --seeds 1 2 3 4 5 --label port --out results/privtrace_validation/port.json \
+    --save-synthesis results/privtrace_validation/port_synthesis
+uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
+    --max-trajectories 20000 --eval-grid 20 --epsilons 0.5 1.0 2.0 --seeds 1 2 3 4 5 \
+    --label reference \
+    --score-synthesis "external/PrivTrace/generated_eps_{eps}_seed_{seed}.txt" \
+    --out results/privtrace_validation/reference.json
+uv run python -m trajguard.experiments.privtrace_eval --compare \
+    results/privtrace_validation/port.json results/privtrace_validation/reference.json
+```
+
+`{eps}` and `{seed}` are placeholders filled from `--epsilons` / `--seeds` (`{eps}` as
+Python's float repr, `1.0`, exactly as the reference was told on its command line).
+`--save-synthesis DIR` keeps the port's synthetic points in the reference's text format (the
+test suite scores such a file and gets the run's values back up to the six decimals).
+The port-only rows `n_states`, `n_second_order` and `synthetic_mean_length` come from the
+fitted generator; the reference exposes nothing comparable.
+
+**Expected outcome** (measured 20 September 2026): see `docs/HANDOFF.md` §2.3 for the
+table, the timings and the reading — in short, the two sides agree where the paper's
+mechanism decides (densities, hot spots, trips, patterns, within the seed spread) and
+differ in trajectory length, where the reference's rejection sampling and end multipliers,
+which the port deliberately does not replicate, shorten its walks. Output stays out of git
+(`results/privtrace_validation/`).
 
 ## 10. How caching works (read before re-running with changed data)
 
