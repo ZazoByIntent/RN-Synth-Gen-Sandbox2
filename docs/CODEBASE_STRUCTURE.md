@@ -235,7 +235,9 @@ In pipeline order, with the reason each package exists:
   rows are an upper bound on what a curator can reach, not a like-for-like
   competitor of the LDP generators. The port follows the paper; the module
   docstring lists where the authors' unlicensed public code departs from the
-  paper and why none of that is replicated.
+  paper and why none of that is replicated — with one of those departures, the
+  reference's adjacency rule, available as an opt-in mask so the two can be
+  compared like for like.
 - **`attacks/`** — the four adversary families, one file each:
   `reidentification.py` ("whose trajectory is this?"), `membership.py` ("was
   this person's data used for training?"), `reconstruction.py` ("can the
@@ -272,8 +274,9 @@ In pipeline order, with the reason each package exists:
   `privtrace_eval.py` (its PrivTrace counterpart: the `privtrace` port and the
   authors' unlicensed reference code scored with the same nine metrics on one
   evaluation grid over the reference's own bounding box; the reference prints no
-  metrics, so both columns are computed here; `docs/NACRT_MEHANIZMI.md` §5,
-  `docs/RUNNING.md` §9.4).
+  metrics, so every column is computed here, and each run is scored twice — with
+  and without the king's-walk bridging — so the comparison cannot be flattered by
+  the scoring convention; `docs/NACRT_MEHANIZMI.md` §5, `docs/RUNNING.md` §9.4).
 - **`reporting/`** — `results_schema.py` is the unified results table
   (`results.csv`, `docs/REZULTATI_SHEMA.md`) as code; `results_io.py` reads it
   back and aggregates repetitions across seeds; `plots.py` draws the per-run

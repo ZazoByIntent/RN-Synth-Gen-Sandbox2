@@ -710,11 +710,19 @@ mestih in ima nezasebne korake, port tega ne posnema (seznam v docstringu modula
 `config/experiments/geolife_mech_mia_u20.yaml` (ista populacija, razrez in napad kot pri
 ZM-1; nova roka `privtrace` ε ∈ {0,5, 2, 8} ob sidrih `markov`, `rn_ldp_synth` ε = 2 in
 `ldptrace`), ukaza `uv run trajguard run …` (seme 42) in `uv run trajguard repeat … --seeds 1 2 3`
-s `PYTHONHASHSEED=0`, commit kode iz veje `claude/zm4-privtrace`. Bazen napada: 90 članov,
-15 nečlanov (`n_pool = 105`). Cel pogon 94–136 s na seme; roka `privtrace` 7,3–8,9 s na
-seme za 17 prilagajanj (16 senčnih + tarča). **Regresija:** vseh 20 vrstic starih rok v
-`repetitions.csv` (markov, rn_ldp_synth, ldptrace; povprečje in interval) je do zadnje
-decimalke enakih zapisu ZM-1 zgoraj. Vrednosti iz `results/geolife_mech_mia_u20/repetitions.csv`
+s `PYTHONHASHSEED=0`. **Meritev je bila 20. septembra 2026 zvečer ponovljena** po popravkih
+neodvisnega pregleda (vrata delitve berejo zašumljeno vsoto, vzorčenje in točkovanje si delita
+enak zasilni začetek, izbirna maska sosednosti), tokrat iz zavezanega drevesa: `run.json` vseh
+štirih pogonov zapisuje `git_commit b0a7dae`. Prejšnji zapis je imel v `run.json` `ef0cbcf`,
+commit **brez** kode PrivTrace, ker je bil pognan iz nezavezanega drevesa — to je zdaj
+popravljeno. Bazen napada: 90 članov, 15 nečlanov (`n_pool = 105`). Cel pogon 128 / 125 / 88 /
+88 s na seme (42 / 1 / 2 / 3); roka `privtrace` 7,0–8,0 s na seme za 17 prilagajanj (16 senčnih
++ tarča). **Regresija:** vseh 20 vrstic starih rok v `repetitions.csv` (markov, rn_ldp_synth,
+ldptrace; povprečje in interval) je do zadnje decimalke enakih zapisu ZM-1 zgoraj, prav tako
+sta vrstici `privtrace` pri ε = 2 in ε = 8 enaki prejšnjemu zapisu; premaknile so se samo
+vrstice pri ε = 0,5, ker vzorčenje in točkovanje zdaj uporabljata isti enakomerni zasilni
+začetek (točkovanje je prej jemalo prag 10⁻¹²), prilagoditve tarče in senc pri tem ε pa imajo
+prazno vrstico začetka. Vrednosti iz `results/geolife_mech_mia_u20/repetitions.csv`
 (povprečje in Studentov 95-odstotni interval čez semena 1–3; v oklepaju vrednost pogona s
 semenom 42; `tpr@fpr` 0,001 in 0,01 sta NaN z opozorilom S4-2 pri 15 nečlanih;
 `over_budget.attacks` prazen v vseh štirih pogonih; rezultati ostajajo lokalni):
@@ -724,12 +732,14 @@ semenom 42; `tpr@fpr` 0,001 in 0,01 sta NaN z opozorilom S4-2 pri 15 nečlanih;
 | `markov` (strop memorizacije) | 0,996 [0,985; 1,007] | 0,989 [0,961; 1,016] | 0,2 s |
 | `rn_ldp_synth` ε = 2 (sidro S4) | 0,572 [0,376; 0,768] | 0,107 [−0,169; 0,384] | 21,9 s |
 | `ldptrace` ε = 0,5 / 2 / 8 | 0,432 / 0,484 / 0,528 (kot pri ZM-1) | 0,063 / 0,107 / 0,156 | 9,9–10,5 s |
-| `privtrace` ε = 0,5 | 0,483 [0,276; 0,691] (0,541) | 0,133 [−0,093; 0,359] (0,167) | 7,4–8,6 s |
-| `privtrace` ε = 2 | 0,540 [0,514; 0,566] (0,690) | 0,048 [−0,021; 0,118] (0,167) | 7,3–8,9 s |
-| `privtrace` ε = 8 | 0,571 [0,325; 0,816] (0,636) | 0,270 [0,166; 0,375] (0,267) | 7,6–8,8 s |
+| `privtrace` ε = 0,5 | 0,529 [0,361; 0,696] (0,581) | 0,133 [−0,103; 0,369] (0,278) | 7,0–7,9 s |
+| `privtrace` ε = 2 | 0,540 [0,514; 0,566] (0,690) | 0,048 [−0,021; 0,118] (0,167) | 7,0–7,9 s |
+| `privtrace` ε = 8 | 0,571 [0,325; 0,816] (0,636) | 0,270 [0,166; 0,375] (0,267) | 7,1–8,0 s |
 
-Po semenih 1 / 2 / 3: AUC 0,550 / 0,390 / 0,511 (ε = 0,5), 0,541 / 0,529 / 0,550 (ε = 2),
-0,492 / 0,539 / 0,681 (ε = 8).
+Po semenih 1 / 2 / 3: AUC 0,602 / 0,515 / 0,470 (ε = 0,5; prej 0,550 / 0,390 / 0,511),
+0,541 / 0,529 / 0,550 (ε = 2), 0,492 / 0,539 / 0,681 (ε = 8). Časi napada pri sidrih so iz
+prve meritve (20. septembra 2026 popoldne); njihove vrednosti AUC in `tpr@fpr` so v ponovitvi
+enake do zadnje decimalke, časi `privtrace` pa so iz ponovitve.
 
 Branje:
 
@@ -737,17 +747,23 @@ Branje:
   Ponovna prilagoditev ciljnih generatorjev (kot orkestrator: učne poti iz predpomnilnika,
   seme pogona) pri vseh ε in semenih 42 / 1 / 2 / 3 da 36 stanj, **nič razdeljenih celic in
   nič stanj 2. reda**: bbox vozlišč zemljevida meri 30 × 33 km, celica 5,0 × 5,6 km, učne
-  verige so dolge povprečno 2,06 stanja; vrata delitve (0,05·90/36 = 0,125 na celico) so
-  pri tako grobi mreži res presežena, a κ = ⌈√(d/200)⌉ pri gostotah ≤ 90 ostane 1, prag
-  2. reda θ₁ = √2·36/(0,4ε) = 127/ε pa daleč presega maso, ki jo 90 poti lahko da eni
-  vrstici. Šum prevlada nad števci: vsota matrike 1. reda po NormCut je 770 / 256 / 128
-  pri ε = 0,5 / 2 / 8 (prava masa 90), vrstica začetka pri ε = 0,5 in semenu 3 ostane brez
-  mase (enakomerni začetek). To je pričakovano vedenje centralne DP pri vzorcu dva reda
-  velikosti pod obsegom članka (17.621 poti Geolife), ne napaka izvedbe; pri stopnjah 50
-  in 182 je pričakovati prve delitve, 2. red pa šele pri tisočih poti na celico.
+  verige so dolge povprečno 2,06 stanja; vrata delitve (0,05·|D|/36; po popravku pregleda
+  je |D| **zašumljena vsota gostot 1. plasti po NormCut**, ne prava masa 90, zato prag niha s
+  šumom — pri pravi masi bi bil 0,125 na celico) so pri tako grobi mreži res presežena, a
+  κ = ⌈√(d/200)⌉ pri gostotah ≤ 90 ostane 1, zato se celica tako ali tako ne razdeli in
+  sprememba vrat na tej stopnji ne premakne ničesar; prag 2. reda θ₁ = √2·36/(0,4ε) = 127/ε
+  pa daleč presega maso, ki jo 90 poti lahko da eni vrstici. Šum prevlada nad števci: vsota
+  matrike 1. reda po NormCut je 770 / 256 / 128 pri ε = 0,5 / 2 / 8 (prava masa 90), masa
+  vrstice začetka pri tarči pri ε = 0,5 pa je 108,2 / 45,5 / 79,6 / 0,00 po semenih
+  42 / 1 / 2 / 3 — pri semenu 3 je NormCut vrstico izpraznil, in takrat **tako vzorčenje kot
+  točkovanje** uporabita isti enakomerni začetek čez 36 stanj (prej je točkovanje jemalo prag
+  10⁻¹², zato hoja in njena ocena nista bili skladni). To je pričakovano vedenje centralne DP
+  pri vzorcu dva reda velikosti pod obsegom članka (17.621 poti Geolife), ne napaka izvedbe;
+  pri stopnjah 50 in 182 je pričakovati prve delitve, 2. red pa šele pri tisočih poti na
+  celico.
 - **Napad na članstvo memorizacije ne zazna:** vsi trije intervali AUC čez semena
   vsebujejo 0,5 ali se ga dotikajo (pri ε = 2 je interval ozek, 0,51–0,57, ker so tri
-  semena po naključju blizu); povprečje raste z ε (0,48 → 0,54 → 0,57), kar je pričakovana
+  semena po naključju blizu); povprečje raste z ε (0,53 → 0,54 → 0,57), kar je pričakovana
   smer in enaka kot pri `ldptrace` (0,43 → 0,48 → 0,53). Pri 15 nečlanih je `tpr@fpr = 0,1`
   kvantiziran na korake 1/15, zato so njegovi intervali široki in vrednost 0,27 pri ε = 8
   ni razlika, ki bi jo bilo mogoče trditi. Vrednost pogona s semenom 42 pri ε = 2 (0,690)
@@ -756,19 +772,28 @@ Branje:
   pri stopnji 20 ne vidi**, ker sta obe strani na ravni naključja in uporabnost sinteze v
   orkestratorju ni priključena (2.5); primerjava uporabnosti je narejena nad Portom v
   ogrodju validacije (spodaj), kjer PrivTrace dela z 20.000 potmi in mreža zares deli.
-- Odprto: (1) šum na diagonali matrike 1. reda (prava vrednost 0, ker so zaporedni
-  dvojniki strnjeni) da ~0,1 % samoprehodov v sintezi; ničenje diagonale bi bilo brezplačno
-  naknadno procesiranje, a ga ne članek ne izvirnik ne delata — odločitev avtorja;
-  (2) roka z gostejšo mrežo (npr. `first_level_k: 12`, kot `ldptrace`) in kopiji
+- (1) **Zaprto (odločitev avtorja, 20. september 2026):** šum na diagonali matrike 1. reda
+  (prava vrednost 0, ker so zaporedni dvojniki strnjeni) ostane, kot je v članku in v
+  izvirniku. Izmerjen učinek je premajhen, da bi upravičil še eno odstopanje: diagonala nosi
+  0,06–0,19 % mase realnega bloka 1. reda in 0,06–0,08 % korakov hoj pri 20.000 poteh Porta
+  (~0,1 % pri stopnji 20). Eno posledico je vseeno treba povedati pošteno: če v vrstici
+  2. reda po NormCut preživi samo diagonala, hoja postane vsrkajoča in teče do `max_len`
+  (videno enkrat na 200 hoj na majhni testni zbirki); ujame jo varovalka D-4.3.
+- Odprto: (2) roka z gostejšo mrežo (npr. `first_level_k: 12`, kot `ldptrace`) in kopiji
   konfiguracije za stopnji 50 in 182 (roka je poceni: ~8 s na seme); (3) `run.json` ne
   zapisuje dejstev PrivTrace (`n_states`, stanja 2. reda) — dobijo se s ponovno
-  prilagoditvijo, kot L_k pri LDPTrace pred PR C.
+  prilagoditvijo, kot L_k pri LDPTrace pred PR C; (4) **reševalec potovanj ali eksplicitni
+  model dolžine**: odstopanje D-4.2 opusti prav tisti popravek pristranskosti, zaradi
+  katerega je reševalec v članku (§4.4: normalizacija 1/(L+1) prešteje kratke poti preveč in
+  dolge premalo), in to se vidi v dolžini — prave poti Porta imajo 12,0 strnjenih stanj,
+  port brez šuma 8,6 (30 % prekratko; meritev v bloku validacije spodaj).
 
 **Validacija `privtrace` proti izvirni kodi nad Portom (izmerjeno 20. septembra 2026, PR #41, veja
 `claude/zm4-privtrace-validation`, skladana na PR #40 `claude/zm4-privtrace`).** Izvirnik: klon
 `github.com/DpTrace/PrivTrace`, commit `b06cef7d8df0305b10f309e8b75660949946f22a` (9. december
 2022, **brez licence**; v paket ni prekopirano nič), v `external/PrivTrace` (ni v gitu), s
-popravkom `scripts/privtrace_reference.patch` (edini artefakt izvirnika v gitu): `np.int` →
+popravkom `scripts/privtrace_reference.patch` (skupaj z diagnostičnim
+`scripts/privtrace_reference_no_or.patch` edina artefakta izvirnika v gitu): `np.int` →
 `int` na 11 mestih, odstranjen `import fcntl` (samo POSIX), `import torch` mrtve kode v
 `try/except`, ter trije parametri `--seed` (koda semena ni imela; vse naključje je globalno
 stanje numpy/random), `--level1_k` (izvirnikovo pravilo K = min(60, ⌊√(N_točk/600)⌋) bi tu
@@ -778,112 +803,264 @@ reševalec `cvxpy` — je nespremenjen. `cvxpy` je enkratno nameščen v obstoje
 (ni v `pyproject.toml`; brez ECOS, zato izvirnikova gola `except:` pristane na SCS). Vhod:
 **prvih 20.000 poti** `porto.dat` (640.519 točk, 32 na pot) v izvirnikovem tekstovnem
 formatu (`--write-subset`), bbox po izvirnikovem pravilu (min/max ± 10⁻⁵ razpona), **K = 6 na
-obeh straneh**, ε ∈ {0,5, 1, 2}, semena 1–5, brez razreza in podvzorčenja. Ocena: obe strani
-z devetimi metrikami članka LDPTrace (`evaluation/ldptrace_metrics.py`) nad enotno mrežo
-20 × 20 nad istim bbox (izvirnik lastnih metrik nima; ena enakomerna točka na list na obeh
-straneh). Ukazi in časi: `docs/RUNNING.md` §9.4; ogrodje `experiments/privtrace_eval.py`;
-izhod `results/privtrace_validation/` (ni v gitu).
+obeh straneh**, ε ∈ {0,5, 1, 2}, semena 1–5, brez razreza in podvzorčenja. Ta bbox je prebran
+iz surovih podatkov in **ni diferencialno zaseben — na nobeni strani, pri izvirniku prav tako
+ne**; obravnavamo ga kot del skupne, javno predpostavljene postavitve poskusa (območje, v
+katerem podatki živijo, določeno pred porabo proračuna in enako za vse stolpce), ne kot del
+mehanizma. Ocena: obe strani z devetimi metrikami članka LDPTrace
+(`evaluation/ldptrace_metrics.py`) nad enotno mrežo 20 × 20 nad istim bbox (izvirnik lastnih
+metrik nima; ena enakomerna točka na list na obeh straneh). **Vsak pogon je ocenjen dvakrat:**
+z mostovi (dogovor LDPTrace — `Grid.chain` zapolni vsak preskok med nesosednjima celicama z
+ravno »kraljevo« potjo, tako da preskok šteje kot cela vrsta celic, ki jih preleti) in brez
+mostov (iste vrednosti pod imeni `nobridge_*`, kjer šteje samo celica, v kateri res leži
+točka). Delež vrinjenih celic (`interpolated_share`) je izpisan za vsako stran, ker meri
+velikost te razlike. Tretji stolpec je port z izbirno masko sosednosti (odstopanje D-4.6,
+privzeto izklopljeno): prehod med stanjema, katerih celici 1. plasti nista isti ali
+4-sosednji, je ničen skupaj s strukturnimi ničlami, po šumu in pred NormCut — to je pravilo
+izvirnikove kode, preneseno v naknadno procesiranje nad javno geometrijo mreže, brez dodatnih
+žrebov in brez spremembe porabljenega proračuna. Ukazi in časi: `docs/RUNNING.md` §9.4;
+ogrodje `experiments/privtrace_eval.py` (commit portove strani `ef9811c`); izhod
+`results/privtrace_validation/` (ni v gitu).
 
 Preverba pred meritvijo: obe strani zgradita **enako mrežo** — izvirnik 159–164 listnih stanj
 (24 od 36 celic razdeljenih, κ 1–5; iz pilota), port 161–164 (23–24 razdeljenih, κ ≤ 5),
 enak bbox; delna primerjava pilota na 2.000 poteh (39 stanj) je bila skladna.
 
-Časi: port bere 20.000 poti v 1,5 s, na (ε, seme) prilagoditev 2,5–3,7 s, sinteza 20.000 hoj
-10–14 s, devet metrik 10–13 s; 15 pogonov 7 min. Izvirnik 70–90 s na pogon sam (3,5 min, ko
-je vzporedno tekel port), 15 pogonov 33 min; ocena njegovih 15 sintez 3 min.
+Časi (ponovna meritev, 15 pogonov na stolpec): port bere 20.000 poti v 1,5 s, prilagoditev
+1,9–2,1 s na (ε, seme), sinteza 20.000 hoj 7,4–10,9 s, metrike z mostovi 8,3–10,8 s in brez
+mostov 9,8–11,9 s — 15 pogonov v 8,3 min; port z masko 9,5–15,9 s za hoje, 15 pogonov v
+8,5 min; ocena 15 sintez izvirnika 18–20,5 s na sintezo, skupaj 5,2 min. Izvirnik sam je tekel
+70–90 s na pogon (3,5 min, ko je vzporedno tekel port), 15 pogonov 33 min; diagnostična pogona
+brez pogojev »ALI« 138 s in 119 s (ustrezna glavna pogona pri tem ε 263 s in 207 s, oba
+vzporedno s portom), njuna ocena in kontrola na semenih 1–2 po ~1 min.
 
-Tabela (povprečje [najmanj; največ] čez pet semen; sedem metrik so napake, nižje je bolje;
-Kendall in F1 sta oceni, višje je bolje; zadnje tri vrstice so dejstva porta, izvirnik jih ne
-izpisuje):
+Tabela je dobesedni izpis ogrodja (decimalna pika, povprečje [najmanj; največ] čez pet
+semen). Stolpci: `port` je port po članku, `port_masked` isti port z masko sosednosti D-4.6,
+`reference` izvirnikova koda; vse tri ocenjujejo naše metrike. Sedem metrik so napake, nižje
+je bolje; Kendall in F1 sta oceni, višje je bolje. Vrstice `n_states`, `n_second_order` in
+`synthetic_mean_length` so dejstva porta (izvirnik jih ne izpisuje). Vrstice `nobridge_*` so
+iste metrike, ocenjene brez mostov; ponovijo se samo za šest metrik, ki berejo verige celic,
+saj se poizvedbe po točkah, premer in dolžina računajo iz točk in jih premoščanje sploh ne
+zadene. `interpolated_share` je delež celic v verigi, ki jih je vstavila kraljeva pot; pri
+pravih poteh je 0.0800 na vseh treh straneh, torej je vse nad tem umetnost točkovanja:
 
-| ε | metric | port (naše metrike) | izvirnik (naše metrike) |
-|---|---|---|---|
-| 0.5 | density_error | 0.0630 [0.0586; 0.0679] | 0.1522 [0.1103; 0.1885] |
-| 0.5 | hotspot_query_error | 0.1133 [0.0035; 0.3056] | 0.4532 [0.0131; 1.0000] |
-| 0.5 | point_query_avre | 0.5436 [0.5108; 0.5828] | 0.6743 [0.6546; 0.6834] |
-| 0.5 | coverage_kendall_tau | 0.5886 [0.5730; 0.6009] | 0.3897 [0.3194; 0.4701] |
-| 0.5 | trip_error | 0.5461 [0.5385; 0.5534] | 0.6062 [0.5908; 0.6216] |
-| 0.5 | diameter_error | 0.1108 [0.0944; 0.1291] | 0.2551 [0.1817; 0.3015] |
-| 0.5 | length_error | 0.1468 [0.1389; 0.1579] | 0.1690 [0.1091; 0.2062] |
-| 0.5 | pattern_f1 | 0.3540 [0.3100; 0.4300] | 0.1640 [0.1000; 0.2600] |
-| 0.5 | pattern_support_error | 0.6740 [0.5889; 0.7282] | 0.8983 [0.8620; 0.9213] |
-| 0.5 | n_states | 162.8 [161.0; 164.0] | — |
-| 0.5 | n_second_order | 0.0 | — |
-| 0.5 | synthetic_mean_length | 7.1 [6.2; 7.6] | — |
-| 1.0 | density_error | 0.0569 [0.0534; 0.0652] | 0.0709 [0.0565; 0.0862] |
-| 1.0 | hotspot_query_error | 0.0802 [0.0235; 0.1937] | 0.1541 [0.0235; 0.3106] |
-| 1.0 | point_query_avre | 0.3386 [0.2430; 0.4370] | 0.5772 [0.4720; 0.6307] |
-| 1.0 | coverage_kendall_tau | 0.6143 [0.5995; 0.6234] | 0.5564 [0.5330; 0.5991] |
-| 1.0 | trip_error | 0.5030 [0.4917; 0.5134] | 0.5483 [0.5380; 0.5550] |
-| 1.0 | diameter_error | 0.0960 [0.0871; 0.1015] | 0.1947 [0.1597; 0.2303] |
-| 1.0 | length_error | 0.1598 [0.1465; 0.1693] | 0.1149 [0.0920; 0.1296] |
-| 1.0 | pattern_f1 | 0.4160 [0.3300; 0.4700] | 0.3320 [0.2300; 0.3800] |
-| 1.0 | pattern_support_error | 0.5815 [0.5228; 0.6543] | 0.8309 [0.7980; 0.8511] |
-| 1.0 | n_states | 164.0 | — |
-| 1.0 | n_second_order | 0.0 | — |
-| 1.0 | synthetic_mean_length | 10.5 [8.6; 11.7] | — |
-| 2.0 | density_error | 0.0482 [0.0457; 0.0504] | 0.0539 [0.0488; 0.0631] |
-| 2.0 | hotspot_query_error | 0.0294 [0.0131; 0.0595] | 0.0788 [0.0235; 0.1630] |
-| 2.0 | point_query_avre | 0.3272 [0.2930; 0.3720] | 0.5402 [0.4863; 0.5630] |
-| 2.0 | coverage_kendall_tau | 0.6407 [0.6305; 0.6540] | 0.6220 [0.5980; 0.6361] |
-| 2.0 | trip_error | 0.4844 [0.4742; 0.4898] | 0.5196 [0.5157; 0.5226] |
-| 2.0 | diameter_error | 0.0863 [0.0836; 0.0877] | 0.1754 [0.1623; 0.1815] |
-| 2.0 | length_error | 0.1446 [0.1350; 0.1527] | 0.0861 [0.0756; 0.0913] |
-| 2.0 | pattern_f1 | 0.4780 [0.4600; 0.4900] | 0.3860 [0.3700; 0.4000] |
-| 2.0 | pattern_support_error | 0.5906 [0.5637; 0.6183] | 0.8030 [0.7954; 0.8129] |
-| 2.0 | n_states | 164.0 | — |
-| 2.0 | n_second_order | 5.4 [4.0; 7.0] | — |
-| 2.0 | synthetic_mean_length | 10.4 [9.8; 11.1] | — |
+| ε | metric | port | port_masked | reference |
+|---|---|---|---|---|
+| 0.5 | density_error | 0.0630 [0.0586; 0.0679] | 0.0960 [0.0489; 0.2630] | 0.1522 [0.1103; 0.1885] |
+| 0.5 | hotspot_query_error | 0.1133 [0.0035; 0.3056] | 0.2176 [0.0000; 1.0000] | 0.4532 [0.0131; 1.0000] |
+| 0.5 | point_query_avre | 0.5436 [0.5108; 0.5828] | 0.5910 [0.3393; 1.4530] | 0.6743 [0.6546; 0.6834] |
+| 0.5 | coverage_kendall_tau | 0.5886 [0.5730; 0.6009] | 0.6056 [0.5935; 0.6234] | 0.3897 [0.3194; 0.4701] |
+| 0.5 | trip_error | 0.5461 [0.5385; 0.5534] | 0.5284 [0.5144; 0.5474] | 0.6062 [0.5908; 0.6216] |
+| 0.5 | diameter_error | 0.1108 [0.0944; 0.1291] | 0.0863 [0.0728; 0.0977] | 0.2551 [0.1817; 0.3015] |
+| 0.5 | length_error | 0.1468 [0.1389; 0.1579] | 0.1108 [0.1055; 0.1243] | 0.1690 [0.1091; 0.2062] |
+| 0.5 | pattern_f1 | 0.3540 [0.3100; 0.4300] | 0.3060 [0.0000; 0.4300] | 0.1640 [0.1000; 0.2600] |
+| 0.5 | pattern_support_error | 0.6740 [0.5889; 0.7282] | 0.6663 [0.6113; 0.7173] | 0.8983 [0.8620; 0.9213] |
+| 0.5 | n_states | 162.8 [161.0; 164.0] | 162.8 [161.0; 164.0] | — |
+| 0.5 | n_second_order | 0.0 | 0.0 | — |
+| 0.5 | synthetic_mean_length | 7.1 [6.2; 7.6] | 13.1 [9.9; 21.6] | — |
+| 0.5 | nobridge_density_error | 0.0619 [0.0600; 0.0650] | 0.0980 [0.0547; 0.2557] | 0.1462 [0.1081; 0.1735] |
+| 0.5 | nobridge_hotspot_query_error | 0.2195 [0.0235; 0.3892] | 0.2170 [0.0000; 1.0000] | 0.3866 [0.0314; 0.8001] |
+| 0.5 | nobridge_coverage_kendall_tau | 0.5702 [0.5499; 0.5860] | 0.5856 [0.5632; 0.5986] | 0.3986 [0.3243; 0.4730] |
+| 0.5 | nobridge_trip_error | 0.5461 [0.5385; 0.5534] | 0.5284 [0.5144; 0.5474] | 0.6062 [0.5908; 0.6216] |
+| 0.5 | nobridge_pattern_f1 | 0.3260 [0.3100; 0.3400] | 0.2740 [0.0500; 0.3400] | 0.2540 [0.2100; 0.2700] |
+| 0.5 | nobridge_pattern_support_error | 0.8525 [0.8102; 0.8886] | 0.7881 [0.7659; 0.8122] | 0.9271 [0.9007; 0.9509] |
+| 0.5 | interpolated_share | 0.6371 [0.5953; 0.6594] | 0.4017 [0.3826; 0.4236] | 0.3709 [0.3117; 0.4206] |
+| 1.0 | density_error | 0.0569 [0.0534; 0.0652] | 0.0432 [0.0411; 0.0466] | 0.0709 [0.0565; 0.0862] |
+| 1.0 | hotspot_query_error | 0.0802 [0.0235; 0.1937] | 0.0199 [0.0013; 0.0314] | 0.1541 [0.0235; 0.3106] |
+| 1.0 | point_query_avre | 0.3386 [0.2430; 0.4370] | 0.3886 [0.3746; 0.4162] | 0.5772 [0.4720; 0.6307] |
+| 1.0 | coverage_kendall_tau | 0.6143 [0.5995; 0.6234] | 0.6458 [0.6408; 0.6578] | 0.5564 [0.5330; 0.5991] |
+| 1.0 | trip_error | 0.5030 [0.4917; 0.5134] | 0.5063 [0.4961; 0.5121] | 0.5483 [0.5380; 0.5550] |
+| 1.0 | diameter_error | 0.0960 [0.0871; 0.1015] | 0.1075 [0.1028; 0.1118] | 0.1947 [0.1597; 0.2303] |
+| 1.0 | length_error | 0.1598 [0.1465; 0.1693] | 0.1082 [0.1041; 0.1138] | 0.1149 [0.0920; 0.1296] |
+| 1.0 | pattern_f1 | 0.4160 [0.3300; 0.4700] | 0.4300 [0.3800; 0.4800] | 0.3320 [0.2300; 0.3800] |
+| 1.0 | pattern_support_error | 0.5815 [0.5228; 0.6543] | 0.6806 [0.6489; 0.7043] | 0.8309 [0.7980; 0.8511] |
+| 1.0 | n_states | 164.0 | 164.0 | — |
+| 1.0 | n_second_order | 0.0 | 0.0 | — |
+| 1.0 | synthetic_mean_length | 10.5 [8.6; 11.7] | 10.4 [9.8; 11.2] | — |
+| 1.0 | nobridge_density_error | 0.0529 [0.0489; 0.0635] | 0.0490 [0.0471; 0.0512] | 0.0693 [0.0625; 0.0794] |
+| 1.0 | nobridge_hotspot_query_error | 0.0602 [0.0235; 0.1991] | 0.0343 [0.0235; 0.0699] | 0.1567 [0.0235; 0.3106] |
+| 1.0 | nobridge_coverage_kendall_tau | 0.6041 [0.5894; 0.6162] | 0.6197 [0.6138; 0.6268] | 0.5528 [0.5371; 0.5819] |
+| 1.0 | nobridge_trip_error | 0.5030 [0.4917; 0.5134] | 0.5063 [0.4961; 0.5121] | 0.5483 [0.5380; 0.5550] |
+| 1.0 | nobridge_pattern_f1 | 0.3520 [0.3200; 0.3900] | 0.3620 [0.3500; 0.3800] | 0.3460 [0.3100; 0.3800] |
+| 1.0 | nobridge_pattern_support_error | 0.7865 [0.7539; 0.8251] | 0.7767 [0.7532; 0.7923] | 0.8734 [0.8450; 0.8931] |
+| 1.0 | interpolated_share | 0.5745 [0.5579; 0.5796] | 0.3539 [0.3483; 0.3621] | 0.3348 [0.2928; 0.3626] |
+| 2.0 | density_error | 0.0482 [0.0457; 0.0504] | 0.0390 [0.0365; 0.0418] | 0.0539 [0.0488; 0.0631] |
+| 2.0 | hotspot_query_error | 0.0294 [0.0131; 0.0595] | 0.0263 [0.0131; 0.0595] | 0.0788 [0.0235; 0.1630] |
+| 2.0 | point_query_avre | 0.3272 [0.2930; 0.3720] | 0.4079 [0.3928; 0.4193] | 0.5402 [0.4863; 0.5630] |
+| 2.0 | coverage_kendall_tau | 0.6407 [0.6305; 0.6540] | 0.6667 [0.6576; 0.6728] | 0.6220 [0.5980; 0.6361] |
+| 2.0 | trip_error | 0.4844 [0.4742; 0.4898] | 0.4998 [0.4967; 0.5044] | 0.5196 [0.5157; 0.5226] |
+| 2.0 | diameter_error | 0.0863 [0.0836; 0.0877] | 0.1235 [0.1200; 0.1327] | 0.1754 [0.1623; 0.1815] |
+| 2.0 | length_error | 0.1446 [0.1350; 0.1527] | 0.1063 [0.1043; 0.1083] | 0.0861 [0.0756; 0.0913] |
+| 2.0 | pattern_f1 | 0.4780 [0.4600; 0.4900] | 0.4560 [0.4400; 0.4700] | 0.3860 [0.3700; 0.4000] |
+| 2.0 | pattern_support_error | 0.5906 [0.5637; 0.6183] | 0.6971 [0.6830; 0.7151] | 0.8030 [0.7954; 0.8129] |
+| 2.0 | n_states | 164.0 | 164.0 | — |
+| 2.0 | n_second_order | 5.4 [4.0; 7.0] | 4.2 [3.0; 6.0] | — |
+| 2.0 | synthetic_mean_length | 10.4 [9.8; 11.1] | 9.8 [9.5; 10.3] | — |
+| 2.0 | nobridge_density_error | 0.0441 [0.0428; 0.0459] | 0.0455 [0.0443; 0.0467] | 0.0527 [0.0496; 0.0550] |
+| 2.0 | nobridge_hotspot_query_error | 0.0266 [0.0235; 0.0314] | 0.0343 [0.0235; 0.0699] | 0.0773 [0.0235; 0.1526] |
+| 2.0 | nobridge_coverage_kendall_tau | 0.6342 [0.6246; 0.6411] | 0.6351 [0.6277; 0.6398] | 0.6102 [0.6013; 0.6182] |
+| 2.0 | nobridge_trip_error | 0.4844 [0.4742; 0.4898] | 0.4998 [0.4967; 0.5044] | 0.5196 [0.5157; 0.5226] |
+| 2.0 | nobridge_pattern_f1 | 0.3900 [0.3700; 0.4000] | 0.3840 [0.3700; 0.4000] | 0.3420 [0.3300; 0.3500] |
+| 2.0 | nobridge_pattern_support_error | 0.7784 [0.7550; 0.7903] | 0.7839 [0.7705; 0.7934] | 0.8481 [0.8394; 0.8589] |
+| 2.0 | interpolated_share | 0.5084 [0.4999; 0.5210] | 0.3323 [0.3250; 0.3392] | 0.3222 [0.3131; 0.3436] |
 
-Dolžina sintetičnih poti (točk na pot): izvirnik 4,7 / 6,1 / 7,0 pri ε = 0,5 / 1 / 2, port
-7,3 / 10,6 / 10,6 (stanj 7,1 / 10,5 / 10,4). Port brez šuma (ε = 10⁴, dve semeni; spodnja meja,
-ki jo določa struktura modela, ne zasebnost): gostota 0,034, vroče točke 0,013, AvRE 0,46,
+**Regresija ponovne meritve:** stolpec `port` je v vseh 255 že obstoječih vrednostih (devet
+metrik × 15 pogonov in dejstva porta) in stolpec `reference` v vseh 165 enak popoldanski
+meritvi z dne 20. septembra 2026 do zadnje decimalke — isti žrebi šuma in iste mreže, ker
+vrata delitve na zašumljeni vsoti pri 20.000 poteh niso prevrnila nobene celice (prag se
+premakne za ~±0,1 okrog 27,8). Novo v tabeli sta torej tretji stolpec in blok brez mostov.
+
+**Diagnostična tabela (ni del glavne primerjave):** kaj se z izvirnikom zgodi, če mu vzamemo
+tri pogoje »ALI« v adaptivnem pravilu (popravek `scripts/privtrace_reference_no_or.patch`,
+uporabljen samo za ta dva pogona in nato razveljavljen). `reference_s12` je glavni izvirnik,
+ocenjen samo na semenih 1–2, da je primerjava enaka za enako; `reference_no_or` je izvirnik
+brez teh treh pogojev, prav tako semeni 1–2. Delež vrinjenih celic pri pravih poteh je tudi
+tu 0.0800:
+
+| ε | metric | port | port_masked | reference_s12 | reference_no_or |
+|---|---|---|---|---|---|
+| 0.5 | density_error | 0.0630 [0.0586; 0.0679] | 0.0960 [0.0489; 0.2630] | 0.1722 [0.1558; 0.1885] | 0.1030 [0.0978; 0.1082] |
+| 0.5 | hotspot_query_error | 0.1133 [0.0035; 0.3056] | 0.2176 [0.0000; 1.0000] | 0.6501 [0.3002; 1.0000] | 0.3801 [0.2160; 0.5442] |
+| 0.5 | point_query_avre | 0.5436 [0.5108; 0.5828] | 0.5910 [0.3393; 1.4530] | 0.6792 [0.6750; 0.6834] | 0.6396 [0.6312; 0.6481] |
+| 0.5 | coverage_kendall_tau | 0.5886 [0.5730; 0.6009] | 0.6056 [0.5935; 0.6234] | 0.3520 [0.3194; 0.3845] | 0.4596 [0.4513; 0.4678] |
+| 0.5 | trip_error | 0.5461 [0.5385; 0.5534] | 0.5284 [0.5144; 0.5474] | 0.6163 [0.6111; 0.6216] | 0.5855 [0.5701; 0.6009] |
+| 0.5 | diameter_error | 0.1108 [0.0944; 0.1291] | 0.0863 [0.0728; 0.0977] | 0.2681 [0.2347; 0.3015] | 0.2674 [0.2652; 0.2695] |
+| 0.5 | length_error | 0.1468 [0.1389; 0.1579] | 0.1108 [0.1055; 0.1243] | 0.1810 [0.1709; 0.1912] | 0.1616 [0.1464; 0.1769] |
+| 0.5 | pattern_f1 | 0.3540 [0.3100; 0.4300] | 0.3060 [0.0000; 0.4300] | 0.1150 [0.1000; 0.1300] | 0.2800 [0.2500; 0.3100] |
+| 0.5 | pattern_support_error | 0.6740 [0.5889; 0.7282] | 0.6663 [0.6113; 0.7173] | 0.9158 [0.9103; 0.9213] | 0.8644 [0.8382; 0.8906] |
+| 0.5 | n_states | 162.8 [161.0; 164.0] | 162.8 [161.0; 164.0] | — | — |
+| 0.5 | n_second_order | 0.0 | 0.0 | — | — |
+| 0.5 | synthetic_mean_length | 7.1 [6.2; 7.6] | 13.1 [9.9; 21.6] | — | — |
+| 0.5 | nobridge_density_error | 0.0619 [0.0600; 0.0650] | 0.0980 [0.0547; 0.2557] | 0.1622 [0.1569; 0.1676] | 0.1041 [0.0975; 0.1107] |
+| 0.5 | nobridge_hotspot_query_error | 0.2195 [0.0235; 0.3892] | 0.2170 [0.0000; 1.0000] | 0.5209 [0.3002; 0.7417] | 0.2618 [0.2095; 0.3141] |
+| 0.5 | nobridge_coverage_kendall_tau | 0.5702 [0.5499; 0.5860] | 0.5856 [0.5632; 0.5986] | 0.3568 [0.3243; 0.3893] | 0.4532 [0.4438; 0.4626] |
+| 0.5 | nobridge_trip_error | 0.5461 [0.5385; 0.5534] | 0.5284 [0.5144; 0.5474] | 0.6163 [0.6111; 0.6216] | 0.5855 [0.5701; 0.6009] |
+| 0.5 | nobridge_pattern_f1 | 0.3260 [0.3100; 0.3400] | 0.2740 [0.0500; 0.3400] | 0.2400 [0.2100; 0.2700] | 0.3150 [0.3100; 0.3200] |
+| 0.5 | nobridge_pattern_support_error | 0.8525 [0.8102; 0.8886] | 0.7881 [0.7659; 0.8122] | 0.9452 [0.9395; 0.9509] | 0.9073 [0.8935; 0.9212] |
+| 0.5 | interpolated_share | 0.6371 [0.5953; 0.6594] | 0.4017 [0.3826; 0.4236] | 0.3877 [0.3547; 0.4206] | 0.3271 [0.3009; 0.3534] |
+
+Kaj v izvirniku delajo ti trije pogoji (bralni pregled njegovih lastnih zašumljenih matrik
+med pogonom; pregledovalna skripta ni v repozitoriju, ε = 0,5): pravilo članka (`degree_amount` **in** `degree_distribution`) izbere **0** stanj
+2. reda od 159 pri semenu 1 in 0 od 164 pri semenu 2; pogoji »ALI« (velika izhodna stopnja,
+teža začetka nad 2 %, teža konca nad 2 %) jih dodajo 0 / 13 / 27 oziroma 1 / 15 / 28, torej
+34 in 35 vsiljenih stanj 2. reda, ki nosijo 35,4 % oziroma 34,1 % mase prehodov med pravimi
+stanji in 59,2 % oziroma 62,0 % mase začetka. Po šumu in odrezu na cela števila je 52,1 %
+oziroma 54,6 % njihovih vrstic praznih (vrnejo se na 1. red). Prevladujoč pogoj je teža
+**konca**, ne začetka. Pri ε = 2 in semenu 1: pravilo članka 4 od 164, s pogoji »ALI« skupaj
+20 (zgrajenih 17), 23,0 % mase, 54,5 % mase začetka, 54,1 % praznih vrstic. Izvirnik zgradi
+tudi manj kažipotov, kot jih izbere (34 → 33, 20 → 17): drugi, nedokumentiran odpad. Eden ali
+dva kažipota na pogon imata pokvarjen stolpec konca (`INT_MIN`, 0,7–2,5 % izhodne mase),
+ker njegovo preračunavanje konca deli z nič — od tod `RuntimeWarning` v dnevnikih; taka
+stanja hoje ne morejo končati in so odvisna od skoka iz slepe ulice. Pogona brez pogojev
+»ALI« nimata nobenega takega opozorila in nobenega zavrnjenega sprehoda.
+
+Dolžina sintetičnih poti (točk na pot): izvirnik 4,7 / 6,1 / 7,0 pri ε = 0,5 / 1 / 2
+(po semenih 1 / 2: 4,22 / 4,42 pri ε = 0,5, 5,81 / 6,19 pri ε = 1, 7,10 / 7,09 pri ε = 2; brez
+pogojev »ALI« 4,70 / 5,45), port 7,3 / 10,6 / 10,6 (stanj 7,1 / 10,5 / 10,4), port z masko
+13,1 / 10,4 / 9,8 stanja. Prave poti Porta imajo na isti mreži s 164 stanji **12,04 strnjenega
+stanja** (mediana 12, 90. percentil 19, največ 100), port brez šuma 8,57 (mediana 6) — to je
+pristranskost, opisana pri odstopanju D-4.2. Pri semenu 1 je port dolg 6,17 stanja (mediana 4)
+pri ε = 0,5 in 9,76 (mediana 7) pri ε = 2. Maska pri ε = 0,5 ni stabilna: **1.207 od 20.000
+hoj** teče do varovalke `max_len` = 200 (pri ε = 2 nobena), ker zamaskirane vrstice ponekod
+ostanejo brez mase konca in z malo dovoljenimi nasledniki, tako da hoja kroži po soseščini do
+varovalke; izvirnik prav to duši z zavračanjem »postopajočih« hoj. Nobena hoja porta brez
+maske ne doseže varovalke pri nobenem ε.
+
+Preskoki med celicama 1. plasti, ki nista 4-sosednji (delež vseh zaporednih korakov, seme 1):
+prave poti 0,0082 (5.091 od 620.519), port 0,2367 pri ε = 0,5 in 0,0912 pri ε = 2, port brez
+šuma 0,0248, port z masko 0 po konstrukciji, izvirnik 0,0139 / 0,0002 (semeni 1 / 2) pri
+ε = 0,5, 0,0095 / 0,0048 pri ε = 1 in 0,0026 / 0,0017 pri ε = 2, izvirnik brez pogojev »ALI«
+0,0084 / 0,0001. Samoprehodi v hojah: port 0,0008 / 0,0006 korakov pri ε = 0,5 / 2 (masa
+diagonale 0,19 % / 0,06 % realnega bloka), z masko 0,0039 / 0,0018, brez šuma 0.
+
+Port brez šuma (ε = 10⁴, dve semeni; spodnja meja, ki jo določa struktura modela, ne
+zasebnost): gostota 0,034, vroče točke 0,013, AvRE 0,46,
 Kendall 0,69, potovanja 0,47, premer 0,088, dolžina 0,093, F1 0,53, podpora vzorcev 0,67,
 133 stanj 2. reda, 8,6 stanja na pot.
 
 Branje (merila kot pri LDPTrace, `docs/NACRT_LDPTRACE_VALIDACIJA.md` §6):
 
-1. **Mreža in trend se ujemata.** Obe strani dobita isto delitev (isto število stanj do
-   nekaj enot, kar je žreb šuma) in pri obeh vse napake padajo in oceni rasteta z ε (edina
-   izjema je portova dolžina, ki je ravna pri 0,15, glej 3). Pri ε = 2 so gostota (0,048
+1. **Mreža in trend se ujemata.** Vse tri strani dobijo isto delitev (isto število stanj do
+   nekaj enot, kar je žreb šuma) in pri vseh napake padajo in oceni rasteta z ε (edina
+   izjema je portova dolžina, ki je ravna pri 0,15, glej 5). Pri ε = 2 so gostota (0,048
    proti 0,054), vroče točke (0,03 proti 0,08 pri široki razpršenosti) in Kendall (0,64 proti
    0,62) **znotraj razpona semen** — to je del mehanizma, ki ga članek določa (zašumljena
    mreža in Markov 1. reda), in tam se strani strinjata; pri ε = 1 se gostota in Kendall
    ravno še prekrivata, pri ε = 0,5 ne več.
-2. **Sicer se strani ne ujemata znotraj razpršenosti semen: port je sistematično boljši.**
-   Pri ε = 0,5 pri vseh devetih metrikah (pri sedmih zunaj razpona semen: gostota 0,063 proti
-   0,152, Kendall 0,59 proti 0,39, premer 0,11 proti 0,26, F1 0,35 proti 0,16, podpora 0,67
-   proti 0,90, AvRE 0,54 proti 0,67, potovanja 0,55 proti 0,61), pri ε = 1 in ε = 2 pri sedmih
-   od devetih (potovanja, premer, AvRE, F1, podpora vzorcev vedno zunaj razpona); izvirnik je
-   boljši samo pri **dolžini** pri ε ≥ 1 (0,115 in 0,086 proti 0,160 in 0,145) — pri ε = 2
-   celo pod portovo mejo brez šuma (0,093).
-3. **Razlike so skladne z dokumentiranimi odstopanji izvirnika od Algoritma 1 v fazi
-   sinteze, ne z oceno modela.** Izvirnikove hoje so krajše (4,7–7,0 točk proti 7,3–10,6) in
-   z manjšim premerom kljub primerljivi ali boljši skupni dolžini, kar je slika hoj, ki se
-   zadržujejo med sosednjimi celicami: preverjanje sosednosti pri sintezi z zavračanjem hoj
-   (dolge hoje so pogosteje zavržene, ker prej vsebujejo nesosednji korak), skoki v naključno
-   sosednjo celico v slepi ulici, in množilniki konca, vezani na napovedano dolžino iz
-   reševalca (×0,2, dokler hoja ne doseže polovice napovedane dolžine — to je nadzor dolžine,
-   ki ga Algoritem 1 nima, in pojasni, zakaj je izvirnik pri dolžini boljši). Odrez števcev
-   2. reda na cela števila pri ε ≤ 1 ne igra vloge (port tam nima stanj 2. reda; pri ε = 2 jih
-   ima 4–7). Portova ravna dolžinska napaka (0,15 tudi pri ε = 2 in 0,09 brez šuma) je
-   lastnost Algoritma 1 brez nadzora dolžine: hoja konča, ko je izžreban navidezni konec, in
-   njena dolžina je pri šumu pristranska navzgor (10,5 stanja proti 8,6 brez šuma).
-4. **Kar ta primerjava ne dokaže.** Ker sta obe strani ocenjeni z istimi metrikami nad isto
-   mrežo in isto delitvijo, je primerjava merilo za *sintezo*, ne za oceno modela; matrik
-   izvirnika brez dodatnega popravka ni mogoče izpisati, zato trditev iz 3 (razlika je v
-   sintezi) ostaja skladna razlaga, ne meritev. Dokončni pripis bi zahteval pogon izvirnika z
-   izklopljenim preverjanjem sosednosti in množilniki (poseg v njegov algoritem, ki ga je
-   avtor 20. septembra 2026 izključil) — odprta postavka. Port je pri ε = 2 blizu svoje meje
-   brez šuma (gostota 0,048 proti 0,034, potovanja 0,48 proti 0,47, premer 0,086 proti 0,088,
-   F1 0,48 proti 0,53), kar pove, da preostale napake pri ε = 2 določa model (Markovova hoja
-   po 164 listih brez para začetek–konec), ne šum.
+2. **Del portove prednosti je bil umetnost točkovanja — izmerjena.** Premoščanje (kraljeva
+   pot) vstavi pri pravih poteh 8 % celic verige, pri portu po članku pa 64 / 57 / 51 % pri
+   ε = 0,5 / 1 / 2; port z masko ima 40 / 35 / 33 %, izvirnik 37 / 33 / 32 %. Tudi zadnja dva,
+   ki oba ostajata pri 4-sosednosti 1. plasti, imata torej okrog tretjino vrinjenih celic:
+   ena celica 1. plasti pokriva 3,3 celice ocenjevalne mreže 20 × 20, zato tudi dovoljen korak
+   v sosednjo celico 1. plasti prečka več ocenjevalnih celic. Portovih dodatnih 51–64 % je
+   plačilo za proste preskoke. Brez mostov portova podpora vzorcev pade s 0,674 na 0,853
+   (ε = 0,5), z 0,582 na 0,787 (ε = 1) in z 0,591 na 0,778 (ε = 2), njegov F1 s 0,354 na 0,326,
+   z 0,416 na 0,352 in z 0,478 na 0,390, napaka vročih točk pri ε = 0,5 pa z 0,113 na 0,220;
+   izvirnik se premakne veliko manj (podpora 0,898 → 0,927, 0,831 → 0,873, 0,803 → 0,848;
+   F1 0,164 → 0,254, 0,332 → 0,346, 0,386 → 0,342). Gostota, Kendall in potovanja se komaj
+   premaknejo (potovanja so po konstrukciji enaka: berejo samo prvo in zadnjo celico).
+3. **Kaj ostane, ko mostove odmislimo: port je še vedno boljši, a ne »pri sedmih od
+   devetih«.** Brez mostov je port boljši pri vseh šestih celičnih metrikah pri ε = 0,5 in
+   ε = 2, pri ε = 1 pa pri petih, saj je F1 znotraj razpona semen (0,352 [0,32; 0,39] proti
+   0,346 [0,31; 0,38]). Prednost pri gostoti (0,062 proti 0,146; 0,053 proti 0,069; 0,044
+   proti 0,053), vročih točkah, Kendallu, potovanjih in podpori vzorcev preživi to preverbo,
+   prednost pri F1 pa se pri ε = 1 skrči na razpon semen. Poizvedbe po točkah, premer in
+   dolžina se računajo iz točk, zato jih premoščanje ne zadene: pri poizvedbah in premeru je
+   port boljši pri vseh ε, pri dolžini ne (točka 5). Prejšnji zapis »port boljši pri sedmih
+   od devetih« je torej pri vzorčnih metrikah pretiraval.
+4. **Zaostanek izvirnika pri ε = 0,5 je najprej v modelu, ne (samo) v sintezi.** Na
+   njegovih lastnih zašumljenih matrikah pravilo članka pri ε = 0,5 izbere **nič** stanj
+   2. reda (obe semeni), njegovi trije pogoji »ALI« pa jih vsilijo 34 oziroma 35 — nosijo
+   35 % mase prehodov in 59–62 % mase začetka, po odrezu na cela števila pa je 52–55 %
+   njihovih vrstic praznih. Ko te pogoje odstranimo (diagnostika zgoraj), se izvirnik
+   izboljša pri osmih od devetih metrik z mostovi in pri vseh šestih brez mostov glede na
+   enako-za-enako kontrolo na semenih 1–2 (brez mostov: gostota 0,162 → 0,104, vroče točke
+   0,521 → 0,262, Kendall 0,357 → 0,453, potovanja 0,616 → 0,586, F1 0,240 → 0,315, podpora
+   0,945 → 0,907), hoje pa se mu podaljšajo (4,22 → 4,70 in 4,42 → 5,45 točke). Port kljub
+   temu ostaja pred izvirnikom brez pogojev »ALI« pri gostoti (0,062 proti 0,104), Kendallu
+   (0,570 proti 0,453), potovanjih (0,546 proti 0,586) in podpori (0,853 proti 0,907); vroče
+   točke (0,220 proti 0,262) in F1 (0,326 proti 0,315) sta znotraj razpršenosti. Preostanek
+   razlike je v izvirnikovi poti 1. reda — porazdelitev začetka iz reševalca `cvxpy` (razdalja
+   L1 0,16–0,17 od njegove lastne zašumljene vrstice začetka), stolpec konca × 1,3, množilniki
+   pri hoji in zavračanje hoj — teh nismo izklopili (odprto).
+5. **Dolžina: portova šibka točka, ne izvirnikova prednost.** Prave poti imajo 12,0
+   strnjenih stanj, port brez šuma 8,6 (30 % prekratko) — to je natanko pristranskost
+   normalizacije 1/(L+1), ki jo članek popravi z reševalcem potovanj (§4.4) in ki jo
+   odstopanje D-4.2 opusti. S šumom da port po članku 6,2 stanja pri ε = 0,5 in 9,8 pri ε = 2
+   (seme 1), izvirnik 4,2–7,1 točke. Boljša dolžinska napaka izvirnika pri ε ≥ 1 (0,115 in
+   0,086 proti 0,160 in 0,145) torej ni delujoč nadzor dolžine, ampak enakomerno prekratka
+   porazdelitev, ki po naključju pade bliže: njegovi množilniki ×0,8 / ×0,5 / ×0,2 verjetnost
+   konca **znižujejo** in hoje podaljšujejo, krajšata pa jih ×1,5 na masi konca stanj 2. reda
+   in zavračanje hoj. (Prejšnji zapis je trdil, da je portova dolžina pri šumu pristranska
+   navzgor; to ni res — port je brez šuma prekratek, s šumom pa se 12,0 približa po naključju
+   šuma.) Odrez števcev 2. reda na cela števila pri ε ≤ 1 ne igra vloge (port tam nima stanj
+   2. reda; pri ε = 2 jih ima 4–7). Port je pri ε = 2 blizu svoje meje brez šuma (gostota
+   0,048 proti 0,034, potovanja 0,48 proti 0,47, premer 0,086 proti 0,088, F1 0,48 proti
+   0,53), kar pove, da preostale napake pri ε = 2 določa model, ne šum.
+6. **Maska sosednosti (D-4.6) kot enako-za-enako različica.** Pri ε ≥ 1 izboljša gostoto
+   (0,043 proti 0,057 in 0,039 proti 0,048), vroče točke, Kendall (0,646 proti 0,614 in 0,667
+   proti 0,641) in dolžino (0,108 in 0,106), poslabša pa poizvedbe po točkah (0,389 proti
+   0,339 in 0,408 proti 0,327), premer (0,086 → 0,124 pri ε = 2) in podporo vzorcev z mostovi;
+   brez mostov sta portovi različici pri ε ≥ 1 pri vseh celičnih metrikah znotraj razpona
+   semen ena od druge. Pri ε = 0,5 je maska nestabilna (pobegle hoje, eno seme s povprečno
+   dolžino 21,6 in gostoto 0,263). Zato ostane privzeto izklopljena (tako je v članku), v
+   primerjavi pa stoji kot različica, ki ima isto omejitev sosednosti kot izvirnik.
+7. **Kar ta primerjava še vedno ne dokaže.** Odstranitev pogojev »ALI« je bila edina
+   diagnostika, ki jo je avtor odobril, in je bila izvedena; izvirnika z izklopljenimi filtri
+   sinteze (množilniki, zavračanje hoj, skok iz slepe ulice, začetek iz `cvxpy`) nismo pognali,
+   zato preostanek razlike pri ε = 0,5 ostaja pripisan, ne izmerjen. Kar je izmerjeno, je
+   portova prednost v bloku brez mostov.
 
-Sklep: port in izvirnik nad istim vhodom delita mrežo, smer z ε in populacijske statistike
-pri ε = 2; v sintezi izvirnik odstopa od članka in je pri tem slabši pri sedmih od devetih
-metrik in boljši pri dolžini. Port je zvesta izvedba članka, ne kode; PrivTrace ostaja
-kandidat za baseline (odločitev D5 je odprta), v poročilu kot zgornja meja uporabnosti pri
-zaupanja vrednem zbiralcu.
+Sklep: port in izvirnik nad istim vhodom delita mrežo in smer z ε, pri ε = 2 pa se ujemata
+tudi pri gostoti, vročih točkah in Kendallu znotraj razpona semen. Portova prednost pri
+preostalih celičnih metrikah preživi točkovanje brez mostov, razen pri F1 pri ε = 1; del
+prednosti, ki jo je kazala prva tabela, je bil umetnost premoščanja. Zaostanek izvirnika pri
+ε = 0,5 je najprej posledica stanj 2. reda, ki jih vsilijo njegovi trije pogoji »ALI« (to je
+zdaj pokazano), nato njegove poti 1. reda (to ni izolirano). Portova lastna šibka točka je
+dolžina (pristranskost D-4.2, brez šuma 30 % prekratko), ki jo izbirna maska zamenja za
+premer. Port je zvesta izvedba članka, ne kode; PrivTrace ostaja kandidat za baseline
+(odločitev D5 je odprta), v poročilu kot zgornja meja uporabnosti pri zaupanja vrednem
+zbiralcu.
 
 ### 2.4 Val 5 — horizont B (2. letnik)
 

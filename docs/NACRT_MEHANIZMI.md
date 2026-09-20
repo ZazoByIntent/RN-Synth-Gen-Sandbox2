@@ -528,41 +528,78 @@ je načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
   gostota preseže `split_gate`·|D|/K² (0,05), na κ × κ podcelic s κ = ⌈√(d/`split_scale`)⌉
   (200); `max_sub_k` = 8 je naša varovalka (izvirnik je nima). Brez parametra
   prebivalstva; `first_level_k` je parameter (privzeto 6, vrednost članka za Geolife).
-  Mreža je v ločenem modulu `synthesis/adaptive_grid.py` (`AdaptiveGrid`), ker bi
-  `privtrace.py` sicer presegel ~500 vrstic (ima jih ~660, od tega ~110 docstringa).
+  Članek **ne pove**, od kod |D| v teh vratih (vrata so pravilo izvirnikove kode, ta pa
+  prebere pravi |D|), zato port vanje pošlje **vsoto zašumljenega vektorja 1. plasti po
+  NormCut**. To je čisto naknadno procesiranje objave 1. stopnje, torej se po njej ne
+  prebere nič nezašumljenega in poraba ostane ε₁ + ε₂ + ε₃. Učinek je majhen: pri 20.000
+  poteh Porta se prag premakne za ~±0,1 okrog 27,8 in ne prevrne nobene celice, pri stopnji
+  20 pa ne spremeni ničesar (κ ostane 1). Mreža je v ločenem modulu
+  `synthesis/adaptive_grid.py` (`AdaptiveGrid`), ker bi `privtrace.py` sicer presegel ~500
+  vrstic (ima jih ~660, od tega ~110 docstringa).
 - **D-4.2:** brez reševalca; začetek se vzorči iz zašumljene vrstice navideznega začetka
-  (po NormCut), konec se ne vzorči. **D-4.3:** `max_len` = 200. **D-4.4:** točke poti so
+  (po NormCut), konec se ne vzorči. Če NormCut to vrstico izprazni, **vzorčenje in
+  točkovanje uporabita isti enakomerni začetek** čez m stanj, tako da sta hoja in njena
+  ocena vedno skladni (prej je točkovanje jemalo prag 10⁻¹²). Cena opustitve je znana in
+  izmerjena: članek v §4.4 pove, da normalizacija 1/(L+1) »prešteje kratke poti preveč in
+  dolge premalo«, porazdelitev potovanj pa je prav popravek te pristranskosti — brez nje je
+  port prekratek. Pri 20.000 poteh Porta in K = 6 imajo prave poti 12,0 strnjenih stanj,
+  port brez šuma pa 8,6 (30 % prekratko). **Reševalec potovanj ali eksplicitni model
+  dolžine je odprta postavka.** **D-4.3:** `max_len` = 200. **D-4.4:** točke poti so
   koordinate vozlišč odsekov (`u`, če ni enako zadnjemu dodanemu, nato `v`), zaporedni
   dvojniki strnjeni, brez interpolacije; način `bbox` (surove koordinate) obstaja samo za
   ogrodje validacije, način celic orkestratorja **ni podprt** (PrivTrace potrebuje
   koordinate; pogled brez `clean` da jasen `ValueError`).
 - **D-4.5:** `PrivTraceGenerator(network=None, bbox=None, epsilon=1.0, first_level_k=6,
   split_scale=200.0, split_gate=0.05, max_sub_k=8, budget_split=(0.2, 0.4, 0.4),
-  theta2=5.0, max_len=200, seed=0)`; `spent_budget()` = ε po `fit`; `fit_points` je
-  javno jedro za ogrodje. Štetje kot v izvirniku: 1. red 1/(L+1) na prehod (START →
-  s₀, koraki, s_zadnji → END), 2. red 1/L na pojav stanja; po šumu stolpec START in
-  vrstica END na 0, NormCut po vrsticah; adaptivno pravilo natanko po članku (2. red
-  tedaj in le tedaj, ko N_sum ≥ √2·m/ε₂ in N₂ > 0 in N₁/N₂ < θ₂), odločeno enkrat na
-  stanje; pri sintezi in točkovanju se vrstica 2. reda uporabi po paru (prejšnje,
+  theta2=5.0, max_len=200, mask_non_adjacent=False, seed=0)`; `spent_budget()` = ε po
+  `fit`; `fit_points` je javno jedro za ogrodje. Štetje kot v izvirniku: 1. red 1/(L+1)
+  na prehod (START → s₀, koraki, s_zadnji → END), 2. red 1/L na pojav stanja; po šumu
+  stolpec START in vrstica END na 0, NormCut po vrsticah; adaptivno pravilo natanko po
+  članku (2. red tedaj in le tedaj, ko N_sum ≥ √2·m/ε₂ in N₂ > 0 in N₁/N₂ < θ₂), odločeno
+  enkrat na stanje; pri sintezi in točkovanju se vrstica 2. reda uporabi po paru (prejšnje,
   trenutno) — če jo NormCut izprazni, se uporabi 1. red. Varovalka pomnilnika:
   n_izbranih·(m+2)² ≤ 3·10⁸.
+- **D-4.6 (maska sosednosti, privzeto izklopljena):** z `mask_non_adjacent=True` je prehod
+  med stanjema, katerih celici 1. plasti nista isti ali 4-sosednji (razdalja Manhattan med
+  (vrstica, stolpec) 1. plasti večja od 1), obravnavan kot nemogoč in ničen skupaj s
+  strukturnimi ničlami — po Laplaceovem šumu in pred NormCut, v matriki 1. reda in v vseh
+  matrikah 2. reda. To je pravilo izvirnikove kode, preneseno v naknadno procesiranje nad
+  **javno** geometrijo mreže: ne porabi nobenega žreba in ne prebere podatkov, zato je
+  porabljeni proračun nespremenjen. Privzeto je izklopljena, ker Algoritem 1 v članku
+  omejitve sosednosti nima; ogrodje validacije jo meri kot tretji stolpec.
 - **Pri stopnji 20** (90 učnih poti, mreža 6 × 6 nad bbox vozlišč 30 × 33 km, celice
   5,0 × 5,6 km, učne verige povprečno 2,06 stanja) se pri vseh ε ∈ {0,5, 2, 8} in semenih
   42, 1, 2, 3 **nobena celica ne deli in nobeno stanje ne dobi 2. reda** (36 stanj): vrata
-  delitve (0,125) in prag θ₁ = 127/ε presegajo maso, ki jo 90 poti lahko da. PrivTrace je
+  delitve (pri pravi masi 0,125 na celico; zašumljena vsota jih le premakne) in prag
+  θ₁ = 127/ε presegajo maso, ki jo 90 poti lahko da, κ pa ostane 1. PrivTrace je
   tu zašumljen Markov 1. reda nad 36 celicami — pričakovano vedenje pri vzorcu dva reda
-  velikosti pod obsegom članka, ne napaka. Izmerjene vrstice: `docs/HANDOFF.md` §2.3.
-- **Validacija proti izvirniku** (`experiments/privtrace_eval.py`, `scripts/privtrace_reference.patch`,
+  velikosti pod obsegom članka, ne napaka. Vrstice so bile 20. septembra 2026 zvečer
+  **ponovno izmerjene iz zavezanega drevesa** (`run.json`: `git_commit b0a7dae`) po
+  popravkih pregleda; premaknile so se samo vrstice pri ε = 0,5 (deljeni zasilni začetek),
+  vse ostalo je enako do zadnje decimalke. Izmerjene vrstice: `docs/HANDOFF.md` §2.3.
+- **Validacija proti izvirniku** (`experiments/privtrace_eval.py`, `scripts/privtrace_reference.patch`
+  in diagnostični `scripts/privtrace_reference_no_or.patch`,
   `docs/RUNNING.md` §9.4): isti podvzorec Porta (prvih 20.000 poti), K = 6 na obeh
   straneh, ε ∈ {0,5, 1, 2}, semena 1–5, devet metrik iz `evaluation/ldptrace_metrics.py`
-  nad mrežo 20 × 20; izvirnik metrik nima. Popravek izvirnika je samo »da teče« (numpy 2,
-  `fcntl`, `torch` mrtva koda) plus `--seed`, `--level1_k`, `--output_file` in šest decimalk
-  v izpisu; algoritem nespremenjen. **Izid (20. september 2026):** obe strani zgradita isto
-  mrežo (159–164 stanj) in se z ε izboljšujeta; pri ε = 2 se gostota, vroče točke in
-  Kendall ujemajo znotraj razpona semen, pri potovanjih, premeru, poizvedbah in vzorcih je
-  port sistematično boljši, izvirnik pa samo pri dolžini (ε ≥ 1) — skladno z izvirnikovimi
-  odstopanji od Algoritma 1 v sintezi (zavračanje hoj, sosednost, množilniki konca z
-  napovedano dolžino). Tabela in branje: `docs/HANDOFF.md` §2.3.
+  nad mrežo 20 × 20; izvirnik metrik nima. Stolpci so trije (port po članku, port z masko
+  D-4.6, izvirnik), vsak pogon je ocenjen dvakrat — z mostovi (dogovor LDPTrace) in brez
+  njih (`nobridge_*`) — izpisan pa je tudi delež vrinjenih celic. Popravek izvirnika je samo
+  »da teče« (numpy 2, `fcntl`, `torch` mrtva koda) plus `--seed`, `--level1_k`,
+  `--output_file` in šest decimalk v izpisu; algoritem nespremenjen. **Izid (20. september
+  2026):** obe strani zgradita isto mrežo (159–164 stanj) in se z ε izboljšujeta; pri ε = 2
+  se gostota, vroče točke in Kendall ujemajo znotraj razpona semen. Del portove prednosti pri
+  vzorcih in vročih točkah je bil **umetnost premoščanja** (kraljeva pot vstavi 51–64 %
+  portovih celic proti 8 % pri pravih poteh); brez mostov port ostaja boljši pri vseh šestih
+  celičnih metrikah pri ε = 0,5 in ε = 2, pri ε = 1 pa pri petih (F1 je znotraj razpona
+  semen). Zaostanek izvirnika pri ε = 0,5 je **najprej v modelu**: pravilo članka na njegovih
+  lastnih zašumljenih matrikah izbere nič stanj 2. reda, njegovi trije pogoji »ALI« jih
+  vsilijo 34–35 (35 % mase prehodov, 59–62 % mase začetka, 52–55 % vrstic praznih po odrezu),
+  in ko jih diagnostično odstranimo, se izvirnik izboljša pri osmih od devetih metrik z
+  mostovi in pri vseh šestih brez njih; preostanek je v njegovi poti 1. reda (začetek iz
+  `cvxpy`, množilniki, zavračanje), ki je nismo izklopili. Pri dolžini je izvirnik boljši pri
+  ε ≥ 1, a le zato, ker so njegove hoje enakomerno prekratke (4,2–7,1 točke proti 12,0
+  strnjenim stanjem pravih poti); portova lastna dolžinska pristranskost je posledica D-4.2.
+  Tabela in branje: `docs/HANDOFF.md` §2.3.
 
 ### 5.1 Kaj mehanizem počne (Wang et al., USENIX Security 2023; koda `DpTrace/PrivTrace`)
 
