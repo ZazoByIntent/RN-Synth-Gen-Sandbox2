@@ -278,16 +278,24 @@ odločitvah razen pragov (čakajo mentorico) in D5 (projekt »Izbirni predmeti«
 odločitev je zapisana ob svoji postavki spodaj z oznako »Odločeno 22. 9. 2026«. Iz njih
 sledi zaporedje pred primerjalnim zvezkom (`docs/NACRT_MEHANIZMI.md` §1.6):
 
-1. PR kode: nova vrednost `attacker.distance: dtw_norm` (2.3.4 in 2.5.1).
-2. PR kode: stolpca `exp_id` in `config_hash` v `repetitions.csv` (2.5).
-3. PR kode: dejstva PrivTrace v `run.json` (2.3.5).
-4. PR kode: M3 — metriki uporabnosti `duration_dist_error` in `speed_dist_error` (2.1,
-   2.2). Avtor želi obe v primerjalnem zvezku, zato mora PR priti pred pogon 182, ki ju
-   izračuna.
-5. Kopija `geolife_mech_mia_u182.yaml` (danes obstaja samo `_u20`).
-6. Avtor sam požene vse sestrske konfiguracije pri stopnji 182; stopnja 50 za mehanizme
-   se preskoči.
+1. **Izvedeno** (PR #47, commit kode `fc3363c`, 22. september 2026): nova vrednost
+   `attacker.distance: dtw_norm` (2.3.4 in 2.5.1); `results.csv` ima nov zadnji stolpec
+   `distance`, stara glava se še bere.
+2. **Izvedeno** (PR #48, commit kode `c30ed33`): stolpca `exp_id` in `config_hash` v
+   `repetitions.csv` (2.5).
+3. **Izvedeno** (PR #49, commit kode `4a9a4f8`): dejstva PrivTrace v `run.json` (2.3.5).
+4. **Izvedeno** (PR #50, commit kode `78f8d43`): M3 — metriki uporabnosti
+   `duration_dist_error` in `speed_dist_error` (2.1, 2.2); obe sta v
+   `geolife_mech_reid_u182.yaml`, zato ju pogon 182 izračuna za primerjalni zvezek.
+5. **Izvedeno** (PR #49): kopija `geolife_mech_mia_u182.yaml` z vrednostmi S4 pri 182
+   (prag 0,3, proračun 1.200 s; ocena ~5 min na seme v glavi datoteke).
+6. Avtor sam požene vse sestrske konfiguracije pri stopnji 182 (`geolife_mech_reid_u182.yaml`,
+   ~26 h na seme z obema razdaljama, in `geolife_mech_mia_u182.yaml`); stopnja 50 za
+   mehanizme se preskoči. **Naslednji korak.**
 7. Primerjalni zvezek nad stopnjo 182.
+
+PR-ji #47–#50 so bili odprti 22. septembra 2026 kot naložena veriga (vsak na prejšnjem)
+in jih združuje avtor; merge commiti niso zapisani tukaj, ker so nastali po zapisu.
 
 Neodvisno od tega zaporedja je odblokiran A4.
 
@@ -305,7 +313,13 @@ Neodvisno od tega zaporedja je odblokiran A4.
   dolžino, trajanje in hitrost. Dodata se `duration_dist_error` in `speed_dist_error`.
   Ker sintetične poti (`markov`, `ldptrace`, `privtrace`, `rn_ldp_synth`) nimajo časov,
   veljata novi metriki samo za perturbacijske mehanizme; pri sintezi M3 ostane dolžina
-  in celice. Postavka je zdaj koda (val 3, 2.2).
+  in celice. **Izvedeno** (PR #50, commit kode `78f8d43`, 22. september 2026): metriki sta
+  v `UTILITY_METRICS` in v `geolife_mech_reid_u182.yaml`; trajanje in hitrost se računata iz
+  točk izdaje (izdana pot podeduje `duration_s` vira), pri ničelnem trajanju je hitrost 0.
+  Opozorilo za branje: noben obstoječi perturbacijski mehanizem ne spreminja časovnih žigov
+  (redčenje ohrani prvo in zadnjo točko), zato bo `duration_dist_error` pri pogonu 182 pri
+  vseh rokah 0; informativna je `speed_dist_error` (šum dolžino napihne, zaokroževanje in
+  redčenje jo skrajšata).
 - **Definicija »poznanega vhodnega vzorca«** za rekonstrukcijo z delnim predznanjem
   (A4, poročilo §6.3). **Odločeno 22. 9. 2026:** napadalec pozna k enakomerno
   razporejenih točk tarčne poti (k = 3 / 5 / 10), enako predznanje kot pri
@@ -325,7 +339,8 @@ Neodvisno od tega zaporedja je odblokiran A4.
   (`representation/views.py`, danes `NotImplementedError`). Predpogoj: v repozitoriju
   ni vira točk interesa in testi ne smejo na omrežje — potreben je fixture sloj POI.
 - **M3 — `duration_dist_error` in `speed_dist_error`** (definicija v 2.1): metriki
-  uporabnosti po vzoru `length_dist_error`, samo za perturbacijske mehanizme. Brez blokad.
+  uporabnosti po vzoru `length_dist_error`, samo za perturbacijske mehanizme. **Izvedeno**
+  (PR #50, 22. september 2026), glej 2.1.
 - **A4 — rekonstrukcija z delnim predznanjem** (definicija v 2.1: k enakomerno
   razporejenih točk tarče kot sidra). Brez blokad.
 
@@ -747,7 +762,10 @@ Branje:
   kombinacija obeh možnosti (`dtw_norm` pride v kodo, `dtw` ostane privzeta), glej 2.5.1;
   (2) stopnja 50 se za mehanizme preskoči, avtor pred primerjalnim zvezkom sam požene
   `geolife_mech_reid_u182.yaml` (z `dtw_norm`, ko bo v kodi); (3) Gaussov šum dobi
-  ponovitve čez semena pri tem pogonu 182, ne pri u20.
+  ponovitve čez semena pri tem pogonu 182, ne pri u20. **Stanje 22. 9. 2026:** `dtw_norm`
+  je v kodi (PR #47) in v `geolife_mech_reid_u182.yaml` kot drugi vnos `reidentification`
+  pri k = 3/5/10; ker vsaka razdalja pomeni poln klic napada, glava datoteke zdaj navaja
+  ~26 h na seme namesto ~13–14 h (z `known_points: [3]` za `dtw_norm` ~+2 h).
 - Ozadje (stanje pred odločitvijo): (1) hipoteza o dolžinski pristranskosti DTW je
   **preverjena in potrjena** (4. september 2026, 2.5.1); (2) kopiji konfiguracije za stopnji 50 in 182
   **obstajata in nista pognani** (4. september 2026): `config/experiments/geolife_mech_reid_u50.yaml`
@@ -861,6 +879,13 @@ Branje:
   (`n_states`, število stanj 2. reda, število ponovnih žrebov), majhen PR pred pogonom 182;
   (2) in (4) ostaneta odprti za kasneje, ker ju primerjalni zvezek ne potrebuje; kopija
   `geolife_mech_mia_u182.yaml` se naredi pred pogonom 182 (stopnja 50 se preskoči).
+  **Izvedeno** (PR #49, commit kode `4a9a4f8`, 22. september 2026): `run.json` zapisuje pod
+  `arms["synthetic:privtrace:…"]` dejstva `n_states`, `n_second_order`, `max_redraws`,
+  `n_capped_walks` in `n_redrawn_walks` z istimi imeni kot ogrodje `privtrace_eval`.
+  Opozorilo za branje: napad na članstvo generatorje samo prilagodi in hoj ne generira,
+  zato sta števca `n_capped_walks` in `n_redrawn_walks` v pogonu MIA po zgradbi vedno 0;
+  smiselno vrednost dá samo pogon, ki hoje generira (tabela 2.3.6). Kopija
+  `geolife_mech_mia_u182.yaml` je v istem PR-ju (ni pognana).
 - Ozadje (stanje pred odločitvijo): (2) roka z gostejšo mrežo (npr. `first_level_k: 12`, kot `ldptrace`) in kopiji
   konfiguracije za stopnji 50 in 182 (roka je poceni: ~8 s na seme); (3) `run.json` ne
   zapisuje dejstev PrivTrace (`n_states`, stanja 2. reda) — dobijo se s ponovno
@@ -1261,7 +1286,9 @@ federativni pristopi, diffusion generatorji. Vse se priključi prek obstoječih 
 - **Neobvezno iz sheme rezultatov** (`docs/REZULTATI_SHEMA.md`): `.parquet` zrcalo
   glavne tabele; stolpca `exp_id` in `config_hash` v `repetitions.csv`. **Odločeno
   22. 9. 2026:** stolpca se dodata (majhen PR pred pogonom 182, ker primerjalni zvezek
-  bere več eksperimentov skupaj); `.parquet` zrcala ne bo.
+  bere več eksperimentov skupaj); `.parquet` zrcala ne bo. **Izvedeno** (PR #48, commit
+  kode `c30ed33`): stolpca sta prva dva v glavi (`REPETITIONS_COLUMNS`), vrednosti iz
+  `seed<N>/run.json`; stare datoteke ostanejo brez njiju, ker jih v kodi nihče ne bere.
 - **A2 (reidentifikacija nad sintetičnimi potmi)** je rešen v poročilu, ne v kodi:
   perturbacija se ocenjuje z reidentifikacijo, sinteza s sklepanjem o članstvu.
 - **Strop memorizacije `markov`** je odvisen od stopnje (AUC ~1,0 pri 20, 0,54 pri 50,
@@ -1354,6 +1381,16 @@ poveča tveganje«, temveč kot razkritje pristranskosti napadalca.
 S4 ostane veljaven kot zapis nenormiranega napadalca. Nove meritve mehanizmov (pogon
 182) poročajo obe razdalji; S4 v poročilu dobi opombo o pristranskosti in kontrolno
 vrstico z `dtw_norm` namesto ponovnega pogona lestvice.
+
+**Izvedeno** (PR #47, commit kode `fc3363c`, 22. september 2026): `geometry.dtw_norm`
+(`dtw / L`, L z vračanjem po matriki stroškov, pri izenačenju diagonala pred navpično pred
+vodoravno); `dtw` se računa z istimi operacijami kot prej. `results.csv` ima nov zadnji
+stolpec `distance` (`docs/REZULTATI_SHEMA.md`), staro glavo bralniki še sprejmejo in
+reidentifikacijskim vrsticam pripišejo `dtw`; `result_id` nove razdalje se konča z
+`:k<N>:dtw_norm`, stari ID-ji so nespremenjeni. Grafi in poročilo na zagon ločita razdalji
+(ena črta na roko in razdaljo; `matrix.csv` in grafa kompromisa kažeta vrstico `dtw`). Test
+na umetnem primeru: kratka sled zmaga pod `dtw`, geometrijsko prava pod `dtw_norm`;
+referenčnih vrednosti iz tabele zgoraj test ne ponavlja (so iz bazena u20).
 
 ---
 
