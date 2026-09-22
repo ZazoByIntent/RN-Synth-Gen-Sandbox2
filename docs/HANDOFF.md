@@ -290,10 +290,22 @@ sledi zaporedje pred primerjalnim zvezkom (`docs/NACRT_MEHANIZMI.md` §1.6):
    `geolife_mech_reid_u182.yaml`, zato ju pogon 182 izračuna za primerjalni zvezek.
 5. **Izvedeno** (PR #49): kopija `geolife_mech_mia_u182.yaml` z vrednostmi S4 pri 182
    (prag 0,3, proračun 1.200 s; ocena ~5 min na seme v glavi datoteke).
-6. Avtor sam požene vse sestrske konfiguracije pri stopnji 182 (`geolife_mech_reid_u182.yaml`,
-   ~26 h na seme z obema razdaljama, in `geolife_mech_mia_u182.yaml`); stopnja 50 za
-   mehanizme se preskoči. **Naslednji korak.**
-7. Primerjalni zvezek nad stopnjo 182.
+6. Po treh PR-jih z 22. septembra 2026 — A1 (#51, druga galerija `release` pri
+   reidentifikaciji, 2.5.2), A2 (#52, nov zadnji stolpec `gallery` v `results.csv`) in B
+   (ta PR, uskladitev konfiguracij za stopnji 50 in 182 na polne mreže rok) — avtor sam
+   požene najprej stopnjo 50 (`geolife_mech_mia_u50.yaml`, nato `geolife_mech_reid_u50.yaml`)
+   in šele nato stopnjo 182 (`geolife_mech_mia_u182.yaml`, nato `geolife_mech_reid_u182.yaml`).
+   Stopnja 50 se torej za mehanizme ne preskoči več. Vsak pogon teče odklopljeno kot
+   `$env:PYTHONHASHSEED=0; uv run trajguard repeat config/experiments/<datoteka>.yaml --seeds 1 2 3`.
+   Ocene avtorja (zgolj ocene, izmerjeno ni še nič): napad na članstvo nekaj minut na seme
+   pri 50 in ~5–10 min na seme pri 182; reidentifikacija ~12 h na seme pri 50, od tega
+   ~10,6 h galerija `release` pri k = 3/5/10 (če jo skrčimo na k = 3, pade celoten pogon na ~3,2 h na seme), torej
+   ~36 h za tri semena; pri 182 ~56–73 h na seme (~29 h galerija `rematched` z obema
+   razdaljama in ~27–44 h galerija `release` pri k = 3), torej 7–9 dni za tri semena.
+   Pričakovati je ~44 klicev čez proračun 300 s pri 50 in ~28 klicev čez proračun 1.200 s
+   pri 182; ti se zapišejo kot `over_budget` in niso napaka (pravilo R1).
+   **Naslednji korak.**
+7. Primerjalni zvezek nad stopnjama 50 in 182 (u20 ostane kot zapis).
 
 PR-ji #47–#50 so bili odprti 22. septembra 2026 kot naložena veriga (vsak na prejšnjem)
 in jih združuje avtor; merge commiti niso zapisani tukaj, ker so nastali po zapisu.
@@ -647,9 +659,11 @@ Branje:
   bo pokazal napadalec nad izdajo (galerija `release`, glej 2.5.2), ki napade same izdane
   točke.
 - Kopiji konfiguracije za stopnji 50 in 182 obstajata (`geolife_mech_reid_u50/u182`, glej
-  ZM-3 v 2.3.4; `point_ldp` ε = 8 je roka pri 182). **Odločeno 22. 9. 2026:** stopnja 50 se
-  za mehanizme preskoči; avtor požene stopnjo 182 pred primerjalnim zvezkom, s ponovitvami
-  čez semena, kjer ima roka seme.
+  ZM-3 v 2.3.4). **Odločeno 22. 9. 2026, dopolnjeno isti dan s PR B:** stopnja 50 se ne
+  preskoči več. Obe kopiji nosita polne mreže rok iz u20, torej tudi točkovni LDP pri
+  ε = 4, 6 in 8 (prej je bila pri 182 predvidena samo roka ε = 8). Avtor pred primerjalnim
+  zvezkom požene najprej stopnjo 50 in nato stopnjo 182, s ponovitvami čez semena, kjer ima
+  roka seme; podrobnosti o pogonih so v 2.5.2.
 
 #### 2.3.4 ZM-3 naivna trojica (u20)
 
@@ -765,7 +779,9 @@ Branje:
 - **Odločeno 22. 9. 2026** (točke 1–4 spodaj): (1) dolžinska pristranskost DTW —
   kombinacija obeh možnosti (`dtw_norm` pride v kodo, `dtw` ostane privzeta), glej 2.5.1;
   (2) stopnja 50 se za mehanizme preskoči, avtor pred primerjalnim zvezkom sam požene
-  `geolife_mech_reid_u182.yaml` (z `dtw_norm`, ko bo v kodi); (3) Gaussov šum dobi
+  `geolife_mech_reid_u182.yaml` (z `dtw_norm`, ko bo v kodi) — spremenjeno 22. 9. 2026 s
+  PR B: stopnja 50 se ne preskoči; polne mreže rok in vnosi z galerijo `release` so pri
+  u50 in u182, avtor požene najprej stopnjo 50 in nato 182 (glej 2.5.2); (3) Gaussov šum dobi
   ponovitve čez semena pri tem pogonu 182, ne pri u20; (4) prazna galerija pri uničevalnih
   rokah se naslovi z napadalcem nad izdajo — druga galerija `release` nad vsemi izdanimi
   točkami, poleg vrstic `rematched` in ne namesto njih (možnost B), glej 2.5.2.
@@ -885,7 +901,9 @@ Branje:
 - **Odločeno 22. 9. 2026:** (3) se izvede — `run.json` bo zapisoval dejstva PrivTrace
   (`n_states`, število stanj 2. reda, število ponovnih žrebov), majhen PR pred pogonom 182;
   (2) in (4) ostaneta odprti za kasneje, ker ju primerjalni zvezek ne potrebuje; kopija
-  `geolife_mech_mia_u182.yaml` se naredi pred pogonom 182 (stopnja 50 se preskoči).
+  `geolife_mech_mia_u182.yaml` se naredi pred pogonom 182. **Spremenjeno 22. 9. 2026 s
+  PR B:** obstajata obe kopiji, `geolife_mech_mia_u50.yaml` (prag 0,05, proračun 300 s,
+  50 uporabnikov) in `geolife_mech_mia_u182.yaml`, stopnja 50 pa se požene prva.
   **Izvedeno** (PR #49, commit kode `4a9a4f8`, 22. september 2026): `run.json` zapisuje pod
   `arms["synthetic:privtrace:…"]` dejstva `n_states`, `n_second_order`, `max_redraws`,
   `n_capped_walks` in `n_redrawn_walks` z istimi imeni kot ogrodje `privtrace_eval`.
@@ -1431,14 +1449,35 @@ izdaji; `n_rematch_dropped` ostaja nespremenjen, ker meri ponovno ujemanje izdaj
 galerije. V `run.json` dobi `arms[<ref>]` ugnezden blok `release`. Konfiguracija vnosa:
 `attacker.gallery: release`, `distance: dtw_norm`, `target_scope: [protected]`.
 
-**Stanje 22. 9. 2026.** PR A1 (veja `claude/reid-release-gallery`, osnova
-`claude/m3-duration-speed`, ker PR-ji #47–#50 še niso v `main`) prinese kodo in drugi vnos
-`reidentification` v `geolife_mech_reid_u20.yaml` (`known_points: [3, 5, 10]`, `dtw_norm`,
-`release`); roke ostanejo nespremenjene. Sledita PR A2 (nov zadnji stolpec `gallery` v
-`results.csv` po vzorcu stolpca `distance` iz PR #47, da poročilo in grafi ločita galeriji)
-in PR B (uskladitev konfiguracij u50 in u182 na polni mreži rok z vnosom `release`:
-`known_points [3]` pri 182, `[3, 5, 10]` pri 50). **Z novo galerijo še ni nič izmerjeno**;
+**Stanje 22. 9. 2026.** PR A1 (veja `claude/reid-release-gallery`, na GitHubu PR #51,
+osnova `claude/m3-duration-speed`, ker PR-ji #47–#50 še niso v `main`) prinese kodo in drugi
+vnos `reidentification` v `geolife_mech_reid_u20.yaml` (`known_points: [3, 5, 10]`,
+`dtw_norm`, `release`); roke ostanejo nespremenjene. Na njem stoji PR A2 (veja `claude/results-gallery-column`, #52, nov zadnji
+stolpec `gallery` v `results.csv` po vzorcu stolpca `distance` iz PR #47, da poročilo in
+grafi ločita galeriji), na tem pa PR B (veja `claude/mech-configs-full-grid`, uskladitev
+konfiguracij u50 in u182 na polni mreži rok z vnosom `release`: `known_points [3]` pri 182,
+`[3, 5, 10]` pri 50). Vsi trije PR-ji so odprti. **Z novo galerijo še ni nič izmerjeno**;
 pri u20 je k = 10 čez proračun 300 s (pravilo R1).
+
+**Opomba (možnost C, 22. september 2026).** Primerjalni zvezek in poročilo (IZV §7 in §8)
+bosta reidentifikacijo poročala na dveh ravneh. Prva raven je uspešnost med preživelimi,
+se pravi vrstice galerije `rematched` take, kot so. Druga raven je uspešnost nad celotno
+izdajo: zadetki, deljeni z vsemi izdanimi sledmi, pri čemer sledi, ki jih odvrže ponovno
+ujemanje, štejejo kot nepovezane. Druga raven se izračuna iz stolpcev `n_pool`, `n_probes`
+in `n_rematch_dropped`, torej brez novih meritev. Poleg obeh ravni se poročajo vrstice
+galerije `release` kot močnejši napadalec, ki ujemalnika sploh ne uporabi. Zvezek primerja
+stopnji 50 in 182, stopnja 20 ostane le kot zapis, sidra S4 pa se berejo iz pogonov S4.
+Poročilo mora izrecno zapisati dvoje: da je »zaščita z uničenjem izdaje« lastnost para
+mehanizem in prag ponovnega ujemanja, ne mehanizma samega, in da je bil prag 0,3 pri
+stopnji 182 izbran zaradi populacije za napad na članstvo, ne kot model napadalca.
+
+**Stanje PR B (22. 9. 2026).** Konfiguraciji `geolife_mech_reid_u50.yaml` in
+`geolife_mech_reid_u182.yaml` sta usklajeni na polne mreže rok iz u20 in imata vnose z
+galerijo `release` (`known_points: [3]` pri 182, `[3, 5, 10]` pri 50); nastala je nova
+`geolife_mech_mia_u50.yaml` (prag 0,05, proračun 300 s, 50 uporabnikov, generatorji kot pri
+u182). Vrstni red pogonov je `geolife_mech_mia_u50.yaml`, `geolife_mech_reid_u50.yaml`,
+`geolife_mech_mia_u182.yaml`, `geolife_mech_reid_u182.yaml`; ocene stroška in število
+klicev čez proračun so v §2, točka 6. **Izmerjeno ni še nič.**
 
 ---
 
