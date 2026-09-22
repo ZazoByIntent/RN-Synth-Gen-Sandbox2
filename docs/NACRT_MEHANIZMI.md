@@ -165,10 +165,13 @@ do takrat vsak korak zapiše svoje vrstice v `HANDOFF.md` §2.3.
 **Zaporedje pred zvezkom (odločitev avtorja, 22. september 2026).** Zvezek se piše nad
 stopnjo 182, ne nad 20; stopnja 50 za mehanizme se preskoči. Pred njim: (1) majhni PR-ji
 kode — normirana razdalja napadalca `dtw_norm` (`HANDOFF.md` §2.3, ZM-3), stolpca
-`exp_id` in `config_hash` v `repetitions.csv`, dejstva PrivTrace v `run.json`; (2) avtor
+`exp_id` in `config_hash` v `repetitions.csv`, dejstva PrivTrace v `run.json`, metriki
+M3 `duration_dist_error` in `speed_dist_error` (`HANDOFF.md` §2.1); (2) avtor
 sam požene vse sestrske konfiguracije pri 182 (reidentifikacija z `dtw_norm`, Gaussov šum
 z več semeni). Zvezek poroča reidentifikacijo z obema razdaljama, sidra S4 pa z `dtw` in
-opombo o dolžinski pristranskosti.
+opombo o dolžinski pristranskosti; uporabnost poroča s `cell_js_divergence`,
+`length_dist_error` in obema metrikama M3 (ti dve samo za perturbacijske mehanizme, ker
+sintetične poti nimajo časov).
 
 ---
 

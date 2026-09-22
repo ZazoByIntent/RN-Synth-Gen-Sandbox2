@@ -254,12 +254,15 @@ sledi zaporedje pred primerjalnim zvezkom (`docs/NACRT_MEHANIZMI.md` §1.6):
 1. PR kode: nova vrednost `attacker.distance: dtw_norm` (2.3, ZM-3 in 2.5).
 2. PR kode: stolpca `exp_id` in `config_hash` v `repetitions.csv` (2.5).
 3. PR kode: dejstva PrivTrace v `run.json` (2.3, ZM-4).
-4. Kopija `geolife_mech_mia_u182.yaml` (danes obstaja samo `_u20`).
-5. Avtor sam požene vse sestrske konfiguracije pri stopnji 182; stopnja 50 za mehanizme
+4. PR kode: M3 — metriki uporabnosti `duration_dist_error` in `speed_dist_error` (2.1,
+   2.2). Avtor želi obe v primerjalnem zvezku, zato mora PR priti pred pogon 182, ki ju
+   izračuna.
+5. Kopija `geolife_mech_mia_u182.yaml` (danes obstaja samo `_u20`).
+6. Avtor sam požene vse sestrske konfiguracije pri stopnji 182; stopnja 50 za mehanizme
    se preskoči.
-6. Primerjalni zvezek nad stopnjo 182.
+7. Primerjalni zvezek nad stopnjo 182.
 
-Neodvisno od tega zaporedja sta odblokirana M3 (dve novi metriki uporabnosti) in A4.
+Neodvisno od tega zaporedja je odblokiran A4.
 
 ### 2.1 Odločitve avtorja (niso koda; blokirajo poročilo, ne repozitorija)
 
