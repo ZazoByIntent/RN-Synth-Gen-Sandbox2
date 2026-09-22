@@ -11,9 +11,10 @@ Aggregated rows plug straight into the ``reporting.plots`` functions.
 
 Consumers (this module, the plot functions, and the S4 analysis notebook
 ``notebooks/03_s4_sweep.ipynb``) all depend on ``RESULTS_COLUMNS`` staying
-stable; only the current header and ``LEGACY_RESULTS_COLUMNS`` (the same header
-without the ``distance`` column) are accepted, and any other header fails loudly
-here, mirroring ``report.merge_results_tables``.
+stable; only the current header and the older ones in ``LEGACY_RESULTS_HEADERS``
+(the same header without ``gallery``, and without both ``gallery`` and
+``distance``) are accepted, and any other header fails loudly here, mirroring
+``report.merge_results_tables``.
 """
 
 import csv
@@ -22,11 +23,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
+from trajguard.attacks.base import DEFAULT_GALLERY
 from trajguard.datamodel import MetricValue
 from trajguard.experiments.repeat import t_ppf_975
 from trajguard.geometry import DEFAULT_DISTANCE
 from trajguard.reporting.results_schema import (
-    LEGACY_RESULTS_COLUMNS,
+    LEGACY_RESULTS_HEADERS,
     RESULTS_COLUMNS,
     ResultRow,
 )
@@ -117,13 +119,22 @@ def legacy_distance(family: str) -> str | None:
     return DEFAULT_DISTANCE if family == "reidentification" else None
 
 
+def legacy_gallery(family: str) -> str | None:
+    """The ``gallery`` a pre-``gallery`` table implies: ``rematched`` for reidentification.
+
+    Every reidentification run written before the column existed attacked the
+    re-matched (snapped) release; no other family has a gallery at all.
+    """
+    return DEFAULT_GALLERY if family == "reidentification" else None
+
+
 def read_results_csv(path: str | Path) -> list[LoadedRow]:
     """Read a ``results.csv`` / ``results_master.csv`` back into ``LoadedRow`` objects.
 
-    The header must equal ``RESULTS_COLUMNS`` or the pre-``distance``
-    ``LEGACY_RESULTS_COLUMNS`` — any other header is a loud error, never
-    silently misaligned columns. Legacy rows get their ``distance`` from
-    ``legacy_distance``. A blank ``value`` cell (the writer blanks non-finite
+    The header must equal ``RESULTS_COLUMNS`` or one of the older
+    ``LEGACY_RESULTS_HEADERS`` — any other header is a loud error, never
+    silently misaligned columns. Columns a legacy header lacks are filled in by
+    ``legacy_distance`` / ``legacy_gallery``. A blank ``value`` cell (the writer blanks non-finite
     values) becomes ``nan``, so degenerate arms stay visible in tables and are
     skipped by the plots. ``metric_id`` is not stored in the CSV and is
     synthesized as ``<result_id>:<metric>``.
@@ -132,17 +143,19 @@ def read_results_csv(path: str | Path) -> list[LoadedRow]:
     with path.open(newline="") as fh:
         reader = csv.reader(fh)
         header = tuple(next(reader, ()))
-        if header not in (RESULTS_COLUMNS, LEGACY_RESULTS_COLUMNS):
+        if header not in (RESULTS_COLUMNS, *LEGACY_RESULTS_HEADERS):
             raise ValueError(
                 f"{path} header does not match RESULTS_COLUMNS "
                 f"(docs/REZULTATI_SHEMA.md); got {header}"
             )
-        is_legacy = header == LEGACY_RESULTS_COLUMNS
+        missing = tuple(c for c in RESULTS_COLUMNS if c not in header)
         loaded: list[LoadedRow] = []
         for cells in reader:
             rec = {c: _parse(c, cell) for c, cell in zip(header, cells, strict=True)}
-            if is_legacy:
+            if "distance" in missing:
                 rec["distance"] = legacy_distance(str(rec["family"]))
+            if "gallery" in missing:
+                rec["gallery"] = legacy_gallery(str(rec["family"]))
             value = MetricValue(
                 metric_id=f"{rec['result_id']}:{rec['metric']}",
                 result_id=str(rec["result_id"]),
@@ -186,17 +199,17 @@ def _identical_or_none(values: Sequence[object]) -> object:
 def aggregate_over_seeds(records: Sequence[LoadedRow]) -> list[ResultRow]:
     """Fold repetition rows into one ``ResultRow`` per metric with an across-seed CI.
 
-    Groups by ``(exp_id, config_hash, result_id, metric, distance)`` — the run
-    seed is deliberately not part of ``config_hash``, so repetitions of one
-    experiment share the group while distinct experiments never merge, and two
-    attacker distances on the same arm stay apart. Within a group the
+    Groups by ``(exp_id, config_hash, result_id, metric, distance, gallery)`` —
+    the run seed is deliberately not part of ``config_hash``, so repetitions of
+    one experiment share the group while distinct experiments never merge, and
+    two attacker distances or galleries on the same arm stay apart. Within a group the
     seeds must be distinct (the same run loaded twice would bias the mean).
     The value becomes the mean over finite per-seed values and the CI the
     Student-t 95% interval across repetitions (``n_bootstrap`` is cleared: this
     is not a bootstrap interval). Runtimes and memory are averaged; per-seed
     counts are kept only when identical across seeds, else blanked.
     """
-    groups: dict[tuple[str, str, str, str, str], list[LoadedRow]] = {}
+    groups: dict[tuple[str, str, str, str, str, str], list[LoadedRow]] = {}
     for rec in records:
         key = (
             rec.provenance.exp_id,
@@ -204,6 +217,7 @@ def aggregate_over_seeds(records: Sequence[LoadedRow]) -> list[ResultRow]:
             rec.row.value.result_id,
             rec.row.value.name,
             rec.row.distance or "",  # blank for families without an attacker distance
+            rec.row.gallery or "",  # blank for families without an attacker gallery
         )
         groups.setdefault(key, []).append(rec)
 

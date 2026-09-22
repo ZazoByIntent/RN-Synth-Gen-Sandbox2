@@ -1819,6 +1819,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                         unit_m=info.unit_m,
                         known_points=k,
                         distance=spec.distance,
+                        gallery=spec.gallery,
                         n_pool=n_pool,
                         n_gallery_users=n_gallery_users,
                         n_probes=len(result.predictions),

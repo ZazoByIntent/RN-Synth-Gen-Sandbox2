@@ -16,7 +16,7 @@ from trajguard.reporting.results_io import (
     read_results_csv,
 )
 from trajguard.reporting.results_schema import (
-    LEGACY_RESULTS_COLUMNS,
+    LEGACY_RESULTS_HEADERS,
     ResultRow,
     write_results_csv,
 )
@@ -61,6 +61,7 @@ def _row(value: MetricValue) -> ResultRow:
         attack_runtime_s=0.25,
         peak_memory_mb=12.5,
         distance="dtw",
+        gallery="rematched",
     )
 
 
@@ -83,13 +84,14 @@ def _utility_row() -> ResultRow:
     )
 
 
-def _write_legacy_csv(tmp_path: Path, rows: list[ResultRow]) -> Path:
-    """A table as runs wrote it before `distance`: the same cells minus the last column."""
+def _write_legacy_csv(tmp_path: Path, rows: list[ResultRow], drop: int = 1) -> Path:
+    """A table as older runs wrote it: the same cells minus the last `drop` columns
+    (1 = before `gallery`, 2 = before `distance` as well)."""
     current = tmp_path / "current.csv"
     write_results_csv(current, PROVENANCE, rows, run_runtime_s=1.5)
     legacy = tmp_path / "legacy.csv"
     with current.open(newline="") as src, legacy.open("w", newline="") as dst:
-        csv.writer(dst).writerows(cells[:-1] for cells in csv.reader(src))
+        csv.writer(dst).writerows(cells[:-drop] for cells in csv.reader(src))
     return legacy
 
 
@@ -140,26 +142,45 @@ def test_read_results_csv_round_trips(tmp_path: Path) -> None:
     assert first.row == replace(full, value=same_id)
     assert first.row.value.result_id == full.value.result_id
 
-    assert first.row.distance == "dtw"  # the attacker axis survives the round trip
+    # Both attacker axes survive the round trip.
+    assert first.row.distance == "dtw" and first.row.gallery == "rematched"
 
     assert second.row.family == "poi_inference" and second.row.epsilon == 0.1
     assert math.isnan(second.row.value.value)  # blank value cell -> non-finite again
     assert second.row.value.ci_low is None and second.row.value.n_bootstrap is None
     assert second.row.unit_m is None and second.row.known_points is None
-    assert second.row.distance is None  # blank distance cell -> None
+    assert second.row.distance is None and second.row.gallery is None  # blanks -> None
+
+
+def test_read_results_csv_accepts_the_pre_gallery_header(tmp_path: Path) -> None:
+    """Tables written between the two attacker columns stay readable: the `distance`
+    cell is taken as written, only the missing `gallery` is filled with the default."""
+    reid_row = replace(_row(_metric("top1_acc", 0.5)), distance="dtw_norm")
+    path = _write_legacy_csv(tmp_path, [reid_row, _utility_row()])
+    with path.open(newline="") as fh:
+        assert tuple(next(csv.reader(fh))) == LEGACY_RESULTS_HEADERS[0]
+
+    reid, util = read_results_csv(path)
+    assert reid.row.family == "reidentification" and reid.row.gallery == "rematched"
+    assert reid.row.distance == "dtw_norm"  # read from the cell, not back-filled
+    assert reid.row.known_points == 5 and reid.row.value.value == 0.5
+    assert util.row.family == "utility" and util.row.gallery is None
 
 
 def test_read_results_csv_accepts_the_pre_distance_header(tmp_path: Path) -> None:
-    """Tables measured before the `distance` column stay readable: reidentification
-    rows used the unnormalised DTW, every other family has no distance at all."""
-    path = _write_legacy_csv(tmp_path, [_row(_metric("top1_acc", 0.5)), _utility_row()])
+    """Tables measured before either attacker column stay readable: reidentification
+    rows used the unnormalised DTW over the re-matched gallery, every other family
+    has neither."""
+    path = _write_legacy_csv(tmp_path, [_row(_metric("top1_acc", 0.5)), _utility_row()], drop=2)
     with path.open(newline="") as fh:
-        assert tuple(next(csv.reader(fh))) == LEGACY_RESULTS_COLUMNS
+        assert tuple(next(csv.reader(fh))) == LEGACY_RESULTS_HEADERS[1]
 
     reid, util = read_results_csv(path)
     assert reid.row.family == "reidentification" and reid.row.distance == "dtw"
+    assert reid.row.gallery == "rematched"
     assert reid.row.known_points == 5 and reid.row.value.value == 0.5
-    assert util.row.family == "utility" and util.row.distance is None
+    assert util.row.family == "utility"
+    assert util.row.distance is None and util.row.gallery is None
 
 
 def test_read_results_csv_rejects_foreign_header(tmp_path: Path) -> None:
@@ -213,6 +234,23 @@ def test_aggregate_over_seeds_keeps_distances_apart() -> None:
     by_distance = {r.distance: r.value.value for r in agg}
     assert by_distance["dtw"] == pytest.approx(0.5)
     assert by_distance["dtw_norm"] == pytest.approx(0.3)
+
+
+def test_aggregate_over_seeds_keeps_galleries_apart() -> None:
+    """Two galleries of the same attacker on the same arm are two rows, never one
+    blended mean, and the aggregated row still says which gallery it came from."""
+
+    def as_release(rec: LoadedRow) -> LoadedRow:
+        row = replace(rec.row, gallery="release")
+        return LoadedRow(provenance=rec.provenance, row=row, run_runtime_s=rec.run_runtime_s)
+
+    agg = aggregate_over_seeds(
+        [_loaded(1, 0.4), _loaded(2, 0.6), as_release(_loaded(1, 0.2)), as_release(_loaded(2, 0.4))]
+    )
+    by_gallery = {r.gallery: r.value.value for r in agg}
+    assert by_gallery["rematched"] == pytest.approx(0.5)
+    assert by_gallery["release"] == pytest.approx(0.3)
+    assert all(r.distance == "dtw" for r in agg)  # same result_id, metric and distance
 
 
 def test_aggregate_over_seeds_rejects_duplicate_seed() -> None:
