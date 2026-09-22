@@ -7,21 +7,23 @@
 # the metrics comment). The u20/u50 siblings stay at threshold 0.05 / budget 300 s — they
 # are the measured record of those rungs. The raw-pool cache of geolife_geoind_reid.yaml
 # (1770 matched traces, 114 users at threshold 0.3) is shared.
-# NOT RUN YET (file created 4 Sep 2026; running it is the author's decision, after the
-# u50 rung has been measured — revise the arm selection below from those numbers).
+# NOT RUN YET (file created 4 Sep 2026, arms widened to the full grid 22 Sep 2026); the
+# author runs it after the u50 rung (geolife_mech_mia_u50.yaml, then
+# geolife_mech_reid_u50.yaml) has been measured.
 # Named with an explicit `_u182` suffix (S4 used no suffix for 182); the `max_users`
 # column in results.csv remains the source of the rung, not the file name.
 #
-# Arm selection: the two anchors (`none`, geo-ind ε = 1) plus ONE arm per mechanism —
-# `point_ldp` ε = 8, `spatial_rounding` 100 m, `temporal_downsampling` 120 s,
-# `gaussian_noise` 50 m. These are the arms that at u20 (docs/HANDOFF.md §2.3) either kept
-# a measurable re-matched pool (rounding 100 m: 104 of 238 traces; downsampling 120 s:
-# 207 of 238) or gave non-degenerate home/work-inference and utility rows (Gaussian 50 m:
-# 43 % of homes and 50 % of workplaces localised within 200 m; point_ldp ε = 8: the only ε
-# that keeps 88 % of true cells and the smallest cell-JS divergence, 0.03). The destructive
-# arms (rounding 500 / 2000 m, Gaussian 200 / 1000 m, point_ldp ε = 4 / 6) drop nearly the
-# whole pool at every rung and show nothing at 182 that u20/u50 do not already show;
-# adding any of them back is one YAML line in the params list.
+# Full grid, not a pre-selection (author decision, 22 Sep 2026): every arm of the u20 file
+# is repeated here, so u20, u50 and u182 carry exactly the same 16 arms (`none`, three
+# geo-ind ε, three point_ldp ε, and three parameters for each of the naive trio) and the
+# comparison notebook (docs/NACRT_MEHANIZMI.md §1.6) puts the same arms side by side at
+# every rung instead of explaining gaps. This replaces the earlier one-arm-per-mechanism
+# selection. The destructive arms (rounding 500 / 2000 m, Gaussian 200 / 1000 m, point_ldp
+# ε = 4 / 6) earn their cost even when their re-matched pool is empty: the run records how
+# many releases the map matcher threw away (`n_rematch_dropped` in run.json), which is what
+# tells "the mechanism protected the user" apart from "the mechanism destroyed the matcher's
+# input", and the `release` entry below scores those same arms over the points they actually
+# publish, so each of them gets a risk number instead of a blank row.
 #
 # Expected effect of threshold 0.3 (not measured): survival of the perturbed releases will
 # be LOWER than at threshold 0.05 — rounding 100 m and Gaussian 50 m may lose most or all
@@ -29,19 +31,39 @@
 # should survive. `n_rematch_dropped` in run.json says what happened; the rows that stay
 # informative when a pool empties are `poi_inference` and the utility metrics.
 #
-# Cost estimate (single seed, from the S4 182-rung record with the same 1770-trace
-# gallery): reidentification on `raw` and `none` is the dominant cost and exceeds the
-# 1200 s budget at every k exactly as in S4 (~3 600 / ~6 000 / ~12 000 s per pool at
-# k = 3 / 5 / 10, i.e. ~12 h for the two pools; recorded in run.json over_budget, not an
-# error — rule R1, docs/RUNNING.md §7.3). The downsampled gallery has ~15x fewer points per
-# trace, so its calls should land in the hundreds of seconds; rounding 100 m and the
-# destructive arms pay mostly their re-matching (~1770 releases each, a few minutes per
-# arm). A `dtw_norm` call costs the same as a `dtw` call (the same dynamic-programming
-# pass; the backtrack over the cost matrix is negligible), so the second reidentification
-# entry below simply doubles the reidentification cost: raw/none go from ~12 h to ~24 h
-# per seed at k = 3/5/10, and the whole run from ~13–14 h to ~26 h per seed. To trim,
-# restrict the `dtw_norm` entry's `known_points` — e.g. `[3]` costs only ~2 h extra.
-# Repetitions (`trajguard repeat --seeds`) multiply all of this.
+# Attacker over the release (third reidentification entry, 22 Sep 2026): the entry with
+# `gallery: release` below attacks the full released GPS points, projected into the map
+# CRS, instead of the re-matched trajectories, so an arm that loses every trajectory at
+# re-matching (Gaussian 1000 m, rounding 2000 m, the point_ldp arms) no longer looks
+# like perfect protection when it only destroyed the input of the map matcher. It is a
+# stronger attacker reported NEXT TO the rematched rows (docs/HANDOFF.md §2.5.2), never
+# instead of them; every mechanism arm, threshold and budget above stays unchanged.
+# It is restricted to `known_points: [3]` here — see the cost estimate.
+#
+# Cost ESTIMATE (single seed; author's estimate of 22 Sep 2026, extrapolated from the S4
+# 182-rung record on the same 1770-trace gallery — nothing in this file is measured):
+#   Rematched entries, both distances, ~29 h. The `raw` and `none` pools dominate: one
+#     pool costs ~3 600 / ~6 000 / ~12 000 s at k = 3 / 5 / 10, i.e. ~21 600 s for the three
+#     k together, and there are four such pool-calls (two scopes x two distances) =
+#     ~24 h. Geo-ind ε = 10 barely perturbs the geometry, so its pool survives re-matching almost
+#     whole, but the S4 182 record puts its calls at ~1 h in total; the three `temporal_downsampling` arms have ~15x fewer
+#     points per trace and cost ~3 h together; the remaining arms lose most of the pool and
+#     pay mainly their re-matching, ~45 min for the 15 perturbing arms.
+#   Release entry at k = 3, ~27–44 h. A release carries the full point stream, ~2–3.3x the
+#     points of a matched trace, and the attacker's DTW is a Python double loop, so one
+#     full-release call costs ~2–3.3x a matched pool-call at the same k (~3 600 s): 13 of
+#     the 16 arms release the full stream (every arm except the three downsampling ones,
+#     whose thinned releases cost ~1 h together).
+#   Total ~56–73 h per seed; three seeds (`trajguard repeat --seeds 1 2 3`) are 7–9 days of
+#   wall clock. About 28 of these calls exceed the 1 200 s budget below; that is recorded in
+#   run.json as over_budget and is not an error (rule R1, docs/RUNNING.md §7.3).
+#   Trimming: setting `known_points: [3]` on the `dtw_norm` REMATCHED entry saves ~9.7 h and
+#   costs only the normalised attacker's k = 5 / 10 columns. Do NOT trim the release entry
+#   by dropping arms — it is the only risk number the destructive arms get. The real lever
+#   on the release entry is a faster DTW implementation, a separate PR.
+#
+# Run it (the author, not a session; detached, after both u50 runs):
+#   $env:PYTHONHASHSEED=0; uv run trajguard repeat config/experiments/geolife_mech_reid_u182.yaml --seeds 1 2 3
 #
 # Units (see the u20 header): `point_ldp` ε per point over 20 x 20 cells (the orchestrator
 # injects the map bbox; never set bbox here), geo-ind ε per 100 m per point, the naive
@@ -91,15 +113,15 @@ split:
 privacy_mechanisms:
   - id: none
   - id: geo_indistinguishability
-    params: {epsilon: [1.0]}      # S4 anchor: ε per unit_m = 100 m per point
+    params: {epsilon: [0.1, 1.0, 10.0]}  # ε per unit_m = 100 m per point; 1.0 is the S4 anchor
   - id: point_ldp
-    params: {epsilon: [8.0]}      # ε per point over 20 x 20 cells; ε = 4 / 6 dropped (header)
+    params: {epsilon: [4.0, 6.0, 8.0]}   # ε per point over 20 x 20 cells (see header)
   - id: spatial_rounding
-    params: {cell_m: [100]}       # metres; 500 / 2000 m dropped (header)
+    params: {cell_m: [100, 500, 2000]}   # metres; no guarantee (see the u20 header)
   - id: temporal_downsampling
-    params: {interval_s: [120]}   # seconds; 30 / 600 s dropped (header)
+    params: {interval_s: [30, 120, 600]} # seconds; first and last point kept
   - id: gaussian_noise
-    params: {sigma_m: [50]}       # metres per axis; 200 / 1000 m dropped (header)
+    params: {sigma_m: [50, 200, 1000]}   # metres per axis; no guarantee
 
 attacks:
   - type: reidentification
@@ -112,6 +134,12 @@ attacks:
       known_points: [3, 5, 10]
       distance: dtw_norm        # rows carry distance=dtw_norm, result_id ...:k<N>:dtw_norm
     target_scope: [raw, protected]
+  - type: reidentification      # attacker over the release (no re-matching), decision of 22 Sep 2026
+    attacker:                   # (docs/HANDOFF.md §2.5.2): reported next to the rematched rows
+      known_points: [3]         # k = 5 / 10 dropped here for cost (see header)
+      distance: dtw_norm        # rows carry distance=dtw_norm, result_id ...:k<N>:dtw_norm:release
+      gallery: release          # full released GPS points projected into the map CRS
+    target_scope: [protected]   # `raw` is rejected here: the raw points are the `none` arm's release
   - type: reconstruction         # MAP inversion of the geo-ind noise; skips other arms
     target_scope: [protected]
   - type: poi_inference          # home/work stay-point inference (design §6.4)
