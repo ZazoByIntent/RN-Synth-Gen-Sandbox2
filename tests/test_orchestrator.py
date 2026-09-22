@@ -2,6 +2,7 @@
 
 import csv
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import Any
@@ -604,7 +605,12 @@ def geoind_config(tmp_path: Path, maps_dir: Path) -> dict[str, Any]:
         {"id": "none"},
         {"id": "geo_indistinguishability", "params": {"epsilon": [10.0], "unit_m": 25.0}},
     ]
-    cfg["metrics"]["utility"] = ["cell_js_divergence", "length_dist_error"]
+    cfg["metrics"]["utility"] = [
+        "cell_js_divergence",
+        "length_dist_error",
+        "duration_dist_error",
+        "speed_dist_error",
+    ]
     cfg["metrics"]["utility_grid"] = {"n_rows": 10, "n_cols": 10}
     cfg["reporting"] = {"export": ["csv"], "plots": ["tradeoff"]}
     return cfg
@@ -646,6 +652,17 @@ def test_perturbing_mechanism_rematches_end_to_end(tmp_path: Path, beijing_maps_
     assert utility[("utility:protected:none", "length_dist_error")] == 0.0
     assert utility[(f"utility:protected:{GEOIND_REF}", "cell_js_divergence")] > 0.0
     assert utility[(f"utility:protected:{GEOIND_REF}", "length_dist_error")] > 0.0
+
+    # M3 movement statistics: every protected arm carries them, no synthetic arm does
+    m3_names = ("duration_dist_error", "speed_dist_error")
+    protected_ids = {rid for rid, _ in utility if rid.startswith("utility:protected:")}
+    assert protected_ids == {"utility:protected:none", f"utility:protected:{GEOIND_REF}"}
+    for result_id in protected_ids:
+        assert all(math.isfinite(utility[(result_id, name)]) for name in m3_names)
+    # geo-ind moves points but never timestamps, so the duration distribution is untouched
+    assert utility[(f"utility:protected:{GEOIND_REF}", "duration_dist_error")] == 0.0
+    assert utility[(f"utility:protected:{GEOIND_REF}", "speed_dist_error")] > 0.0
+    assert not [rid for rid, name in utility if "synthetic:" in rid and name in m3_names]
 
     # only the perturbing mechanism needs a protected cache entry (identity is free)
     entries = list((tmp_path / "protected").iterdir())

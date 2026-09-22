@@ -5,6 +5,11 @@ fit the attack-shaped ``Metric`` ABC; the orchestrator dispatches them by name v
 ``UTILITY_METRICS``. Confidence intervals come from a paired bootstrap: raw/noisy
 per-trajectory contributions are resampled jointly (same indices), which preserves
 the coupling between a trajectory and its protected version.
+
+The dispatch table holds ``cell_js_divergence`` (spatial distribution) and the M3
+movement statistics ``length_dist_error``, ``duration_dist_error`` and
+``speed_dist_error``. The two time-based ones apply to perturbation releases only:
+synthetic releases carry no timestamps and never reach this paired protocol.
 """
 
 import math
@@ -93,6 +98,28 @@ def cell_js_divergence(
     return _paired_bootstrap(raw_counts, noisy_counts, stat, n_bootstrap, ci, rng)
 
 
+def _w1_sorted(a: np.ndarray, b: np.ndarray) -> float:
+    """Wasserstein-1 between two equal-sized samples: mean |sort(a) - sort(b)|."""
+    return float(np.abs(np.sort(a) - np.sort(b)).mean())
+
+
+# The released view of a trajectory inherits `duration_s` (and hence a `mean_speed`
+# computed from it) from its raw source, so both are read off the points instead.
+
+
+def _duration_s(traj: CleanTrajectory) -> float:
+    """Time span (seconds) of a trajectory's own points; 0.0 below two points."""
+    if len(traj.points) < 2:
+        return 0.0
+    return float(traj.points[-1][2] - traj.points[0][2])
+
+
+def _mean_speed(traj: CleanTrajectory) -> float:
+    """Mean speed (m/s) from the trajectory's own points; 0.0 when the span is not positive."""
+    duration = _duration_s(traj)
+    return float(traj.length_m / duration) if duration > 0 else 0.0
+
+
 def length_dist_error(
     raw: Sequence[CleanTrajectory],
     noisy: Sequence[CleanTrajectory],
@@ -107,16 +134,48 @@ def length_dist_error(
         return math.nan, math.nan, math.nan
     raw_len = np.array([t.length_m for t in raw], dtype=float)
     noisy_len = np.array([t.length_m for t in noisy], dtype=float)
+    return _paired_bootstrap(raw_len, noisy_len, _w1_sorted, n_bootstrap, ci, rng)
 
-    def stat(a: np.ndarray, b: np.ndarray) -> float:
-        return float(np.abs(np.sort(a) - np.sort(b)).mean())
 
-    return _paired_bootstrap(raw_len, noisy_len, stat, n_bootstrap, ci, rng)
+def duration_dist_error(
+    raw: Sequence[CleanTrajectory],
+    noisy: Sequence[CleanTrajectory],
+    *,
+    grid: Grid,
+    n_bootstrap: int,
+    ci: float,
+    rng: np.random.Generator,
+) -> tuple[float, float, float]:
+    """Wasserstein-1 (seconds) between raw and released duration distributions."""
+    if not raw:
+        return math.nan, math.nan, math.nan
+    raw_dur = np.array([_duration_s(t) for t in raw], dtype=float)
+    noisy_dur = np.array([_duration_s(t) for t in noisy], dtype=float)
+    return _paired_bootstrap(raw_dur, noisy_dur, _w1_sorted, n_bootstrap, ci, rng)
+
+
+def speed_dist_error(
+    raw: Sequence[CleanTrajectory],
+    noisy: Sequence[CleanTrajectory],
+    *,
+    grid: Grid,
+    n_bootstrap: int,
+    ci: float,
+    rng: np.random.Generator,
+) -> tuple[float, float, float]:
+    """Wasserstein-1 (m/s) between raw and released mean-speed distributions."""
+    if not raw:
+        return math.nan, math.nan, math.nan
+    raw_speed = np.array([_mean_speed(t) for t in raw], dtype=float)
+    noisy_speed = np.array([_mean_speed(t) for t in noisy], dtype=float)
+    return _paired_bootstrap(raw_speed, noisy_speed, _w1_sorted, n_bootstrap, ci, rng)
 
 
 UTILITY_METRICS: dict[str, UtilityMetric] = {
     "cell_js_divergence": cell_js_divergence,
     "length_dist_error": length_dist_error,
+    "duration_dist_error": duration_dist_error,
+    "speed_dist_error": speed_dist_error,
 }
 
 
