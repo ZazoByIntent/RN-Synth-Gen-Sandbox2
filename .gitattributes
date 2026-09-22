@@ -1,0 +1,3 @@
+# Patch files must stay byte-identical to the index (LF) on every platform, so that
+# `git apply` in external/ sees the same bytes on Windows (core.autocrlf=true) as elsewhere.
+*.patch -text
