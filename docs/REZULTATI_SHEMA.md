@@ -28,9 +28,13 @@ ob spremembi sheme se popravita oba, v istem zahtevku za združitev.
 - `reports/results_master.csv` — `trajguard report` zlepi vse zagone pod `results/` v eno
   glavno tabelo. `.parquet` zrcala ni (odločitev avtorja 22. septembra 2026: primerjalni
   zvezek bere CSV).
-- `repetitions.csv` (raven čez semena) dobi stolpca `exp_id` in `config_hash`, da je
-  samostojno berljiva, ko primerjalni zvezek bere več eksperimentov skupaj (odločitev
-  avtorja 22. septembra 2026; izvedba še ni narejena — PR, ki ju doda, posodobi ta odstavek).
+- `repetitions.csv` (raven čez semena) ima od 22. septembra 2026 stolpca `exp_id` in
+  `config_hash` pred `result_id` (vrednosti iz `seed<N>/run.json`; če se med semeni
+  razlikujeta, `trajguard repeat` glasno odpove), da je samostojno berljiva, ko primerjalni
+  zvezek bere več eksperimentov skupaj. Datoteke, zapisane prej (S4, u20), teh stolpcev
+  nimajo; v kodi je ne bere nihče, zato ostanejo, kot so. Glava je `REPETITIONS_COLUMNS` v
+  `experiments/repeat.py`: `exp_id`, `config_hash`, `result_id`, `metric`, `n_repetitions`,
+  `mean`, `ci_low`, `ci_high`.
 
 Vrednosti, ki niso končna števila (NaN/inf pri degeneriranih vejah), se zapišejo kot prazna
 celica — enako kot danes v `metrics.csv`.
@@ -180,5 +184,5 @@ Varovala: test `tests/test_results_schema.py` sinhronizira kodo s tem dokumentom
 `tests/test_results_io.py` pa krožno pot zapis → branje. *Dodajanje* novega stolpca na konec
 je varno šele, ko se v istem PR dopolnijo shema, oba modula, ta dokument in po potrebi zvezek.
 
-Odprto ostaja dvoje neobveznega oziroma kasnejšega: `.parquet` zrcalo glavne tabele in
-stolpca `exp_id`/`config_hash` v `repetitions.csv`.
+Od neobveznega ne ostaja nič odprtega: `.parquet` zrcala glavne tabele ne bo (odločitev
+22. septembra 2026), stolpca `exp_id`/`config_hash` v `repetitions.csv` sta dodana.
