@@ -10,7 +10,7 @@ import os
 import subprocess
 import time
 import tracemalloc
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from functools import partial
@@ -24,10 +24,10 @@ import yaml
 from pyproj import Transformer
 
 from trajguard.attacks.attribute import attribute_report
-from trajguard.attacks.base import Attack, BackgroundKnowledge
+from trajguard.attacks.base import DEFAULT_GALLERY, GALLERIES, Attack, BackgroundKnowledge
 from trajguard.attacks.membership import membership_report
 from trajguard.attacks.reconstruction import reconstruction_report
-from trajguard.attacks.reidentification import distance_suffix
+from trajguard.attacks.reidentification import PointTrace, distance_suffix, gallery_suffix
 from trajguard.datamodel import AttackResult, CleanTrajectory, MatchedTrajectory, MetricValue
 from trajguard.datasets.base import DatasetLoader
 from trajguard.datasets.cleaning import CleaningConfig, clean, haversine_m
@@ -84,6 +84,7 @@ class AttackSpec:
     attack_type: str
     known_points: tuple[int, ...]  # empty for families without a known-points knob
     distance: str
+    gallery: str  # reidentification only: which released form is attacked (base.GALLERIES)
     target_scopes: tuple[str, ...]
     motion_m: float | None = None  # reconstruction only: fixed curvature-prior scale (m)
     poi_params: tuple[tuple[str, Any], ...] = ()  # poi_inference only: stay-point knobs
@@ -199,6 +200,7 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                     attack_type=attack_type,
                     known_points=(),
                     distance=DEFAULT_DISTANCE,  # unused: this family has no distance knob
+                    gallery=DEFAULT_GALLERY,  # unused: this family has no gallery knob
                     target_scopes=scopes,
                     motion_m=float(motion) if motion is not None else None,
                 )
@@ -241,6 +243,7 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                     attack_type=attack_type,
                     known_points=(),
                     distance=DEFAULT_DISTANCE,  # unused: this family has no distance knob
+                    gallery=DEFAULT_GALLERY,  # unused: this family has no gallery knob
                     target_scopes=scopes,
                     poi_params=tuple(sorted(params.items())),
                     threshold_m=threshold,
@@ -280,6 +283,7 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                     attack_type=attack_type,
                     known_points=(),
                     distance=DEFAULT_DISTANCE,  # unused: this family has no distance knob
+                    gallery=DEFAULT_GALLERY,  # unused: this family has no gallery knob
                     target_scopes=scopes,
                     mia_params=tuple(sorted(mia.items())),
                     fprs=fprs,
@@ -296,26 +300,41 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                 f"config: {ctx}.attacker.distance {distance!r} unsupported; "
                 f"expected one of {sorted(DISTANCES)}"
             )
-        # One entry per distance: the result ids of two entries sharing a distance
+        gallery = str(attacker.get("gallery", DEFAULT_GALLERY))
+        if gallery not in GALLERIES:
+            raise ValueError(
+                f"config: {ctx}.attacker.gallery {gallery!r} unsupported; "
+                f"expected one of {sorted(GALLERIES)}"
+            )
+        # The release gallery is the mechanism's own output, so it only exists for a
+        # protected arm; the untouched raw points are what the identity ('none') arm
+        # already releases. Asking for a raw release arm is a config mistake.
+        if gallery == "release" and "raw" in scopes:
+            raise ValueError(
+                f"config: {ctx}.target_scope must not contain 'raw' with attacker.gallery "
+                "'release' (the raw points are the 'none' arm's release)"
+            )
+        # One entry per (distance, gallery): the result ids of two entries sharing both
         # would collide, silently overwriting each other's rows in the report.
         duplicate = next(
             (
                 j
                 for j, s in enumerate(specs)
-                if s.attack_type == attack_type and s.distance == distance
+                if s.attack_type == attack_type and s.distance == distance and s.gallery == gallery
             ),
             None,
         )
         if duplicate is not None:
             raise ValueError(
                 f"config: {ctx} repeats {attack_type} with distance {distance!r} "
-                f"(already attacks[{duplicate}])"
+                f"and gallery {gallery!r} (already attacks[{duplicate}])"
             )
         specs.append(
             AttackSpec(
                 attack_type=attack_type,
                 known_points=known,
                 distance=distance,
+                gallery=gallery,
                 target_scopes=scopes,
             )
         )
@@ -1150,6 +1169,42 @@ def _run_measured(
     return result, round(peak / 1e6, 3)
 
 
+_Projector = Callable[[Sequence[tuple[float, float, float]]], np.ndarray]
+
+
+def _projector(cfg: RunConfig) -> _Projector:
+    """Build a reusable lat/lon -> map-CRS projector for released (lat, lon, t) points."""
+    transformer = Transformer.from_crs("EPSG:4326", cfg.map_crs, always_xy=True)
+
+    def project(points: Sequence[tuple[float, float, float]]) -> np.ndarray:
+        xs, ys = transformer.transform([p[1] for p in points], [p[0] for p in points])
+        return np.column_stack((np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)))
+
+    return project
+
+
+def _release_traces(
+    pool_clean: Mapping[str, CleanTrajectory],
+    order: Sequence[MatchedTrajectory],
+    project: _Projector,
+) -> list[PointTrace]:
+    """The full released points of one pool as projected traces, in the matched pool's order.
+
+    Keeping the matched pool's order (rather than the dict's) makes the release
+    gallery the same sequence as the rematched one, so both modes are deterministic
+    and directly comparable. Every matched id has a released trajectory by
+    construction, so a missing key is a bug and raises rather than being skipped.
+    """
+    return [
+        PointTrace(
+            traj_id=m.traj_id,
+            user_id=m.user_id,
+            xy=project(pool_clean[m.traj_id].points),
+        )
+        for m in order
+    ]
+
+
 def _reconstruction_values(
     cfg: RunConfig,
     spec: AttackSpec,
@@ -1167,11 +1222,10 @@ def _reconstruction_values(
     the snapped pool. Arms of other mechanisms (e.g. the identity baseline) are
     skipped — there is no planar-Laplace noise to invert.
     """
-    transformer = Transformer.from_crs("EPSG:4326", cfg.map_crs, always_xy=True)
+    project = _projector(cfg)
 
-    def project(points: Sequence[tuple[float, float, float]]) -> list[tuple[float, float]]:
-        xs, ys = transformer.transform([p[1] for p in points], [p[0] for p in points])
-        return list(zip(xs, ys, strict=True))
+    def pairs(points: Sequence[tuple[float, float, float]]) -> list[tuple[float, float]]:
+        return [(float(x), float(y)) for x, y in project(points)]
 
     rows: list[ResultRow] = []
     for ref, pool in pools.items():
@@ -1179,8 +1233,8 @@ def _reconstruction_values(
         if not isinstance(mech, GeoIndistinguishability):
             continue
         ids = sorted(set(clean_by_id) & set(pool.clean_by_id))
-        target = [project(pool.clean_by_id[i].points) for i in ids]
-        aux = [project(clean_by_id[i].points) for i in ids]
+        target = [pairs(pool.clean_by_id[i].points) for i in ids]
+        aux = [pairs(clean_by_id[i].points) for i in ids]
         attack = attack_cls(epsilon=mech.epsilon, unit_m=mech.unit_m, motion_m=spec.motion_m)
         result_id = f"reconstruction:{ref}"
         result, peak_mb = _run_measured(cfg.measure_memory, partial(attack.run, target, aux))
@@ -1675,6 +1729,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     run_warnings: list[str] = []
     generator_arms: dict[str, dict[str, Any]] = {}  # fitted-target facts per MIA arm
     probe_counts: dict[str, int] = {}
+    release_arms: dict[str, dict[str, Any]] = {}  # per-ref facts of the release gallery
     for spec, attack_cls in plans:
         if spec.attack_type == "reconstruction":
             all_rows.extend(
@@ -1696,29 +1751,61 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             run_warnings.extend(mia_warnings)
             generator_arms.update(mia_arms)
             continue
+        # The release gallery works on the full released points, so it needs the
+        # lat/lon -> map-CRS projection; building it once per spec keeps it off the
+        # per-arm path. The rematched gallery is already in projected metres.
+        project = _projector(cfg) if spec.gallery == "release" else None
         for ref, pool in pools.items():
             if ref.split(":", 1)[0] not in spec.target_scopes:
                 continue
-            # Probes always come from the raw pool (attacker knowledge, design
-            # §6.1); the raw arm is the same population via leave-one-out.
-            aux = None if ref == "raw" else matched
+            target: Sequence[MatchedTrajectory | PointTrace]
+            aux: Sequence[MatchedTrajectory | PointTrace] | None
+            if project is not None:
+                # No map-matcher in the loop: the attacker sees every released
+                # trajectory, including the ones re-matching would have dropped.
+                target = _release_traces(pool.clean_by_id, matched, project)
+                aux = _release_traces(clean_by_id, matched, project)
+                n_pool = len(pool.clean_by_id)
+                n_gallery_users = len({t.user_id for t in target})
+            else:
+                # Probes always come from the raw pool (attacker knowledge, design
+                # §6.1); the raw arm is the same population via leave-one-out.
+                target = pool.matched
+                aux = None if ref == "raw" else matched
+                n_pool = len(pool.matched)
+                n_gallery_users = len({t.user_id for t in pool.matched})
             for k in spec.known_points:
                 attack = attack_cls()
                 attack.configure(
-                    BackgroundKnowledge(known_points=k, distance=spec.distance, seed=cfg.seed)
+                    BackgroundKnowledge(
+                        known_points=k,
+                        distance=spec.distance,
+                        seed=cfg.seed,
+                        gallery=spec.gallery,
+                    )
                 )
                 result, peak_mb = _run_measured(
-                    cfg.measure_memory, partial(attack.run, pool.matched, aux)
+                    cfg.measure_memory, partial(attack.run, target, aux)
                 )
                 result = replace(
                     result,
                     exp_id=cfg.exp_id,
                     target_data_ref=ref,
-                    # The default distance stays implicit, so the ids of the
-                    # measured S4 record keep their meaning.
-                    result_id=f"{spec.attack_type}:{ref}:k{k}{distance_suffix(spec.distance)}",
+                    # The default distance and gallery stay implicit, so the ids of
+                    # the measured S4 record keep their meaning.
+                    result_id=(
+                        f"{spec.attack_type}:{ref}:k{k}"
+                        f"{distance_suffix(spec.distance)}{gallery_suffix(spec.gallery)}"
+                    ),
                 )
-                probe_counts[ref] = len(result.predictions)
+                if project is None:
+                    probe_counts[ref] = len(result.predictions)
+                else:
+                    release_arms[ref] = {
+                        "n_pool": n_pool,
+                        "n_gallery_users": n_gallery_users,
+                        "n_probes": len(result.predictions),
+                    }
                 values = evaluate(result, metrics, cfg.bootstrap_n, cfg.bootstrap_ci, cfg.seed)
                 info = arm_info[ref]
                 all_rows.extend(
@@ -1732,8 +1819,8 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                         unit_m=info.unit_m,
                         known_points=k,
                         distance=spec.distance,
-                        n_pool=len(pool.matched),
-                        n_gallery_users=len({t.user_id for t in pool.matched}),
+                        n_pool=n_pool,
+                        n_gallery_users=n_gallery_users,
                         n_probes=len(result.predictions),
                         n_rematch_dropped=pool.rematch_dropped,
                         spent_budget=pool.spent_budget,
@@ -1787,7 +1874,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             )
             utility_by_ref.setdefault(ref, {})[name] = point
 
-    arms = {
+    arms: dict[str, dict[str, Any]] = {
         ref: {
             "n_pool": len(pool.matched),
             "n_gallery_users": len({t.user_id for t in pool.matched}),
@@ -1797,6 +1884,10 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         }
         for ref, pool in pools.items()
     }
+    # An arm attacked with the release gallery keeps its matched-pool facts above and
+    # gains the release ones in a nested block, so existing readers are unaffected.
+    for ref, facts in release_arms.items():
+        arms[ref]["release"] = facts
     # Generator arms attacked by membership inference are not release pools; they add
     # the fitted target's public facts (ldptrace's l_k, privtrace's n_states and its
     # second-order / redraw counts) under ``synthetic:<ref>``.

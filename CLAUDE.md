@@ -23,6 +23,10 @@ doctoral project. This file is the constitution for the repo; read it every sess
   Next: the author runs `geolife_mech_reid_u182.yaml` (~26 h per seed with both
   distances) and `geolife_mech_mia_u182.yaml` (~5 min per seed) at 182 users, then the
   shared comparison notebook (`docs/NACRT_MEHANIZMI.md` §1.6).
+- The reidentification attack has a second gallery `release` over the released GPS points,
+  with no map-matching (22 Sep 2026, `docs/HANDOFF.md` §2.5.2): branch
+  `claude/reid-release-gallery` on `claude/m3-duration-speed`, u20 config updated, nothing
+  measured yet; a `gallery` results column and the u50/u182 configs follow.
 
 Whoever changes the project state updates these lines in the same PR. The history of
 PRs, merge commits and result interpretation lives only in `docs/HANDOFF.md`, never

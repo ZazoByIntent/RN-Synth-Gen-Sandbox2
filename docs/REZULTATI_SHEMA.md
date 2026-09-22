@@ -165,6 +165,18 @@ nosi pripono le neprivzeta razdalja, in sicer za `:k<N>` (npr.
 `reidentification:protected:none:k5:dtw_norm`); privzeti `dtw` ostane neizpisan, zato
 so današnji `result_id` nespremenjeni.
 
+Isti dan je `result_id` reidentifikacije dobil še segment za galerijo napadalca, torej
+za to, kaj napadalec preiskuje: vzorec je zdaj `…:k<N>[:dtw_norm][:release]`, kjer je
+segment galerije zadnji, privzeta galerija `rematched` (ponovno ujemane zaščitene sledi)
+pa ostane neizpisana. Primer vrstice z galerijo izdanih točk:
+`reidentification:protected:gaussian_noise:sigma_m=1000.0:k3:dtw_norm:release`. Stolpca
+`gallery` v glavi še ni: načrtovan je kot naslednji zadnji stolpec v ločenem PR, šele
+tedaj bodo odjemalci obe galeriji ločili sami; do takrat `report.py` pripone `:release`
+ne razpozna, zato ju v tabeli loči le `result_id`. Pri vrstici z galerijo `release`
+pomeni `n_pool` število vseh izdanih sledi — ne le tistih, ki so preživele ponovno
+ujemanje — `n_gallery_users` število uporabnikov v izdaji, `n_rematch_dropped` pa še
+naprej poroča o ponovnem ujemanju izdane veje istega mehanizma.
+
 ## Odjemalci sheme — glava stolpcev je vmesnik, ne podrobnost
 
 Na točno to glavo (`RESULTS_COLUMNS`, vrstni red in imena stolpcev) so vezani štirje

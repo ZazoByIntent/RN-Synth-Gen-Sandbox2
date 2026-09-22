@@ -714,9 +714,36 @@ DTW favours short gallery sequences. That hypothesis was checked on 4 Sep 2026 o
 the cached u20 pools and **confirmed** (`docs/HANDOFF.md` §2.5.1): a normalised DTW
 (cost divided by the alignment length) lifts the raw pool from 0.28 / 0.38 / 0.49 to
 0.52 / 0.57 / 0.60 at k = 3 / 5 / 10, the level of the downsampled arms, and the
-nearest gallery trace stops being one of the shortest — the attack code is unchanged
-(a normalised attacker distance is an open author decision, since it would change the
-whole S4 record). Rows and the reading: `docs/HANDOFF.md` §2.3.4.
+nearest gallery trace stops being one of the shortest — the attack code was unchanged
+for that check, and the normalised distance has been in the code as
+`attacker.distance: dtw_norm` since 22 Sep 2026, reported next to `dtw` instead of
+replacing it, so the measured S4 rows keep their meaning. Rows and the reading:
+`docs/HANDOFF.md` §2.3.4.
+
+**Attacker over the release (`gallery: release`, decision of 22 Sep 2026).** The attack
+can now search two galleries. The default `rematched` searches the re-map-matched
+protected trajectories, as every measured row so far; the new `release` searches the
+full released GPS points, which the orchestrator only projects into the map coordinate
+system, with no map matcher in the loop. That removes a misleading result: an arm that
+destroys the release so thoroughly that nothing re-matches (Gaussian 1000 m,
+geo-indistinguishability at ε = 0.1) used to score a perfect "protection" which came
+from the empty pool, not from privacy. Keys: `attacker.gallery` (`rematched` by default,
+or `release`), `attacker.distance` (`dtw` or `dtw_norm`) and `target_scope`, which must
+be `[protected]` on a release entry — `raw` is rejected, because the raw points are the
+release of the `none` arm, and `none` is the control. The result id carries the gallery
+last: `reidentification:<ref>:k<N>[:dtw_norm][:release]`. On a release row `n_pool`
+counts all released trajectories (not the re-match survivors) and `n_gallery_users` the
+users in the release, while `n_rematch_dropped` still reports that arm's re-matching, so
+the two together show what the matcher was discarding; `run.json` keeps the
+`arms[<ref>]` keys and adds a nested `release: {n_pool, n_gallery_users, n_probes}` when
+a release entry ran. A release holds ~352 points per trace at u20 against ~106 matched
+points and the distance is a Python double loop, so a release call costs about three
+times (~3.3x, estimated) a matched-pool call: the release entry in
+`geolife_mech_reid_u20.yaml` adds ~2.6 h per seed and its k = 10 grid point goes over
+the 300 s budget, recorded as
+`over_budget` in `run.json`, not an error (rule R1, §7.3). For now `results.csv` has no
+`gallery` column (it arrives with the next pull request), so `report.py` does not parse
+the `:release` suffix yet and the two galleries are told apart only by the result id.
 
 **Sibling configs for the 50- and 182-user rungs exist and are NOT measured** (created
 4 Sep 2026): `geolife_mech_reid_u50.yaml` carries all u20 arms at threshold 0.05 /

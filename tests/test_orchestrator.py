@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 import yaml
 
+from trajguard.attacks.base import GALLERIES
 from trajguard.experiments.orchestrator import ConsistencyError, load_config, run
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -233,6 +234,69 @@ def test_repeated_attacker_distance_fails_loudly(tmp_path: Path) -> None:
     cfg["attacks"].append(dict(cfg["attacks"][0]))
     with pytest.raises(ValueError, match=r"attacks\[1\] repeats reidentification"):
         run(write_config(tmp_path, cfg))
+
+
+def test_default_gallery_is_the_rematched_pool(tmp_path: Path) -> None:
+    """Omitting attacker.gallery keeps today's behaviour (and today's result ids)."""
+    loaded = load_config(write_config(tmp_path, base_config(tmp_path, tmp_path / "maps")))
+    assert [s.gallery for s in loaded.attacks] == ["rematched"]
+
+
+def test_two_galleries_with_one_distance_are_two_entries(tmp_path: Path) -> None:
+    """The gallery is part of the entry's identity, so one distance can serve both."""
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"].append(
+        {
+            "type": "reidentification",
+            "attacker": {"known_points": [3], "distance": "dtw", "gallery": "release"},
+            "target_scope": ["protected"],
+        }
+    )
+    loaded = load_config(write_config(tmp_path, cfg))
+    assert [(s.distance, s.gallery) for s in loaded.attacks] == [
+        ("dtw", "rematched"),
+        ("dtw", "release"),
+    ]
+
+
+def test_repeated_attacker_distance_and_gallery_fails_loudly(tmp_path: Path) -> None:
+    """Two entries sharing a distance *and* a gallery would write the same result ids."""
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    entry = {
+        "type": "reidentification",
+        "attacker": {"known_points": [3], "distance": "dtw", "gallery": "release"},
+        "target_scope": ["protected"],
+    }
+    cfg["attacks"] = [entry, dict(entry)]
+    with pytest.raises(ValueError, match=r"distance 'dtw' and gallery 'release'"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_release_gallery_rejects_the_raw_scope(tmp_path: Path) -> None:
+    """The untouched points are what the identity arm releases; a raw release arm is a dupe."""
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["attacker"]["gallery"] = "release"
+    with pytest.raises(ValueError, match="target_scope must not contain 'raw'"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_unknown_attacker_gallery_fails_loudly(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["attacker"]["gallery"] = "snapped"
+    with pytest.raises(ValueError, match="attacker.gallery 'snapped' unsupported"):
+        run(write_config(tmp_path, cfg))
+
+
+@pytest.mark.parametrize(
+    "config_path",
+    sorted((Path(__file__).parent.parent / "config" / "experiments").glob("geolife_mech_*.yaml")),
+    ids=lambda p: p.name,
+)
+def test_experiment_configs_parse(config_path: Path) -> None:
+    """Every shipped mechanism config still validates, with a gallery the attack knows."""
+    loaded = load_config(config_path)
+    galleries = [s.gallery for s in loaded.attacks if s.attack_type == "reidentification"]
+    assert all(g in GALLERIES for g in galleries)
 
 
 def test_reconstruction_rejects_reid_attacker_keys(tmp_path: Path) -> None:
@@ -927,6 +991,78 @@ def test_dtw_norm_entry_adds_rows_and_leaves_the_dtw_ones_untouched(
         "by_knowledge_reidentification.png",
         "runtime.png",
     } <= written
+
+
+GAUSSIAN_REF = "gaussian_noise:sigma_m=1000.0"
+
+
+def release_gallery_config(tmp_path: Path, maps_dir: Path) -> dict[str, Any]:
+    """Identity + a release too noisy to snap back, attacked with both galleries."""
+    cfg = base_config(tmp_path, maps_dir)
+    cfg["privacy_mechanisms"] = [
+        {"id": "none"},
+        {"id": "gaussian_noise", "params": {"sigma_m": [1000]}},
+    ]
+    cfg["attacks"] = [
+        {
+            "type": "reidentification",
+            "attacker": {"known_points": [3], "distance": "dtw"},
+            "target_scope": ["raw", "protected"],
+        },
+        {
+            "type": "reidentification",
+            "attacker": {"known_points": [3], "distance": "dtw_norm", "gallery": "release"},
+            "target_scope": ["protected"],
+        },
+    ]
+    return cfg
+
+
+def reid_rows(out_dir: Path) -> dict[tuple[str, str], dict[str, str]]:
+    """Every reidentification row of results.csv, keyed by (result_id, metric)."""
+    rows = list(csv.DictReader((out_dir / "results.csv").open()))
+    return {(r["result_id"], r["metric"]): r for r in rows if r["family"] == "reidentification"}
+
+
+def test_release_gallery_attacks_what_rematching_dropped(
+    tmp_path: Path, beijing_maps_dir: Path
+) -> None:
+    """A 1 km-noise release survives no re-matching, so the rematched gallery reports an
+    empty pool and perfect 'protection'. The release gallery reads the published points
+    directly (no matcher in the loop), so the same arm is still attackable: 8 gallery
+    trajectories of 2 users, with the drop count kept for the record."""
+    cfg = release_gallery_config(tmp_path, beijing_maps_dir)
+    run(write_config(tmp_path, cfg))
+    rows = reid_rows(tmp_path / "out")
+
+    rematched = rows[(f"reidentification:protected:{GAUSSIAN_REF}:k3", "top1_acc")]
+    assert int(rematched["n_pool"]) == 0
+    assert float(rematched["value"]) == 0.0
+    assert int(rematched["n_rematch_dropped"]) == 8
+
+    released_id = f"reidentification:protected:{GAUSSIAN_REF}:k3:dtw_norm:release"
+    released = rows[(released_id, "top1_acc")]
+    assert int(released["n_pool"]) == 8
+    assert int(released["n_gallery_users"]) == 2
+    assert int(released["n_rematch_dropped"]) == 8  # the arm's matcher losses, for the record
+    assert int(released["n_probes"]) == int(rematched["n_probes"])
+    assert math.isfinite(float(released["value"]))
+
+    identity = rows[("reidentification:protected:none:k3:dtw_norm:release", "top1_acc")]
+    assert int(identity["n_pool"]) == 8
+    assert int(identity["n_rematch_dropped"]) == 0
+
+    # run.json keeps the matched-pool facts of every arm and nests the release ones
+    arms = json.loads((tmp_path / "out" / "run.json").read_text())["arms"]
+    gauss_arm = arms[f"protected:{GAUSSIAN_REF}"]
+    assert gauss_arm["n_pool"] == 0 and gauss_arm["n_rematch_dropped"] == 8
+    assert gauss_arm["release"]["n_pool"] == 8
+    assert gauss_arm["release"]["n_gallery_users"] == 2
+
+    # the release gallery is as deterministic as the rematched one across reruns
+    first = reid_cells(tmp_path / "out")
+    run(write_config(tmp_path, cfg))
+    assert reid_cells(tmp_path / "out") == first
 
 
 def test_results_csv_membership_columns(tmp_path: Path, beijing_maps_dir: Path) -> None:

@@ -37,6 +37,24 @@
 # The orchestrator injects the map bbox into `point_ldp` (never set bbox here).
 # Point LDP and the naive trio are baseline candidates (decision D5 in project Izbirni
 # predmeti is open).
+#
+# Attacker over the release (extra reidentification entry, 22 Sep 2026): the entry with
+# `gallery: release` below attacks the full released GPS points, projected into the map
+# CRS, instead of the re-matched trajectories, so an arm that loses every trajectory at
+# re-matching (Gaussian 1000 m, rounding 2000 m, the point_ldp arms) no longer looks
+# like perfect protection when it only destroyed the input of the map matcher. It is a
+# stronger attacker reported NEXT TO the rematched rows (docs/HANDOFF.md §2.5.2), never
+# instead of them; every mechanism arm, threshold and budget above stays unchanged.
+# Cost: a release carries ~352 points per trace at u20 against ~106 matched points, and
+# the attacker's DTW is a Python double loop, so one full-release call costs ≈ 3.3x a
+# matched-pool call: per arm ≈ 140 s at k = 3, ≈ 230 s at k = 5 and ≈ 450 s at k = 10,
+# i.e. ≈ 820 s per arm for the three k together. k = 10 is over the 300 s budget set in
+# `metrics.attack_time_budget_s` below; that is recorded in run.json as over_budget and
+# is not an error (rule R1, docs/RUNNING.md §7.3). Eleven of the fourteen arms release
+# the full point stream — every arm except the three `temporal_downsampling` ones, whose
+# releases are thinned to a fraction of the points and cost ≈ 4 min together — so the
+# entry adds ≈ 11 x 820 s + 4 min ≈ 2.6 h per seed on top of the run. Trim it to
+# `known_points: [3]` (≈ 26 min in total) to stay inside the 300 s budget.
 experiment:
   id: geolife_mech_reid_u20
   seed: 42                   # run seed: mechanism noise, attacker knowledge, bootstrap
@@ -92,6 +110,12 @@ attacks:
       known_points: [3, 5, 10]   # points the attacker knows about each target
       distance: dtw
     target_scope: [raw, protected]
+  - type: reidentification      # attacker over the release (no re-matching), decision of 22 Sep 2026
+    attacker:                   # (docs/HANDOFF.md §2.5.2): reported next to the rematched rows
+      known_points: [3, 5, 10]
+      distance: dtw_norm        # rows carry distance=dtw_norm, result_id ...:k<N>:dtw_norm:release
+      gallery: release          # full released GPS points projected into the map CRS
+    target_scope: [protected]   # `raw` is rejected here: the raw points are the `none` arm's release
   - type: reconstruction         # MAP inversion of the geo-ind noise; skips other arms
     target_scope: [protected]
   - type: poi_inference          # home/work stay-point inference (design §6.4)

@@ -165,7 +165,7 @@ validation (`docs/NACRT_LDPTRACE_VALIDACIJA.md`).
 
 | Attack | `target_scope` | Approach | Primary metrics | Phase |
 | --- | --- | --- | --- | --- |
-| Reidentification / linkage (de Montjoye 2013) | raw, protected | attacker knows k target points; NN over matched trajectories (DTW/Hausdorff) | top-1/top-k accuracy, linkage rate | P4 |
+| Reidentification / linkage (de Montjoye 2013) | raw, protected | attacker knows k target points; nearest neighbour either over the re-matched pool (`rematched`, the default) or over the full released points projected into the map CRS (`release`, `protected` scope only), distance `dtw` or `dtw_norm` | top-1/top-k accuracy, linkage rate | P4 |
 | Membership inference, LiRA-lite (Carlini 2022) | synthetic | shadow generators + likelihood ratio | TPR @ FPR ∈ {0.001, 0.01}, AUC | P6 |
 | Reconstruction / inversion (Buchholz 2022) | protected | MAP inversion of the known mechanism | Hausdorff, DTW, mean spatial error (m) | P6 |
 | POI / home-work inference (Primault 2019) | protected, synthetic | stay-point clustering; night hours → home, day hours → work | est↔true home/work distance (m), fraction of users within threshold | P6.5 |
@@ -187,6 +187,17 @@ Top-level YAML keys: `experiment`, `map`, `dataset`, `cleaning`, `map_matching`,
 key and seed. Parsed with plain PyYAML + manual validation — no Hydra/OmegaConf.
 Full annotated example: design §8. Entry point: `trajguard run <config>` (argparse,
 registered under `[project.scripts]`).
+
+A `reidentification` entry configures its attacker with `attacker.known_points` (a list,
+expanded into the grid), `attacker.distance` (`dtw` by default, or `dtw_norm`, the same
+alignment cost divided by its length) and `attacker.gallery` (`rematched` by default,
+i.e. the re-map-matched trajectories, or `release`, the full released points projected
+into the map coordinate reference system (CRS) with no matcher in the loop). A
+`release` entry must declare `target_scope: [protected]`, because the raw points are
+already the release of the `none` arm. Several reidentification entries may sit side by
+side, but repeating the
+same (distance, gallery) pair in one config is rejected as a mistake, since the two
+entries would write the same result ids.
 
 `dataset.representation` selects the pipeline: `segments` (default; `map` and
 `map_matching` mandatory, the pool is map-matched) or `cells` (`dataset.grid:
