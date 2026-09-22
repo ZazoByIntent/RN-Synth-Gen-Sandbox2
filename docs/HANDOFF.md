@@ -39,6 +39,7 @@ da vrstice naslovov, `sed -n 'a,bp'` prebere odsek; nikoli cele datoteke):
   - §2.5 manjše, tehnične (zvezki, grafi, predpomnjenje sinteze, shema rezultatov, A2, strop
     `markov`, ujemanje in `PYTHONHASHSEED`, meja celice)
     - §2.5.1 dolžinska pristranskost DTW v reidentifikaciji (preverba, tabela, odločitev `dtw_norm`)
+    - §2.5.2 napadalec nad izdajo (galerija `release`, odločitev 22. 9. 2026, možnost B)
 - §3 Kje je zgodovina (arhivirane datoteke)
 
 ---
@@ -641,7 +642,10 @@ Branje:
   populacijske statistike nad celicami (histogram celic), ne za izdajo sledi; finejša
   mreža (50 × 50, k = 2.500) bi za isti delež pravih celic zahtevala ε ≳ 10 in bi izdano
   točko še vedno premaknila za ~300 m. To je pričakovana lastnost LDP na točko, ne napaka
-  izvedbe. Točkovni LDP ostaja kandidat za baseline (odločitev D5 je odprta).
+  izvedbe. Točkovni LDP ostaja kandidat za baseline (odločitev D5 je odprta). Ali je
+  zaščita izdaje sledi pri teh rokah resnična ali le posledica praga ponovnega ujemanja,
+  bo pokazal napadalec nad izdajo (galerija `release`, glej 2.5.2), ki napade same izdane
+  točke.
 - Kopiji konfiguracije za stopnji 50 in 182 obstajata (`geolife_mech_reid_u50/u182`, glej
   ZM-3 v 2.3.4; `point_ldp` ε = 8 je roka pri 182). **Odločeno 22. 9. 2026:** stopnja 50 se
   za mehanizme preskoči; avtor požene stopnjo 182 pred primerjalnim zvezkom, s ponovitvami
@@ -758,11 +762,14 @@ Branje:
   `point_ldp`; redčenje ne uniči ničesar in reidentifikacijo celo poveča. Za sklepanje o
   domu/delu sta zaokroževanje 100 m in Gauss 50 m praktično brez učinka. Vsi trije
   ostajajo kandidati za baseline (odločitev D5 je odprta).
-- **Odločeno 22. 9. 2026** (točke 1–3 spodaj): (1) dolžinska pristranskost DTW —
+- **Odločeno 22. 9. 2026** (točke 1–4 spodaj): (1) dolžinska pristranskost DTW —
   kombinacija obeh možnosti (`dtw_norm` pride v kodo, `dtw` ostane privzeta), glej 2.5.1;
   (2) stopnja 50 se za mehanizme preskoči, avtor pred primerjalnim zvezkom sam požene
   `geolife_mech_reid_u182.yaml` (z `dtw_norm`, ko bo v kodi); (3) Gaussov šum dobi
-  ponovitve čez semena pri tem pogonu 182, ne pri u20. **Stanje 22. 9. 2026:** `dtw_norm`
+  ponovitve čez semena pri tem pogonu 182, ne pri u20; (4) prazna galerija pri uničevalnih
+  rokah se naslovi z napadalcem nad izdajo — druga galerija `release` nad vsemi izdanimi
+  točkami, poleg vrstic `rematched` in ne namesto njih (možnost B), glej 2.5.2.
+  **Stanje 22. 9. 2026:** `dtw_norm`
   je v kodi (PR #47) in v `geolife_mech_reid_u182.yaml` kot drugi vnos `reidentification`
   pri k = 3/5/10; ker vsaka razdalja pomeni poln klic napada, glava datoteke zdaj navaja
   ~26 h na seme namesto ~13–14 h (z `known_points: [3]` za `dtw_norm` ~+2 h).
@@ -1391,6 +1398,47 @@ reidentifikacijskim vrsticam pripišejo `dtw`; `result_id` nove razdalje se kon�
 (ena črta na roko in razdaljo; `matrix.csv` in grafa kompromisa kažeta vrstico `dtw`). Test
 na umetnem primeru: kratka sled zmaga pod `dtw`, geometrijsko prava pod `dtw_norm`;
 referenčnih vrednosti iz tabele zgoraj test ne ponavlja (so iz bazena u20).
+
+#### 2.5.2 Napadalec nad izdajo (galerija `release`)
+
+**Težava: prag ponovnega ujemanja izprazni galerijo.** Orkestrator vsako zaščiteno izdajo
+znova ujame na cestno omrežje in obdrži samo sledi z `match_score >= min_match_score`. Pri
+uničevalnih rokah (Gauss 1.000 m, geo-ind ε = 0,1, zaokroževanje 2.000 m …) praga ne
+prestane nobena sled, zato je galerija prazna in vrstica poroča `n_pool = 0` in
+`top1_acc = 0`. Videz popolne zaščite je lastnost para mehanizem + prag ponovnega
+ujemanja, ne mehanizma samega: napadalec, ki dela neposredno nad izdanimi točkami,
+ujemanja sploh ne potrebuje.
+
+**Odločeno 22. 9. 2026: možnost B — napadalec nad izdajo.** Reidentifikacija dobi drugo
+galerijo `release`, ki teče nad **vsemi izdanimi točkami GPS**; te orkestrator projicira v
+koordinatni sistem karte (`Transformer.from_crs("EPSG:4326", cfg.map_crs, always_xy=True)`,
+isti recept kot pri napadu rekonstrukcije), ujemalnika v zanki ni. V praksi:
+
+- `release` je **močnejši napadalec**, ker ga prag ponovnega ujemanja ne omejuje; poroča se
+  **poleg** vrstic galerije `rematched`, nikoli namesto njih.
+- Roka `none` je kontrola: njena izdaja so surove točke, zato njena vrstica `release` pove,
+  koliko napadalec pridobi že samo s tem, da ujemanja ne uporabi.
+- `rematched` ostaja privzeta galerija in je v ID-jih implicitna, zato so vsi dosedanji
+  ID-ji nespremenjeni; `raw` v `target_scope` vnosa z galerijo `release` je napaka
+  konfiguracije, ker surovi bazen ni izdaja.
+- Cena je ~2–3-kratna (ocenjeno ~3,3-kratna) na klic napada, ker ima sled pri u20 ~352
+  izdanih točk proti ~106 ujetim, DTW pa je dvojna zanka v Pythonu.
+
+**Kaj nosijo vrstice.** `result_id` se konča s pripono `:release`
+(`reidentification:<ref>:k<N>[:dtw_norm][:release]`). V vrstici `release` je `n_pool`
+število **vseh** izdanih sledi (ne preživelih) in `n_gallery_users` število uporabnikov v
+izdaji; `n_rematch_dropped` ostaja nespremenjen, ker meri ponovno ujemanje izdaje in ne
+galerije. V `run.json` dobi `arms[<ref>]` ugnezden blok `release`. Konfiguracija vnosa:
+`attacker.gallery: release`, `distance: dtw_norm`, `target_scope: [protected]`.
+
+**Stanje 22. 9. 2026.** PR A1 (veja `claude/reid-release-gallery`, osnova
+`claude/m3-duration-speed`, ker PR-ji #47–#50 še niso v `main`) prinese kodo in drugi vnos
+`reidentification` v `geolife_mech_reid_u20.yaml` (`known_points: [3, 5, 10]`, `dtw_norm`,
+`release`); roke ostanejo nespremenjene. Sledita PR A2 (nov zadnji stolpec `gallery` v
+`results.csv` po vzorcu stolpca `distance` iz PR #47, da poročilo in grafi ločita galeriji)
+in PR B (uskladitev konfiguracij u50 in u182 na polni mreži rok z vnosom `release`:
+`known_points [3]` pri 182, `[3, 5, 10]` pri 50). **Z novo galerijo še ni nič izmerjeno**;
+pri u20 je k = 10 čez proračun 300 s (pravilo R1).
 
 ---
 
