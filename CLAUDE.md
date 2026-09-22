@@ -17,8 +17,8 @@ doctoral project. This file is the constitution for the repo; read it every sess
   and are not measured.
 - Open decisions were settled on 22 Sep 2026 (`docs/HANDOFF.md` §2, intro). Next, in
   order: small code PRs (`attacker.distance: dtw_norm`, `exp_id`/`config_hash` in
-  `repetitions.csv`, PrivTrace facts in `run.json`, a `geolife_mech_mia_u182.yaml`
-  copy), then the author runs every mechanism config at 182 users, then the shared
+  `repetitions.csv`, PrivTrace facts in `run.json`, M3 utility metrics
+  `duration_dist_error`/`speed_dist_error`, a `geolife_mech_mia_u182.yaml` copy), then the author runs every mechanism config at 182 users, then the shared
   comparison notebook (`docs/NACRT_MEHANIZMI.md` §1.6).
 
 Whoever changes the project state updates these lines in the same PR. The history of
