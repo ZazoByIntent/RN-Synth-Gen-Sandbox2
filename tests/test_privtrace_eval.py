@@ -171,6 +171,12 @@ def test_run_synthesis_records_and_determinism() -> None:
         assert sum(record["stage_epsilons"]) == pytest.approx(HUGE_EPS)
         assert record["n_synthetic"] == len(points) and record["synthetic_mean_length"] >= 1
         assert record["synthetic_mean_points"] >= 2  # every walk yields at least two points
+        # the D-4.3 walk-length cap: recorded per run, not tabulated
+        assert {"max_redraws", "n_capped_walks", "n_redrawn_walks"} <= set(record)
+        assert record["max_redraws"] == 20  # the generator's default
+        for name in ("n_capped_walks", "n_redrawn_walks"):
+            assert isinstance(record[name], int) and record[name] >= 0, name
+        assert record["n_capped_walks"] <= record["n_synthetic"]
         assert all(record[k] >= 0 for k in ("fit_s", "generate_s", "metrics_s"))
         # cell metrics are always finite; the length/diameter bins can be empty at n = 5
         for name in ("density_error", "trip_error", "coverage_kendall_tau", "pattern_f1"):
@@ -178,6 +184,14 @@ def test_run_synthesis_records_and_determinism() -> None:
         # the second, unbridged scoring pass stores all nine metrics plus the share
         assert {f"nobridge_{name}" for name in METRIC_NAMES} <= set(record)
         assert 0.0 <= record["interpolated_share"] <= 1.0
+        # length and diameter read the raw real points and the synthetic points, never a
+        # chain, so the two passes must agree on them by construction
+        for name in ("length_error", "diameter_error"):
+            unbridged = record[f"nobridge_{name}"]
+            if math.isnan(record[name]):
+                assert math.isnan(unbridged), name
+            else:
+                assert unbridged == record[name], name
         assert record["mask_non_adjacent"] is False
 
     masked = pe.run_synthesis(points, grid, FIRST_LEVEL_K, [HUGE_EPS], [1], mask_non_adjacent=True)
@@ -231,7 +245,7 @@ def _fake_runs(
         if nobridge_density is not None:
             record.update({f"nobridge_{name}": 0.0 for name in METRIC_NAMES})
             record["nobridge_density_error"] = nobridge_density[i]
-            record["nobridge_point_query_avre"] = 0.7  # stored, but not a tabulated row
+            record["nobridge_point_query_avre"] = 0.7
             record["interpolated_share"] = 0.5
         runs["1.0"][seed] = record
     return runs
@@ -246,8 +260,12 @@ def test_summarize_covers_metrics_port_only_and_no_bridge_rows() -> None:
     assert summary["synthetic_mean_length"]["mean"] == 3.5
     assert summary["nobridge_density_error"] == {"mean": 0.5, "min": 0.4, "max": 0.6, "n": 2}
     assert summary["interpolated_share"] == {"mean": 0.5, "min": 0.5, "max": 0.5, "n": 2}
-    # only the six chain metrics of NOBRIDGE_METRICS are summarized, not all nine
-    assert "nobridge_point_query_avre" not in summary
+    # the point query moves without bridging too (its real side follows the real chains)
+    assert summary["nobridge_point_query_avre"] == {"mean": 0.7, "min": 0.7, "max": 0.7, "n": 2}
+    # only the seven metrics of NOBRIDGE_METRICS are summarized, not all nine: length and
+    # diameter read points only, so their unbridged values repeat the bridged ones
+    assert "nobridge_length_error" not in summary
+    assert "nobridge_diameter_error" not in summary
 
     plain = pe.summarize(_fake_runs([0.1, 0.3]))["1.0"]
     assert "n_states" not in plain
@@ -263,20 +281,23 @@ def test_compare_table_layout() -> None:
     table = pe.compare_table([port, ref])
     lines = table.splitlines()
     assert lines[0] == "| ε | metric | port | reference |"
-    # header, rule, nine metrics, three port-only rows, six no-bridge rows + the share
-    assert len(lines) == 2 + len(METRIC_NAMES) + 3 + 7
+    # header, rule, nine metrics, three port-only rows, seven no-bridge rows + the share
+    assert len(lines) == 2 + len(METRIC_NAMES) + 3 + 8
     density = next(line for line in lines if "| density_error |" in line)
     assert density == "| 1.0 | density_error | 0.2000 [0.1000; 0.3000] | 0.2000 |"
-    assert lines[-10] == "| 1.0 | n_states | 5.0 [4.0; 6.0] | — |"
-    assert lines[-8] == "| 1.0 | synthetic_mean_length | 3.5 | — |"
+    assert lines[-11] == "| 1.0 | n_states | 5.0 [4.0; 6.0] | — |"
+    assert lines[-9] == "| 1.0 | synthetic_mean_length | 3.5 | — |"
     # the no-bridge block comes last, in NOBRIDGE_METRICS order, share included
-    assert [line.split(" | ")[1] for line in lines[-7:]] == [
+    block = [line.split(" | ")[1] for line in lines[-8:]]
+    assert block == [
         *(f"nobridge_{name}" for name in pe.NOBRIDGE_METRICS),
         "interpolated_share",
     ]
-    assert lines[-7] == "| 1.0 | nobridge_density_error | 0.5000 [0.4000; 0.6000] | — |"
+    assert block[2] == "nobridge_point_query_avre"  # in METRIC_NAMES order, after the hotspots
+    assert lines[-8] == "| 1.0 | nobridge_density_error | 0.5000 [0.4000; 0.6000] | — |"
     assert lines[-1] == "| 1.0 | interpolated_share | 0.5000 | — |"
-    assert "nobridge_point_query_avre" not in table
+    # length and diameter cannot move without bridging, so they are not repeated
+    assert "nobridge_length_error" not in table and "nobridge_diameter_error" not in table
     with pytest.raises(ValueError, match="at least one"):
         pe.compare_table([])
 
@@ -341,6 +362,7 @@ def test_cli_run_score_and_compare(tmp_path: Path, capsys: pytest.CaptureFixture
     assert f"| {EPS_KEY} | density_error |" in out
     assert f"| {EPS_KEY} | n_states |" in out and " | — |" in out  # port-only row
     assert f"| {EPS_KEY} | nobridge_density_error |" in out
+    assert f"| {EPS_KEY} | nobridge_point_query_avre |" in out
     assert f"| {EPS_KEY} | interpolated_share |" in out
 
 
