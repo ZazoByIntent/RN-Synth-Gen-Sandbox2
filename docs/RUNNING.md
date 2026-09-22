@@ -1051,8 +1051,11 @@ redrawn from the same random stream, at most `max_redraws` = 20 times (deviation
 every run records three extra keys in its JSON: `max_redraws`, `n_redrawn_walks` (how many
 walks were thrown away and drawn again) and `n_capped_walks` (how many walks were kept
 although every redraw hit the cap). The guard is post-processing of the released model — it
-reads no data and spends no budget — and in practice it only fires under the mask at ε = 0.5;
-without the mask both counters are 0 in all 15 runs.
+reads no data and spends no budget — and in practice it only fires under the mask at ε = 0.5.
+Without the mask both counters were 0 in all 15 runs of the regression re-run of 22 September
+2026 (its output was not kept; `port.json` in `results/` is the PR #41 file and predates the
+counters), and none of the saved unmasked syntheses in `port_synthesis/` contains a 200-state
+walk.
 
 **The two scoring passes.** Every run is scored twice. The nine metrics under their plain
 names use the LDPTrace convention, where `Grid.chain` bridges a jump between non-adjacent

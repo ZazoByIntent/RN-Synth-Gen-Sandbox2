@@ -1221,6 +1221,7 @@ def test_the_redraw_guard_replaces_capped_walks_when_an_escape_exists() -> None:
     assert on.n_capped_walks == 0
     assert on.n_redrawn_walks >= 1
     # A walk that starts in the trap always caps, so "no capped walk left" means every kept walk
-    # started in the escape state. All 21 attempts landing in the trap has probability 2^-21 per
-    # walk, and the seed is fixed, so this cannot flake.
+    # started in the escape state. Every attempt caps with probability at least 1/2 (a start in
+    # the trap always does, and a start in the escape state can wander into it), so 21 capped
+    # attempts in a row are rare but not impossible; the seed is fixed, so this cannot flake.
     assert all(payload[0] == escape for payload in with_guard)

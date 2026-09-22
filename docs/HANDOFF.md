@@ -934,13 +934,18 @@ premakne za ~±0,1 okrog 27,8). Novo v tabeli sta torej tretji stolpec in blok b
 **Regresija ob ponovni meritvi maske (22. september 2026, PR #42):** iz commita `ca1eb7f` je
 bilo ponovno pognanih vseh 15 pogonov stolpca `port` (8,2 min) in ponovno ocenjenih vseh 15
 sintez izvirnika (5,2 min). Pri portu je vseh 420 že obstoječih vrednosti (15 pogonov × 28
-ključev brez časov) do zadnje decimalke enakih datoteki `results/privtrace_validation/port.json`
-iz PR #41; novi so samo trije ključi varovalke (`max_redraws` = 20, `n_capped_walks` = 0 in
-`n_redrawn_walks` = 0 v vseh 15 pogonih). Pri izvirniku je enakih vseh 315 vrednosti (15
-pogonov × 21 ključ), ker se koda ocenjevanja ni spremenila, ampak samo izpis tabele. Obe
-datoteki v `results/` zato ostaneta zapis iz PR #41 (`git_commit ef9811c`); zamenjan je samo
-`port_masked.json` (`git_commit ca1eb7f`). Cel paket — ponovna meritev z masko in obe
-regresiji — je tekel 21,7 min.
+ključev brez časov in poti do sinteze) do zadnje decimalke enakih datoteki
+`results/privtrace_validation/port.json` iz PR #41; novi so samo trije ključi varovalke
+(`max_redraws` = 20, `n_capped_walks` = 0 in `n_redrawn_walks` = 0 v vseh 15 pogonih). Pri
+izvirniku je enakih vseh 315 vrednosti (15 pogonov × 21 ključev brez časov in poti do sinteze),
+ker se koda ocenjevanja ni spremenila, ampak samo izpis tabele. Obe datoteki v `results/` zato
+ostaneta zapis iz PR #41 (`git_commit ef9811c`); izhoda obeh regresijskih pogonov nista shranjena
+v `results/`. Zamenjan je samo `port_masked.json` (`git_commit ca1eb7f`) skupaj s shranjenimi
+sintezami v `port_masked_synthesis/`: datoteke maske iz PR #41 so s tem prepisane (kopija je
+zunaj repozitorija), zato so številke tistega pogona, ki jih besedilo še navaja — 1.207 hoj do
+varovalke pri semenu 1, povprečna dolžina 21,6 stanja, delež samoprehodov 0,0039 — citirane iz
+preseženega zapisa in jih iz datotek na disku ni več mogoče ponoviti. Cel paket — ponovna
+meritev z masko in obe regresiji — je tekel 21,7 min.
 
 **Diagnostična tabela (ni del glavne primerjave):** kaj se z izvirnikom zgodi, če mu vzamemo
 tri pogoje »ALI« v adaptivnem pravilu (popravek `scripts/privtrace_reference_no_or.patch`,
@@ -1048,8 +1053,9 @@ Branje (merila kot pri LDPTrace, `docs/NACRT_LDPTRACE_VALIDACIJA.md` §6):
    izvirnik se premakne veliko manj (podpora 0,898 → 0,927, 0,831 → 0,873, 0,803 → 0,848;
    F1 0,164 → 0,254, 0,332 → 0,346, 0,386 → 0,342). Gostota, Kendall in potovanja se komaj
    premaknejo (potovanja so po konstrukciji enaka: berejo samo prvo in zadnjo celico).
-3. **Kaj ostane, ko mostove odmislimo: port je še vedno boljši, a ne »pri sedmih od
-   devetih«.** Brez mostov se ponovi sedem metrik in pri vseh sedmih je portovo povprečje
+3. **Kaj ostane, ko mostove odmislimo: port je še vedno boljši, a pri vzorčnih metrikah ne
+   toliko, kot je kazala tabela z mostovi.** Brez mostov se ponovi sedem metrik in pri vseh
+   sedmih je portovo povprečje
    pri vseh treh ε boljše od izvirnikovega; pri ε = 1 je prednost pri F1 tako majhna
    (0,352 [0,32; 0,39] proti 0,346 [0,31; 0,38]), da je znotraj razpona semen in je ne
    štejemo za razliko. Po enotnem merilu — ali se razpona čez pet semen prekrivata ali ne —
@@ -1102,8 +1108,9 @@ Branje (merila kot pri LDPTrace, `docs/NACRT_LDPTRACE_VALIDACIJA.md` §6):
    (0,043 proti 0,057 in 0,039 proti 0,048), vroče točke, Kendall (0,646 proti 0,614 in 0,667
    proti 0,641) in dolžino (0,108 in 0,106), poslabša pa poizvedbe po točkah (0,389 proti
    0,339 in 0,408 proti 0,327), premer (0,086 → 0,124 pri ε = 2) in podporo vzorcev z mostovi;
-   brez mostov sta portovi različici pri ε ≥ 1 pri vseh celičnih metrikah znotraj razpona
-   semen ena od druge, z dvema izjemama pri ε = 2, kjer je port po članku boljši zunaj razpona:
+   brez mostov sta portovi različici pri ε ≥ 1 pri vseh sedmih metrikah bloka brez mostov
+   znotraj razpona semen ena od druge, z dvema izjemama pri ε = 2, kjer je port po članku boljši
+   zunaj razpona:
    potovanja (0,484 [0,474; 0,490] proti 0,500 [0,497; 0,504]; ta metrika je z mostovi in brez
    njih enaka) in poizvedba po točkah (0,277 [0,233; 0,329] proti 0,369 [0,337; 0,393]); pri
    ε = 1 se tudi ta dva prekrivata (potovanja 0,503 [0,492; 0,513] proti 0,506 [0,496; 0,512],
