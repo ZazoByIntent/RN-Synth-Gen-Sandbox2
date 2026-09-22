@@ -5,44 +5,21 @@ doctoral project. This file is the constitution for the repo; read it every sess
 
 ## Status
 
-**All phases P0–P7 are implemented and merged; RN-LDP-Synth has a working v1
-prototype. The S4 campaign is measured on all three rungs of the sample ladder
-(20 / 50 / 182 users); the report reads from the 182-user reporting run of
-18–21 Aug 2026 (threshold 0.3, budget 1200 s). Measured values per rung and the
-list of open items: `docs/HANDOFF.md`. Protection-mechanism breadth per
-`docs/NACRT_MEHANIZMI.md`: ZM-1 LDPTrace is implemented (generator `ldptrace`,
-baseline candidate) and measured at the 20-user rung on 2 Sep 2026 (rows in
-`docs/HANDOFF.md` §2.3); its validation against the authors' code follows
-`docs/NACRT_LDPTRACE_VALIDACIJA.md` and is complete: PRs #33–#36 were merged into `main`
-on 4 Sep 2026 (merge commits, in the order 33 → 34 → 35 → 36). PR A (PR #33): the paper's
-nine utility metrics, `evaluation/ldptrace_metrics.py`. PR B1 (PR #34): cells
-representation and inputs (`TrajectoryView.sequence` / `as_sequence()`, `Grid.chain`, the
-`bbox` mode of `ldptrace`, the `ldptrace_dat` loader and the Porto conversion; 367,008
-Porto trajectories converted into `data/interim/porto/`, numbers in `docs/HANDOFF.md`
-§2.3). PR B2 (PR #35): orchestrator cells mode (`dataset.representation: cells`, no map or
-matching, membership inference only; `config/experiments/porto_cells_mia.yaml`; Porto
-membership inference measured at 2,000 trips, rows in `docs/HANDOFF.md` §2.3, run guide
-`docs/RUNNING.md` §9.2). PR C (PR #36): the Porto comparison run (harness
-`experiments/ldptrace_eval.py`, reference clone `2d30e41` patched only for a seed, 3 ε × 5
-seeds on both sides over all 367,008 trips; the port matches the reference within the seed
-spread and our metrics reproduce the reference's own printout to the digit — table in
-`docs/HANDOFF.md` §2.3, run guide `docs/RUNNING.md` §9.3, actual decisions
-`docs/NACRT_LDPTRACE_VALIDACIJA.md` §12.5).
-ZM-2 point LDP is implemented (mechanism `point_ldp`, `src/trajguard/privacy/point_ldp.py`;
-the orchestrator injects the map bbox into mechanism constructors that accept `bbox`) and
-measured at the 20-user rung on 4 Sep 2026 with `config/experiments/geolife_mech_reid_u20.yaml`
-(rows in `docs/HANDOFF.md` §2.3, actual decisions in `docs/NACRT_MEHANIZMI.md` §3).
-ZM-3 naive baselines are implemented (mechanisms `spatial_rounding`,
-`temporal_downsampling`, `gaussian_noise` in `src/trajguard/privacy/naive.py`, no formal
-guarantee) and measured at the 20-user rung on 4 Sep 2026 with the same config, nine
-arms next to the ZM-2 anchors (rows in `docs/HANDOFF.md` §2.3, actual decisions in
-`docs/NACRT_MEHANIZMI.md` §4). The DTW length-bias hypothesis raised by ZM-3 was checked
-on 4 Sep 2026 over the cached u20 pools and confirmed (`docs/HANDOFF.md` §2.5; the attack
-code is unchanged, a normalised attacker distance is an open author decision). Sibling
-configs for the 50- and 182-user rungs (`config/experiments/geolife_mech_reid_u50.yaml`,
-`geolife_mech_reid_u182.yaml`) exist and are not measured. ZM-4 PrivTrace is implemented (generator `privtrace`, `src/trajguard/synthesis/privtrace.py` + `adaptive_grid.py`; central DP, trusted curator, trajectory-level ε — an upper bound on utility, not a like-for-like competitor of the LDP arms) and measured at the 20-user rung on 20 Sep 2026 from the committed tree (`config/experiments/geolife_mech_mia_u20.yaml`, `run.json`: `git_commit b0a7dae`; rows in `docs/HANDOFF.md` §2.3; at this rung it degenerates to a noised first-order Markov model over 36 cells, as expected); the port follows the paper and its differential validation against the authors' unlicensed code (harness `experiments/privtrace_eval.py`, Porto 20,000 trips, K = 6, 3 ε × 5 seeds) is complete: PR #40 (the generator) was merged into `main` on 20 Sep 2026 with merge commit `5cb6c50` and PR #41 (the validation) with merge commit `e82e1fd`; the review follow-up is PR #42 (22 Sep 2026, branch `claude/zm4-review-followup`). The comparison has three columns — port, port with the optional D-4.6 adjacency mask, reference — and every run is scored twice, with and without king's-walk bridging. The ten findings of the independent review of 20 Sep 2026 were fixed on PR #41: the split gate now reads the noisy post-NormCut total, sampling and scoring share one uniform START fallback, the adjacency mask is available (off by default), every run is scored bridged and unbridged, and the reference was re-run once with its three OR conditions removed as a diagnostic. PR #42 closes the final-review items: the unbridged block now also tabulates the point query, so seven of the nine metrics are repeated without bridging (only the diameter and the length are computed from raw points and stay identical); a walk that reaches the `max_len` cap without drawing END is discarded and redrawn from the same stream, at most `max_redraws` = 20 times (deviation D-4.3, post-processing only, no walk of the unmasked port ever reaches the cap on Porto, and the harness records `max_redraws`, `n_capped_walks` and `n_redrawn_walks` per run); the `port_masked` column was therefore re-measured on 22 Sep 2026 (`git_commit ca1eb7f`, with the port and reference columns re-run as a regression and identical to the digit); the split-gate test is pinned; and these four documents are reconciled. Reading: both sides share the grid and the trend with ε and agree at ε = 2 on density, hot spots and Kendall within the seed spread; scored without bridging, the port's mean is better on all seven repeated metrics at every ε, and by the one criterion of whether the two ranges over the five seeds overlap its lead lies outside that spread on Kendall, trips, pattern support and the point query at every ε and on density and pattern F1 at ε = 0.5 and ε = 2 (at ε = 1 both just overlap), while hot spots stay inside the spread at every ε; the reference's shortfall at ε = 0.5 comes first from the second-order states its OR conditions force (shown), then from its first-order synthesis path (not isolated); the port's own weak point is length (deviation D-4.2, 30 % short noise-free), and with the redraw guard the masked variant at ε = 0.5 is better than, or within the seed spread of, the paper-faithful port on every metric. Table in `docs/HANDOFF.md` §2.3, run guide `docs/RUNNING.md` §9.4, actual decisions `docs/NACRT_MEHANIZMI.md` §5. Next: the shared comparison notebook (`docs/NACRT_MEHANIZMI.md` §1.6).**
-Whoever changes the project state (a new
-run, a closed item, a new component) updates this line in the same PR.
+- All phases P0–P7 are merged; RN-LDP-Synth has a working v1 prototype.
+- The S4 campaign is measured at all three rungs (20 / 50 / 182 users); the report
+  reads from the 182-user run of 18–21 Aug 2026. Numbers and open items:
+  `docs/HANDOFF.md`.
+- Protection mechanisms ZM-1 LDPTrace, ZM-2 point LDP, ZM-3 naive baselines and
+  ZM-4 PrivTrace are implemented, validated against the authors' code where one
+  exists (LDPTrace, PrivTrace), measured at the 20-user rung and merged into `main`
+  (last: PR #42, merge commit `90573b0`, 22 Sep 2026). Rows in `docs/HANDOFF.md`
+  §2.3, decisions in `docs/NACRT_MEHANIZMI.md`. The u50/u182 mechanism configs exist
+  and are not measured.
+- Next: the shared comparison notebook (`docs/NACRT_MEHANIZMI.md` §1.6).
+
+Whoever changes the project state updates these lines in the same PR. The history of
+PRs, merge commits and result interpretation lives only in `docs/HANDOFF.md`, never
+here.
 
 ## Doc map — read on demand, never all at once
 
@@ -131,20 +108,38 @@ question (a section, not the file). For a typical coding task this file plus
   no speculative abstraction beyond the seven ABCs.
 - Commits small and scoped. One phase = one branch = one PR.
 
+## Tool output budget
+
+Tool output is the largest consumer of context in this repo. Keep it small:
+
+- Run tests as `pytest -q`, never `-v`; on failure re-run only the failing test.
+- Pipe long output through `| tail -20` (or `Select-Object -Last 20`); never dump a
+  whole log, CSV or notebook into the conversation.
+- Long experiments run detached in the background; the session reads only `run.json`
+  and the last lines of the log when they finish.
+- Look at `git diff --stat` first and open the full diff only for the files you need.
+
 ## Definition of done (applies to every task)
 
 1. `ruff check` and `mypy` are clean.
 2. A test exists and passes against the `tests/` fixture (~20 trajectories);
    the whole suite runs in seconds.
-3. You **show the evidence**: paste the exact command you ran and its output.
-   Do not assert "it works" — prove it with the test output or a small run.
+3. You **show the evidence**: paste the exact command you ran and the last ~10 lines
+   of its output. Do not assert "it works" — prove it with the test summary or a small
+   run, but do not paste the full log.
 
 ## How to work in this repo
 
 - Start any non-trivial task in **plan mode**. Show the plan, wait for my approval
   before editing files.
 - Use a **subagent** for research-heavy reading (e.g. how a library expects input),
-  so the main context stays clean.
+  so the main context stays clean. Every subagent is a fresh `general-purpose` agent,
+  never a `fork` (a fork inherits and re-bills the whole session context). Paste the
+  few lines of docs it needs into its prompt instead of pointing it at a file, and ask
+  it to return a short summary, the list of changed files and the last 10 lines of
+  the test output, not full tool output.
+- For a larger task in the orchestrator / implementer / reviewer setup, invoke the
+  `orchestrate` skill; it carries the full recipe so it costs nothing in other sessions.
 - If a task would touch more than ~5 files or mixes concerns, **stop and propose a
   split** instead of doing it all at once.
 - Prefer editing existing files over creating new ones unless the design calls for a
