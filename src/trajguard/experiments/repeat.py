@@ -10,9 +10,15 @@ bootstrap CI, which measures resampling uncertainty *within* a single run.
 Deliberately a thin harness around :func:`run_experiment` (like
 ``experiments.rnldp_eval``): no orchestrator changes, no new dependencies —
 the t critical values come from a small built-in table instead of scipy.
+
+``repetitions.csv`` carries the run provenance columns ``exp_id`` and
+``config_hash`` (read back from each repetition's ``run.json``) so that the file
+identifies its own experiment when a comparison notebook reads several of them
+together.
 """
 
 import csv
+import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -48,6 +54,19 @@ _T_975 = {
     60: 2.000,
     120: 1.980,
 }
+
+# Header of ``repetitions.csv``. The two run-provenance columns come first,
+# mirroring ``results.csv``; files written before 22 Sep 2026 lack them.
+REPETITIONS_COLUMNS: tuple[str, ...] = (
+    "exp_id",
+    "config_hash",
+    "result_id",
+    "metric",
+    "n_repetitions",
+    "mean",
+    "ci_low",
+    "ci_high",
+)
 
 
 def t_ppf_975(df: int) -> float:
@@ -113,15 +132,41 @@ def run_repetitions(config_path: str | Path, seeds: Sequence[int]) -> list[Repet
         rep = replace(cfg, seed=seed, output_dir=cfg.output_dir / f"seed{seed}")
         values_by_seed[seed] = run_experiment(rep)
     summaries = aggregate(values_by_seed)
-    _write_csv(summaries, cfg.output_dir / "repetitions.csv")
+    exp_id, config_hash = read_run_provenance(cfg.output_dir, seeds)
+    _write_csv(summaries, cfg.output_dir / "repetitions.csv", exp_id, config_hash)
     return summaries
 
 
-def _write_csv(summaries: Sequence[RepetitionSummary], path: Path) -> None:
-    """Write the aggregate as CSV; None fields become blank cells."""
+def read_run_provenance(output_dir: Path, seeds: Sequence[int]) -> tuple[str, str]:
+    """Read ``(exp_id, config_hash)`` from every seed's ``run.json``; all seeds must agree."""
+    found: dict[int, tuple[str, str]] = {}
+    for seed in seeds:
+        path = output_dir / f"seed{seed}" / "run.json"
+        if not path.is_file():
+            raise ValueError(f"seed{seed} wrote no run.json, expected at {path}")
+        run = json.loads(path.read_text())
+        missing = [k for k in ("exp_id", "config_hash") if run.get(k) is None]
+        if missing:
+            raise ValueError(f"seed{seed} run.json lacks {', '.join(missing)}: {path}")
+        found[seed] = (str(run["exp_id"]), str(run["config_hash"]))
+    distinct = set(found.values())
+    if len(distinct) != 1:
+        detail = ", ".join(f"seed{seed}={pair}" for seed, pair in sorted(found.items()))
+        raise ValueError(
+            f"repetitions of one experiment must share exp_id and config_hash; got {detail}"
+        )
+    return next(iter(distinct))
+
+
+def _write_csv(
+    summaries: Sequence[RepetitionSummary], path: Path, exp_id: str, config_hash: str
+) -> None:
+    """Write the aggregate as CSV, provenance on every row; None fields become blank cells."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["result_id", "metric", "n_repetitions", "mean", "ci_low", "ci_high"])
+        writer.writerow(REPETITIONS_COLUMNS)
         for s in summaries:
-            writer.writerow([s.result_id, s.metric, s.n, s.mean, s.ci_low, s.ci_high])
+            writer.writerow(
+                [exp_id, config_hash, s.result_id, s.metric, s.n, s.mean, s.ci_low, s.ci_high]
+            )
