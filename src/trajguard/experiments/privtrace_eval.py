@@ -40,7 +40,9 @@ matches ``ldptrace_metrics.sample_points``.
 **Scoring.** Both sides are mapped onto one uniform ``n × n`` evaluation grid (default
 20 × 20) over :func:`reference_bbox`, which is independent of either adaptive grid, and scored
 with the same nine metrics: cell chains for the cell metrics, the raw GPS points of the real
-side and the sampled synthetic points for the length, diameter and point-query metrics.
+side against the sampled synthetic points for the length and diameter errors, and, for the
+point query, one uniform point per cell of the *real* chains against those same synthetic
+points.
 
 Every run is scored **twice**, because the two passes disagree about what a walk that jumps
 between far-apart cells is worth:
@@ -50,6 +52,16 @@ between far-apart cells is worth:
    king's walk, so a jump is charged as the whole line of cells it flies over;
 2. *unbridged* (the same nine values under ``nobridge_<name>``) — :func:`points_to_cell_sequences`
    keeps only the cells the trajectory's own points fall in, so a jump is charged as one step.
+
+Seven of the nine values move between the two passes: the six metrics that read cell chains,
+plus the point query, whose real side is one uniform point drawn per cell of the *real* chains
+(``ldptrace_metrics.evaluate``), so a real side with fewer cells gives a different real sample
+(and, because the same ``rng`` draws that sample before the 200 query centres, a shifted set of
+centres as well -- within one pass every column still sees the same real sample and centres).
+Only the length and diameter errors are identical in both passes, because they read the raw
+real points and the synthetic points and never see a chain; all nine unbridged values are
+stored, but only the seven that can move (:data:`NOBRIDGE_METRICS`) are summarized and
+tabulated, and those two are not repeated.
 
 The port's Algorithm 1 has no adjacency constraint, so its walks jump often and bridging turns
 those jumps into long straight runs of cells that no point ever visited: on Porto 20 000 trips
@@ -70,6 +82,9 @@ no comparable contract — it is matched in distribution across seeds, not draw 
 
 Output: one JSON per side (``runs[epsilon][seed]``) and a console table with mean and range
 over seeds; ``--compare A.json B.json`` prints the two-column Markdown table for the handoff.
+Every port run also records ``max_redraws``, ``n_capped_walks`` and ``n_redrawn_walks``, which
+measure how often the D-4.3 walk-length cap bound (it matters for the masked port at
+ε = 0.5); they stay in the JSON and are deliberately not table rows.
 Nothing here is registered or wired into the orchestrator.
 
 CLI::
@@ -127,13 +142,15 @@ EXTEND_RATIO = 1e-5  # reference Grid.extend_ratio: bbox = data min/max ± ratio
 COORD_DECIMALS = 6  # the reference writes and reads six decimals
 _EXTRA_ROWS = ("n_states", "n_second_order", "synthetic_mean_length")  # port-only table rows
 
-# The six metrics that read cell chains and therefore change when the king's-walk bridging is
-# removed. ``length_error`` and ``diameter_error`` read points only, and ``point_query_avre``
-# moves only because the real side's per-cell sampling follows the real chains; all nine are
-# stored under ``nobridge_*`` but only these six are tabulated.
+# The seven metrics that move when the king's-walk bridging is removed: the six that read cell
+# chains, plus ``point_query_avre``, whose real side is one uniform point per cell of the real
+# chains and therefore changes with them. Only ``length_error`` and ``diameter_error`` are
+# identical in both passes, because they read the raw real points and the synthetic points; all
+# nine are stored under ``nobridge_*`` but only these seven are summarized and tabulated.
 NOBRIDGE_METRICS: tuple[str, ...] = (
     "density_error",
     "hotspot_query_error",
+    "point_query_avre",
     "coverage_kendall_tau",
     "trip_error",
     "pattern_f1",
@@ -305,8 +322,11 @@ def run_synthesis(
     on the raw points, ``len(raw_points)`` synthetic walks, one uniform point per leaf state,
     then :func:`evaluate` against the same real points. Scoring runs twice, once on the bridged
     chains (the nine plain keys) and once on the unbridged cell sequences (``nobridge_<name>``,
-    see the module docstring); ``interpolated_share`` records how much of the synthetic side's
-    bridged chains was inserted by the king's walk. ``generator_kwargs`` reach the generator
+    all nine stored, seven of them different — the six chain metrics plus the point query, whose
+    real side is sampled per cell of the real chains; see the module docstring);
+    ``interpolated_share`` records how much of the synthetic side's bridged chains was inserted
+    by the king's walk, and ``max_redraws`` / ``n_capped_walks`` / ``n_redrawn_walks`` record how
+    often the generator's walk-length cap bound. ``generator_kwargs`` reach the generator
     unchanged (e.g. ``mask_non_adjacent=True``). ``save_dir`` (optional) receives
     ``syn_<label>_eps_<ε>_seed_<s>.txt`` in the reference's text format.
     """
@@ -364,6 +384,9 @@ def run_synthesis(
                 "max_kappa": max(gen.grid.kappa),
                 "stage_epsilons": [float(e) for e in gen.stage_epsilons],
                 "n_synthetic": len(payloads),
+                "max_redraws": int(gen.max_redraws),
+                "n_capped_walks": int(gen.n_capped_walks),
+                "n_redrawn_walks": int(gen.n_redrawn_walks),
                 "synthetic_mean_length": float(np.mean([len(p) for p in payloads])),
                 "synthetic_mean_points": float(np.mean([len(p) for p in syn_points])),
                 "fit_s": round(t1 - t0, 3),
@@ -449,8 +472,11 @@ def summarize(
 
     The metric part is ``ldptrace_eval.summarize``; the extra rows (state counts, mean walk
     length) exist on the port side only and are summarized the same way. The unbridged pass is
-    summarized too — ``nobridge_<name>`` for the six chain metrics of :data:`NOBRIDGE_METRICS`
-    and ``interpolated_share`` — for every epsilon whose records carry them.
+    summarized too — ``nobridge_<name>`` for the seven metrics of :data:`NOBRIDGE_METRICS` that
+    bridging can move (the six chain metrics plus the point query, whose real side is sampled
+    per cell of the real chains) and ``interpolated_share`` — for every epsilon whose records
+    carry them. The unbridged length and diameter errors are stored but not summarized: they
+    read the raw real points and the synthetic points, so they equal the bridged values.
     """
     out = _metric_summary(runs)
     for eps, by_seed in runs.items():
@@ -477,9 +503,12 @@ def compare_table(
 
     Same layout as ``ldptrace_eval.compare_table`` — cells are ``mean [min; max]`` over seeds,
     the bare mean when all seeds agree — with the port-only ``extra_rows`` appended per
-    epsilon instead of LDPTrace's ``l_k``, and after them the no-bridge block: the six
-    ``nobridge_<name>`` rows of :data:`NOBRIDGE_METRICS` and ``interpolated_share``. A side
-    that has no value for a row shows ``—``; a row no side has is left out.
+    epsilon instead of LDPTrace's ``l_k``, and after them the no-bridge block: the seven
+    ``nobridge_<name>`` rows of :data:`NOBRIDGE_METRICS` and ``interpolated_share``. Those are
+    the seven metrics bridging can move (the six chain metrics plus the point query, whose real
+    side is sampled per cell of the real chains); the unbridged length and diameter errors equal
+    their bridged values and are not repeated. A side that has no value for a row shows ``—``;
+    a row no side has is left out.
     """
     if not results:
         raise ValueError("compare_table needs at least one result")

@@ -23,14 +23,19 @@ Algorithm 1): the first state is drawn from the noisy START row, and every furth
 the ``[previous, next]`` row of the current state when that state has a second-order matrix
 whose row for this predecessor carries mass, and its first-order row otherwise. The walk stops
 when the virtual END is drawn, when it reaches ``max_len`` states, or when the row it would
-sample from has no mass left at all. The payload is that state sequence -- state ids, no
-coordinates: the benchmark scores states, so the reference's last step, one random point drawn
-inside each leaf rectangle, is left out. Scoring an input sequence (the membership-inference
-hook) multiplies exactly those factors -- START to the first state, one per step under the same
-adaptive rule, the last state to END -- each floored at 1e-12 so an unseen step costs a finite
-penalty instead of minus infinity, and adds no length term. When NormCut has emptied the START
-row, both paths fall back to the same uniform start over the ``m`` real states
-(:meth:`PrivTraceGenerator._start_probabilities`), so a walk and its score always agree.
+sample from has no mass left at all; a walk that reaches ``max_len`` without having drawn END is
+discarded and redrawn, at most ``max_redraws`` times (D-4.3). The payload is that state
+sequence -- state ids, no coordinates: the benchmark scores states, so the reference's last
+step, one random point drawn inside each leaf rectangle, is left out. Scoring an input sequence
+(the membership-inference hook) multiplies exactly those factors -- START to the first state,
+one per step under the same adaptive rule, the last state to END -- each floored at 1e-12 so an
+unseen step costs a finite penalty instead of minus infinity, and adds no length term. When
+NormCut has emptied the START row, both paths fall back to the same uniform start over the
+``m`` real states (:meth:`PrivTraceGenerator._start_probabilities`), so the start factor of a
+walk and of its score always agrees. That agreement is for the start only: a walk that stops at
+a dead end or at the ``max_len`` cap is scored with an END factor it never drew (the dead end's
+is floored at 1e-12), and a walk kept after the redraws of D-4.3 was conditioned on not hitting
+the cap, which the score does not model.
 
 **Trust model.** PrivTrace assumes a TRUSTED CURATOR who sees every raw trajectory; the
 guarantee is trajectory-level eps-differential privacy (neighbouring databases differ in one
@@ -64,13 +69,18 @@ Two input modes, chosen by the constructor (exactly one of ``network`` / ``bbox`
 
 Deviations from the paper, all deliberate:
 
-- **D-4.1 (grid).** The subdivision rule is the reference code's
-  ``kappa_i = ceil(sqrt(d_i / split_scale))`` behind a five-per-cent gate, because the paper
-  states its own ``kappa`` formula twice and the two versions disagree by a factor of 1000
-  (see :mod:`trajguard.synthesis.adaptive_grid`). The cap ``max_sub_k`` is ours -- without it
-  one dense cell can blow up the state count and the quadratic work that follows.
+- **D-4.1 (grid, and what the split gate may read).** The subdivision rule is the reference
+  code's ``kappa_i = ceil(sqrt(d_i / split_scale))`` behind a five-per-cent gate, because the
+  paper states its own ``kappa`` formula twice and the two versions disagree by a factor of
+  1000 (see :mod:`trajguard.synthesis.adaptive_grid`). The cap ``max_sub_k`` is ours -- without
+  it one dense cell can blow up the state count and the quadratic work that follows.
   ``first_level_k`` is a plain parameter instead of the paper's ``K = sqrt(|D| / c)`` with a
-  hand-chosen per-dataset ``c``.
+  hand-chosen per-dataset ``c``. The paper is **silent** on where the ``|D|`` in the split gate
+  comes from -- the gate itself is the reference code's rule, and the reference reads the true
+  ``|D|`` there -- so this port feeds the gate the sum of the noisy post-NormCut level-1 vector
+  instead. That sum is pure post-processing of the stage-1 release (NormCut preserves the total
+  whenever the positive mass covers the negative), so nothing un-noised is read after stage 1
+  and the port still spends exactly ``eps1 + eps2 + eps3``.
 - **D-4.2 (no trip solver).** The paper calibrates a start/end trip distribution with a
   least-squares program over all state pairs; this port samples the start from the noisy START
   row instead. The paper itself discards the sampled end ("lambda_end will not be used"), so
@@ -81,27 +91,35 @@ Deviations from the paper, all deliberate:
   length bias. Measured on Porto (20 000 trips, ``K = 6``, effectively noise-free
   ``eps = 1e4``): the real trips have 12.0 collapsed states on average, this port's walks 8.6,
   about 30 per cent short. A trip solver or an explicit length model is an open item.
-- **D-4.3 (walk cap).** A generated walk is capped at ``max_len`` states instead of running
-  until the virtual END happens to be drawn.
-- **D-4.4 (states from the network; what the split gate may read).** In network mode the states
-  come from the public road network's node coordinates, consecutive duplicates are collapsed
-  and gaps are not bridged.
-  ``first_level_k`` is a public parameter. The paper is **silent** on where the ``|D|`` in the
-  split gate comes from -- the gate itself is the reference code's rule, and the reference
-  reads the true ``|D|`` there -- so this port feeds the gate the sum of the noisy
-  post-NormCut level-1 vector instead. That sum is pure post-processing of the stage-1
-  release (NormCut preserves the total whenever the positive mass covers the negative), so
-  nothing un-noised is read after stage 1 and the port still spends exactly
-  ``eps1 + eps2 + eps3``.
+- **D-4.3 (walk cap, with a redraw guard).** A generated walk is capped at ``max_len`` states
+  instead of running until the virtual END happens to be drawn. A walk that reaches the cap
+  without ever drawing END is discarded and redrawn from the same random stream, at most
+  ``max_redraws`` times (default 20); if every redraw is capped as well, the last one is kept,
+  and after a :meth:`PrivTraceGenerator.generate` call ``n_capped_walks`` and
+  ``n_redrawn_walks`` report how often that happened. The guard reads no data and spends no
+  budget -- it is post-processing of the released model -- and it applies with and without the
+  D-4.6 mask; what it does change is that the emitted walks are conditioned on not hitting the
+  cap, which scoring does not model. The motive is the mask: under D-4.6 at ``eps = 0.5`` on
+  Porto (20 000 trips) 1207 of the 20 000 walks on seed 1 ran to the cap of 200 states, because
+  a masked row can lose its END mass and keep only a few allowed successors, so the walk
+  circles its own neighbourhood. Without the mask no walk on Porto reaches the cap at any
+  ``eps``, so the paper-faithful port is left unchanged by the guard.
+- **D-4.4 (states from the network).** In network mode the states come from the public road
+  network's node coordinates, consecutive duplicates are collapsed and gaps are not bridged.
 - **D-4.6 (adjacency mask, off by default).** With ``mask_non_adjacent=True`` a transition
   between two real states whose level-1 cells are neither the same nor 4-adjacent (Manhattan
   distance of their level-1 row/column positions above 1) is treated as impossible and zeroed
   together with the structural zeros -- after the Laplace noise and before NormCut, in the
   first-order matrix and in every second-order matrix. This is the reference code's adjacency
   rule (``large_neighbor_or_same_by_subcell_index``) turned into post-processing over the
-  public grid geometry: it consumes no random draws and reads no data, so the spent budget is
-  unchanged. It is **off** by default because the paper's Algorithm 1 has no adjacency
-  constraint; the validation harness measures both variants.
+  public grid geometry: it adds no random draws of its own and reads no data, so the spent
+  budget is unchanged; but because it lands before NormCut and before the selection rule, the
+  set of second-order states and with it the number of stage-3 Laplace matrices can differ from
+  the unmasked fit (5.4 against 4.2 selected states on Porto 20 000 trips at ``eps = 2``). The
+  stage still spends ``eps3`` once whatever that count, because one trajectory contributes
+  weight 1 across all second-order matrices together. It is **off** by default because the
+  paper's Algorithm 1 has no adjacency constraint; the validation harness measures both
+  variants.
 
 Places where the authors' public code (github.com/DpTrace/PrivTrace, **no licence**, not used
 here) deviates from the paper and this port does **not** follow it: ``K`` derived from the raw
@@ -258,6 +276,7 @@ class PrivTraceGenerator(SyntheticGenerator):
         budget_split: tuple[float, float, float] = (0.2, 0.4, 0.4),
         theta2: float = 5.0,
         max_len: int = 200,
+        max_redraws: int = 20,
         mask_non_adjacent: bool = False,
         seed: int = 0,
     ) -> None:
@@ -280,6 +299,8 @@ class PrivTraceGenerator(SyntheticGenerator):
             raise ValueError(f"theta2 must be > 0, got {theta2}")
         if max_len < 1:
             raise ValueError(f"max_len must be >= 1, got {max_len}")
+        if max_redraws < 0:
+            raise ValueError(f"max_redraws must be >= 0, got {max_redraws}")
 
         self.epsilon = float(epsilon)
         self.first_level_k = int(first_level_k)
@@ -288,6 +309,7 @@ class PrivTraceGenerator(SyntheticGenerator):
         self.max_sub_k = int(max_sub_k)
         self.theta2 = float(theta2)
         self.max_len = int(max_len)
+        self.max_redraws = int(max_redraws)
         self.mask_non_adjacent = bool(mask_non_adjacent)
         self.seed = seed
         w1, w2, w3 = (float(share) for share in budget_split)
@@ -308,6 +330,7 @@ class PrivTraceGenerator(SyntheticGenerator):
             "budget_split": list(self.budget_split),
             "theta2": self.theta2,
             "max_len": self.max_len,
+            "max_redraws": self.max_redraws,
             "mask_non_adjacent": self.mask_non_adjacent,
             "seed": seed,
         }
@@ -327,6 +350,9 @@ class PrivTraceGenerator(SyntheticGenerator):
         self.second_order_states: tuple[int, ...] = ()
         self._order1 = np.zeros((0, 0))
         self._order2: dict[int, np.ndarray] = {}
+        # D-4.3 bookkeeping of the last generate() call; both are reset there.
+        self.n_capped_walks = 0
+        self.n_redrawn_walks = 0
 
     # -- public geometry ----------------------------------------------------------------
 
@@ -411,7 +437,7 @@ class PrivTraceGenerator(SyntheticGenerator):
 
         # Stage 1 (eps1): length-normalised level-1 densities, noised, repaired, subdivided.
         # The split gate is measured against the sum of the noisy vector, not against the true
-        # trajectory count: post-processing of the stage-1 release only (D-4.4).
+        # trajectory count: post-processing of the stage-1 release only (D-4.1).
         density = level1_density(points, self.bbox, k)
         noisy_density = normcut(density + self._rng.laplace(0.0, 1.0 / eps1, k * k))
         self.grid = AdaptiveGrid.build(
@@ -560,22 +586,47 @@ class PrivTraceGenerator(SyntheticGenerator):
 
         The payload is the leaf-state sequence itself; states are not decoded back to
         coordinates (see the module docstring, "Synthesis and scoring").
+
+        D-4.3's redraw guard: a walk that runs into the ``max_len`` cap without ever drawing END
+        is discarded and drawn again from the same stream, at most ``max_redraws`` times; the
+        last attempt is kept even when it is capped too. The call resets
+        :attr:`n_redrawn_walks`, the number of walks it discarded, and :attr:`n_capped_walks`,
+        the number of returned walks that are still capped.
         """
         if not self._fitted:
             raise RuntimeError("PrivTraceGenerator.generate called before fit()")
         rng = np.random.default_rng(seed)
         ph = params_hash({**self._params, "generate_seed": seed})
+        self.n_capped_walks = 0
+        self.n_redrawn_walks = 0
         return [
             SyntheticTrajectory(
                 syn_id=f"privtrace/{seed}/{i}",
                 generator_id="privtrace",
                 params_hash=ph,
-                payload=tuple(self._sample_walk(rng)),
+                payload=tuple(self._sample_walk_with_redraws(rng)),
                 trained_on_split="train",
                 map_id=self._map_id,
             )
             for i in range(n)
         ]
+
+    def _sample_walk_with_redraws(self, rng: np.random.Generator) -> list[int]:
+        """One walk under D-4.3: redraw while it hits the cap, at most ``max_redraws`` times.
+
+        Every attempt draws from the same ``rng`` in turn, so with ``max_redraws = 0`` -- and
+        whenever no attempt hits the cap -- the sequence of random draws is exactly the one
+        :meth:`_sample_walk` produces on its own. The two counters are updated in place.
+        """
+        walk = self._sample_walk(rng)
+        for _ in range(self.max_redraws):
+            if len(walk) < self.max_len:
+                return walk
+            self.n_redrawn_walks += 1
+            walk = self._sample_walk(rng)
+        if len(walk) >= self.max_len:
+            self.n_capped_walks += 1
+        return walk
 
     def _sample_walk(self, rng: np.random.Generator) -> list[int]:
         """Start ~ the noisy START row, then adaptive steps until END, ``max_len`` or a dead end.

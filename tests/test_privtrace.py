@@ -416,6 +416,8 @@ def test_constructor_rejects_bad_arguments(fixture_network: RoadNetwork) -> None
     with pytest.raises(ValueError):
         PrivTraceGenerator(bbox=BBOX, max_len=0)
     with pytest.raises(ValueError):
+        PrivTraceGenerator(bbox=BBOX, max_redraws=-1)
+    with pytest.raises(ValueError):
         PrivTraceGenerator(bbox=(0.0, 0.0, 10.0))  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         PrivTraceGenerator(bbox=(0.0, 0.0, 0.0, 20.0))  # degenerate span
@@ -640,14 +642,45 @@ def test_generate_ids_and_params_hash_carry_the_generate_seed(fitted: PrivTraceG
     assert one[0].params_hash != two[0].params_hash
 
 
+def test_max_redraws_enters_the_params_hash_and_the_counters_start_at_zero() -> None:
+    """The D-4.3 knob is part of the recorded parameters, so two settings are two arms."""
+    off = PrivTraceGenerator(bbox=BBOX, epsilon=50.0, first_level_k=2, max_redraws=0, seed=3)
+    on = PrivTraceGenerator(bbox=BBOX, epsilon=50.0, first_level_k=2, max_redraws=20, seed=3)
+    assert off._params["max_redraws"] == 0
+    assert on._params["max_redraws"] == 20
+    assert (off.n_capped_walks, off.n_redrawn_walks) == (0, 0)  # nothing generated yet
+    assert (on.n_capped_walks, on.n_redrawn_walks) == (0, 0)
+    off.fit_points(_bbox_points())
+    on.fit_points(_bbox_points())
+    assert off.generate(1, seed=1)[0].params_hash != on.generate(1, seed=1)[0].params_hash
+
+
 def test_walks_stop_at_max_len(
     fixture_network: RoadNetwork, train_views: list[TrajectoryView]
 ) -> None:
-    gen = PrivTraceGenerator(fixture_network, epsilon=_BIG_EPS, first_level_k=4, max_len=3, seed=11)
+    # max_redraws=0 switches the D-4.3 redraw guard off, so a capped walk is returned as it is
+    # and the assertion below is still about the cap and not about the guard.
+    gen = PrivTraceGenerator(
+        fixture_network, epsilon=_BIG_EPS, first_level_k=4, max_len=3, max_redraws=0, seed=11
+    )
     gen.fit(train_views)
     lengths = [len(syn.payload) for syn in gen.generate(20, seed=6)]
     assert min(lengths) >= 1
     assert max(lengths) == 3  # the cap binds: the same fit runs to 10 states uncapped
+
+
+def test_max_redraws_zero_returns_capped_walks_and_counts_them(
+    fixture_network: RoadNetwork, train_views: list[TrajectoryView]
+) -> None:
+    """With the guard off the old semantics hold: the capped walk is kept, nothing is redrawn."""
+    gen = PrivTraceGenerator(
+        fixture_network, epsilon=_BIG_EPS, first_level_k=4, max_len=3, max_redraws=0, seed=11
+    )
+    gen.fit(train_views)
+    payloads = [syn.payload for syn in gen.generate(20, seed=6)]
+    assert gen.n_redrawn_walks == 0
+    assert gen.n_capped_walks == sum(len(payload) == 3 for payload in payloads)
+    assert gen.n_capped_walks > 0  # measured: 10 of the 20 walks run into the cap of 3 states
 
 
 def test_high_epsilon_walks_follow_the_training_structure(
@@ -781,6 +814,8 @@ def test_constructor_signature_matches_the_orchestrator_injection(
     assert gen.seed == 7 and gen.epsilon == 2.0 and gen.bbox[0] < gen.bbox[2]
     bound_mask = signature.bind_partial(mask_non_adjacent=True)  # the D-4.6 YAML switch binds
     assert bound_mask.arguments == {"mask_non_adjacent": True}
+    bound_redraws = signature.bind_partial(max_redraws=5)  # and so does the D-4.3 knob
+    assert bound_redraws.arguments == {"max_redraws": 5}
 
 
 # --- Noise accounting, the empty START row, the dead end and the D-4.6 mask -------------
@@ -816,12 +851,15 @@ def _hub_points(n: int = 90, seed: int = 20260920) -> list[np.ndarray]:
     ]
 
 
-def _hub_generator(mask_non_adjacent: bool = False, seed: int = 4) -> PrivTraceGenerator:
+def _hub_generator(
+    mask_non_adjacent: bool = False, seed: int = 4, max_redraws: int = 20
+) -> PrivTraceGenerator:
     """A fitted bbox-mode generator over :func:`_hub_points`, optionally under the D-4.6 mask."""
     gen = PrivTraceGenerator(
         bbox=BBOX,
         epsilon=_HUB_EPS,
         first_level_k=_HUB_K,
+        max_redraws=max_redraws,
         mask_non_adjacent=mask_non_adjacent,
         seed=seed,
     )
@@ -999,6 +1037,81 @@ def test_the_fitted_grid_is_the_gate_applied_to_the_noisy_total() -> None:
     assert float(noisy.sum()) != float(len(points))
 
 
+class _OneSpikeLaplace:
+    """Stand-in for the generator's ``Generator``: one huge stage-1 spike, then no noise at all.
+
+    The first ``laplace`` call -- the level-1 density of stage 1 -- returns ``amount`` in cell
+    ``cell`` and 0 everywhere else; every later call (the stage-2 matrix and the stage-3
+    matrices) returns zeros of the requested shape. The size is read the way
+    :class:`_LaplaceRecorder` reads it, so both positional and keyword calls work.
+    """
+
+    def __init__(self, cell: int, amount: float, size: int) -> None:
+        self.spike = np.zeros(size, dtype=np.float64)
+        self.spike[cell] = amount
+        self.calls = 0
+
+    def laplace(self, *args: Any, **kwargs: Any) -> np.ndarray:
+        self.calls += 1
+        if self.calls == 1:
+            return self.spike.copy()
+        size = kwargs["size"] if "size" in kwargs else args[2]
+        return np.zeros(size, dtype=np.float64)
+
+
+def test_the_split_gate_on_the_noisy_total_splits_a_different_cell_than_the_true_count() -> None:
+    """D-4.1 pinned on a stubbed noise draw, where the two candidate gates disagree.
+
+    The hub fixture has true level-1 densities 30 in cell 4, 10 in cells 0, 1, 3, 5, 7, 8 and 0
+    in cells 2 and 6, total 90. The stub adds +9000 to cell 2 alone, so the released vector sums
+    to 9090 and NormCut leaves it untouched (nothing is negative). With ``split_scale = 1``:
+
+    * the gate this port uses reads the noisy total, ``0.05 * 9090 / 9 = 50.5``, so only the
+      spike passes it and ``kappa[2] = min(ceil(sqrt(9000)), max_sub_k = 8) = 8`` while cell 4
+      (density 30) stays unsplit;
+    * the reference's gate reads the true trajectory count, ``0.05 * 90 / 9 = 0.5``, which
+      every non-empty cell passes: cell 4 would be split ``ceil(sqrt(30)) = 6`` ways.
+
+    So the grid below is only reachable through the noisy total, and the old rule would fail.
+    """
+    points = _hub_points()
+    gen = PrivTraceGenerator(
+        bbox=BBOX,
+        epsilon=_HUB_EPS,
+        first_level_k=_HUB_K,
+        split_scale=1.0,
+        seed=4,
+    )
+    stub = _OneSpikeLaplace(2, 9000.0, _HUB_K * _HUB_K)
+    gen._rng = stub  # type: ignore[assignment]
+    gen.fit_points(points)
+
+    noisy = normcut(level1_density(points, BBOX, _HUB_K) + stub.spike)
+    assert float(noisy.sum()) == pytest.approx(9090.0)
+    assert gen.grid.kappa[4] == 1  # the dense-in-truth hub does not pass the noisy gate
+    assert gen.grid.kappa[2] == 8  # the spike does, and its kappa is clamped to max_sub_k
+    assert gen.grid == AdaptiveGrid.build(
+        BBOX,
+        _HUB_K,
+        noisy,
+        float(noisy.sum()),
+        split_scale=1.0,
+        split_gate=gen.split_gate,
+        max_sub_k=gen.max_sub_k,
+    )
+    would_have_been = AdaptiveGrid.build(
+        BBOX,
+        _HUB_K,
+        noisy,
+        total_density=float(len(points)),
+        split_scale=1.0,
+        split_gate=gen.split_gate,
+        max_sub_k=gen.max_sub_k,
+    )
+    assert would_have_been.kappa[4] == 6  # what a gate on the true count would have done
+    assert gen.grid != would_have_been
+
+
 def test_the_adjacency_mask_zeroes_every_non_adjacent_transition() -> None:
     """D-4.6: only same-or-4-adjacent level-1 steps keep their mass; the virtual ones survive."""
     masked = _hub_generator(mask_non_adjacent=True)
@@ -1039,3 +1152,76 @@ def test_walks_under_the_mask_never_leave_the_level1_neighbourhood() -> None:
     ]
     assert len(steps) >= 100  # measured: 439 steps over the 200 walks
     assert all(_level1_distance(masked.grid, a, b) <= 1 for a, b in steps)
+
+
+# --- D-4.3: the redraw guard on walks that run into the max_len cap ----------------------
+
+
+def _absorbing_hub(max_redraws: int) -> tuple[PrivTraceGenerator, int, int]:
+    """A hub fit with one real state turned into a trap, plus that state and an escape state.
+
+    The trap keeps all of its outgoing mass on itself, so it can never draw END and a walk that
+    enters it runs to ``max_len`` whatever the seed. The escape state carries END mass and has
+    no second-order matrix, chosen exactly as the dead-end test chooses its target. Neither
+    change is a fit: they edit the released matrices so the guard has something to bite on.
+    """
+    gen = _hub_generator(max_redraws=max_redraws)
+    m = gen.n_states
+    end = m + 1
+    trap = 0
+    escape = next(
+        s for s in range(m) if s != trap and s not in gen._order2 and gen._order1[s, end] > 0.0
+    )
+    gen._order1[trap, :] = 0.0
+    gen._order1[trap, trap] = 1.0
+    gen._order2.pop(trap, None)
+    return gen, trap, escape
+
+
+def test_the_redraw_guard_leaves_the_draws_alone_when_no_walk_caps() -> None:
+    """On a fit where nothing reaches the cap the guard is invisible, down to the payloads."""
+    off = _hub_generator(max_redraws=0)
+    on = _hub_generator(max_redraws=20)
+    without = [syn.payload for syn in off.generate(50, seed=17)]
+    with_guard = [syn.payload for syn in on.generate(50, seed=17)]
+    # Measured: the longest of the 50 walks has 3 states against a cap of 200, so the guard
+    # never fires and both streams stay in step, draw for draw.
+    assert without == with_guard
+    assert (off.n_capped_walks, off.n_redrawn_walks) == (0, 0)
+    assert (on.n_capped_walks, on.n_redrawn_walks) == (0, 0)
+
+
+def test_a_walk_capped_on_every_redraw_is_kept_and_counted() -> None:
+    """When every attempt caps, the last one is returned and both counters say so."""
+    gen, trap, _ = _absorbing_hub(max_redraws=3)
+    gen._order1[gen.n_states, :] = 0.0
+    gen._order1[gen.n_states, trap] = 1.0  # every walk must begin in the trap
+    payloads = [syn.payload for syn in gen.generate(5, seed=1)]
+    assert all(len(payload) == gen.max_len for payload in payloads)
+    assert gen.n_capped_walks == 5
+    assert gen.n_redrawn_walks == 15  # 3 discarded attempts before the kept fourth one, 5 times
+
+
+def test_the_redraw_guard_replaces_capped_walks_when_an_escape_exists() -> None:
+    """With a fair coin between the trap and an escape state, the guard removes every cap."""
+    off, trap, escape = _absorbing_hub(max_redraws=0)
+    on, _, _ = _absorbing_hub(max_redraws=20)
+    for gen in (off, on):
+        start = gen.n_states
+        gen._order1[start, :] = 0.0
+        gen._order1[start, trap] = 1.0
+        gen._order1[start, escape] = 1.0  # equal weights, so the start is a fair coin
+    without = [syn.payload for syn in off.generate(20, seed=3)]
+    with_guard = [syn.payload for syn in on.generate(20, seed=3)]
+    # Measured on this seed: with the guard off 14 of the 20 walks cap -- 12 of them begin in
+    # the trap, 2 wander into it from the escape state; with the guard on, 36 attempts are
+    # discarded and not one returned walk is capped.
+    assert off.n_capped_walks > 0
+    assert any(payload[0] == trap for payload in without)
+    assert on.n_capped_walks == 0
+    assert on.n_redrawn_walks >= 1
+    # A walk that starts in the trap always caps, so "no capped walk left" means every kept walk
+    # started in the escape state. Every attempt caps with probability at least 1/2 (a start in
+    # the trap always does, and a start in the escape state can wander into it), so 21 capped
+    # attempts in a row are rare but not impossible; the seed is fixed, so this cannot flake.
+    assert all(payload[0] == escape for payload in with_guard)

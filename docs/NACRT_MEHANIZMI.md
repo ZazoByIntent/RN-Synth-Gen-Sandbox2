@@ -19,7 +19,7 @@ zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) 
 | ZM-1 | LDPTrace (Du et al., PVLDB 2023) | `SyntheticGenerator` | ε-LDP na pot | Python, Apache-2.0 | srednji | **zaključen** (2. september 2026, PR #32, združen v `main`) |
 | ZM-2 | Točkovni LDP (GRR nad celicami) | `PrivacyMechanism` | ε-LDP na točko | lastna (gradnik `ldp.py`) | majhen | **zaključen** (4. september 2026, PR #38, veja `claude/zm2-point-ldp`) |
 | ZM-3 | Naivna trojica: zaokroževanje, redčenje, Gaussov šum | `PrivacyMechanism` | brez | lastna | majhen | **zaključen** (4. september 2026, PR #39, veja `claude/zm3-naive-baselines`) |
-| ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | **zaključen** (20. september 2026, PR #40 veja `claude/zm4-privtrace`; validacija PR #41 veja `claude/zm4-privtrace-validation`, skladan) |
+| ZM-4 | PrivTrace (Wang et al., USENIX Sec 2023) | `SyntheticGenerator` | centralna DP na pot | Python, brez licence | velik | **zaključen** (20. september 2026, PR #40 in validacijski PR #41 združena v `main`, zlivna commita `5cb6c50` in `e82e1fd`; postavke končnega pregleda zaprte v PR #42, 22. september 2026) |
 
 Vrstni red je hkrati prioriteta: LDPTrace je edini celovit sintetizator pod lokalno DP in
 edina primerjava, ki jo poglavje 7.3 poročila zares potrebuje; točkovni LDP je poceni
@@ -508,9 +508,13 @@ perturbacijskih rok; pred tem avtor odloči, katere vrednosti gredo naprej od u5
 
 ## 5. ZM-4 PrivTrace kot generator (`synthesis/privtrace.py`, registrsko ime `privtrace`) — ZAKLJUČEN
 
-**Izvedeno 20. septembra 2026** (PR #40, veja `claude/zm4-privtrace`; validacija proti izvirniku
-v ločenem, skladanem PR #41, veja `claude/zm4-privtrace-validation`). Dejanske odločitve, kjer
-je načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
+**Izvedeno 20. septembra 2026** (PR #40, združen v `main` z zlivnim commitom `5cb6c50`;
+validacija proti izvirniku v ločenem PR #41, združenem istega dne z zlivnim commitom
+`e82e1fd`). Postavke končnega pregleda so zaprte 22. septembra 2026 v PR #42 (veja
+`claude/zm4-review-followup`): ponovni žreb pri varovalki hoje (D-4.3), izpis poizvedbe po
+točkah tudi v bloku brez mostov, ponovna meritev stolpca `port_masked` in uskladitev
+dokumentov. Dejanske odločitve, kjer je načrt spodaj puščal izbiro ali kjer se je izvedba od
+njega razlikovala:
 
 - **Port sledi članku, ne kodi avtorjev** (odločitev avtorja 20. septembra 2026 po
   raziskavi izvirnika `github.com/DpTrace/PrivTrace`, commit `b06cef7`, 9. december 2022,
@@ -538,20 +542,40 @@ je načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
   vrstic (ima jih ~660, od tega ~110 docstringa).
 - **D-4.2:** brez reševalca; začetek se vzorči iz zašumljene vrstice navideznega začetka
   (po NormCut), konec se ne vzorči. Če NormCut to vrstico izprazni, **vzorčenje in
-  točkovanje uporabita isti enakomerni začetek** čez m stanj, tako da sta hoja in njena
-  ocena vedno skladni (prej je točkovanje jemalo prag 10⁻¹²). Cena opustitve je znana in
+  točkovanje uporabita isti enakomerni začetek** čez m stanj, tako da sta **začetna
+  faktorja** hoje in njene ocene vedno skladna (prej je točkovanje jemalo prag 10⁻¹²).
+  Skladnost velja samo za začetek: hoja, ki se ustavi v slepi ulici ali pri varovalki, je
+  ocenjena s faktorjem konca, ki ga ni nikoli izžrebala, hoja, obdržana po ponovnem žrebu
+  (D-4.3), pa je pogojena s tem, da varovalke ni dosegla, česar ocena ne modelira.
+  Cena opustitve je znana in
   izmerjena: članek v §4.4 pove, da normalizacija 1/(L+1) »prešteje kratke poti preveč in
   dolge premalo«, porazdelitev potovanj pa je prav popravek te pristranskosti — brez nje je
   port prekratek. Pri 20.000 poteh Porta in K = 6 imajo prave poti 12,0 strnjenih stanj,
   port brez šuma pa 8,6 (30 % prekratko). **Reševalec potovanj ali eksplicitni model
-  dolžine je odprta postavka.** **D-4.3:** `max_len` = 200. **D-4.4:** točke poti so
+  dolžine je odprta postavka.**
+- **D-4.3 (varovalka hoje s ponovnim žrebom):** hoja je omejena na `max_len` = 200 stanj;
+  hoja, ki varovalko doseže, ne da bi izžrebala navidezni konec, se zavrže in ponovno izžreba
+  iz istega toka naključja, največ `max_redraws` = 20-krat (če varovalko dosežejo tudi vse
+  ponovitve, se obdrži zadnja). Varovalka ne prebere podatkov in ne porabi proračuna — je
+  naknadno procesiranje objavljenega modela — in velja enako z masko D-4.6 in brez nje; cena
+  je, da so izžrebane hoje pogojene s tem, da varovalke niso dosegle, česar točkovanje ne
+  modelira. Povod je bila maska: pri 20.000 poteh Porta in ε = 0,5 je v meritvi PR #41
+  **1.207 od 20.000** zamaskiranih hoj pri semenu 1 teklo do varovalke, ker zamaskirana
+  vrstica lahko ostane brez mase konca in z malo dovoljenimi nasledniki. Nobena hoja porta
+  brez maske na Portu ne doseže varovalke pri nobenem ε, zato je stolpec porta po članku
+  nespremenjen (regresija iz commita `ca1eb7f`: vseh 420 že obstoječih vrednosti enakih do
+  zadnje decimalke). Po klicu `generate` sta na voljo števca `n_capped_walks` in
+  `n_redrawn_walks`; ogrodje jih skupaj z `max_redraws` zapiše v vsak pogon. Napad na članstvo
+  `generate` nikoli ne kliče, zato se meritve pri stopnji 20 s tem ne spremenijo.
+- **D-4.4:** točke poti so
   koordinate vozlišč odsekov (`u`, če ni enako zadnjemu dodanemu, nato `v`), zaporedni
   dvojniki strnjeni, brez interpolacije; način `bbox` (surove koordinate) obstaja samo za
   ogrodje validacije, način celic orkestratorja **ni podprt** (PrivTrace potrebuje
   koordinate; pogled brez `clean` da jasen `ValueError`).
 - **D-4.5:** `PrivTraceGenerator(network=None, bbox=None, epsilon=1.0, first_level_k=6,
   split_scale=200.0, split_gate=0.05, max_sub_k=8, budget_split=(0.2, 0.4, 0.4),
-  theta2=5.0, max_len=200, mask_non_adjacent=False, seed=0)`; `spent_budget()` = ε po
+  theta2=5.0, max_len=200, max_redraws=20, mask_non_adjacent=False, seed=0)`;
+  `spent_budget()` = ε po
   `fit`; `fit_points` je javno jedro za ogrodje. Štetje kot v izvirniku: 1. red 1/(L+1)
   na prehod (START → s₀, koraki, s_zadnji → END), 2. red 1/L na pojav stanja; po šumu
   stolpec START in vrstica END na 0, NormCut po vrsticah; adaptivno pravilo natanko po
@@ -564,14 +588,20 @@ je načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
   (vrstica, stolpec) 1. plasti večja od 1), obravnavan kot nemogoč in ničen skupaj s
   strukturnimi ničlami — po Laplaceovem šumu in pred NormCut, v matriki 1. reda in v vseh
   matrikah 2. reda. To je pravilo izvirnikove kode, preneseno v naknadno procesiranje nad
-  **javno** geometrijo mreže: ne porabi nobenega žreba in ne prebere podatkov, zato je
-  porabljeni proračun nespremenjen. Privzeto je izklopljena, ker Algoritem 1 v članku
+  **javno** geometrijo mreže: ne porabi nobenega svojega žreba in ne prebere podatkov, zato je
+  porabljeni proračun nespremenjen. Ker pa pade pred NormCut in pred izbirnim pravilom, se
+  nabor stanj 2. reda in s tem število Laplaceovih matrik 3. stopnje lahko razlikuje od
+  neizmaskirane prilagoditve (pri 20.000 poteh Porta in ε = 2 izbere port 5,4 stanja, port z
+  masko 4,2). ε₃ se porabi enkrat, ne glede na to število, ker ena pot prispeva utež 1 čez vse
+  matrike 2. reda skupaj. Privzeto je izklopljena, ker Algoritem 1 v članku
   omejitve sosednosti nima; ogrodje validacije jo meri kot tretji stolpec.
 - **Pri stopnji 20** (90 učnih poti, mreža 6 × 6 nad bbox vozlišč 30 × 33 km, celice
   5,0 × 5,6 km, učne verige povprečno 2,06 stanja) se pri vseh ε ∈ {0,5, 2, 8} in semenih
-  42, 1, 2, 3 **nobena celica ne deli in nobeno stanje ne dobi 2. reda** (36 stanj): vrata
-  delitve (pri pravi masi 0,125 na celico; zašumljena vsota jih le premakne) in prag
-  θ₁ = 127/ε presegajo maso, ki jo 90 poti lahko da, κ pa ostane 1. PrivTrace je
+  42, 1, 2, 3 **nobena celica ne deli in nobeno stanje ne dobi 2. reda** (36 stanj), a iz
+  dveh različnih razlogov. Vrata delitve so pri pravi masi 90 poti 0,125 na celico, celica pa
+  nosi okrog 2,5 (90/36), torej so vrata **presežena** (zašumljena vsota jih le premakne);
+  delitev prepreči samo κ = ⌈√(d/200)⌉, ki pri gostotah do 200 ostane 1. Maso, ki jo 90 poti
+  lahko da eni vrstici, daleč presega le prag 2. reda θ₁ = 127/ε. PrivTrace je
   tu zašumljen Markov 1. reda nad 36 celicami — pričakovano vedenje pri vzorcu dva reda
   velikosti pod obsegom članka, ne napaka. Vrstice so bile 20. septembra 2026 zvečer
   **ponovno izmerjene iz zavezanega drevesa** (`run.json`: `git_commit b0a7dae`) po
@@ -583,19 +613,29 @@ je načrt spodaj puščal izbiro ali kjer se je izvedba od njega razlikovala:
   straneh, ε ∈ {0,5, 1, 2}, semena 1–5, devet metrik iz `evaluation/ldptrace_metrics.py`
   nad mrežo 20 × 20; izvirnik metrik nima. Stolpci so trije (port po članku, port z masko
   D-4.6, izvirnik), vsak pogon je ocenjen dvakrat — z mostovi (dogovor LDPTrace) in brez
-  njih (`nobridge_*`) — izpisan pa je tudi delež vrinjenih celic. Popravek izvirnika je samo
+  njih (`nobridge_*`) — izpisan pa je tudi delež vrinjenih celic. Brez mostov se ponovi
+  **sedem** metrik: šest, ki berejo verige celic, in poizvedba po točkah, katere realna stran
+  se vzorči po celicah realnih verig (ena enakomerna točka na celico), zato se premakne skupaj
+  z verigami; iz surovih točk se računata samo premer in dolžina in ta dva sta v obeh prehodih
+  enaka. Popravek izvirnika je samo
   »da teče« (numpy 2, `fcntl`, `torch` mrtva koda) plus `--seed`, `--level1_k`,
   `--output_file` in šest decimalk v izpisu; algoritem nespremenjen. **Izid (20. september
-  2026):** obe strani zgradita isto mrežo (159–164 stanj) in se z ε izboljšujeta; pri ε = 2
+  2026; stolpec `port_masked` ponovno izmerjen 22. septembra 2026 po uvedbi ponovnega žreba,
+  druga dva stolpca sta ostala enaka do zadnje decimalke):** obe strani zgradita isto mrežo
+  (159–164 stanj) in se z ε izboljšujeta; pri ε = 2
   se gostota, vroče točke in Kendall ujemajo znotraj razpona semen. Del portove prednosti pri
   vzorcih in vročih točkah je bil **umetnost premoščanja** (kraljeva pot vstavi 51–64 %
-  portovih celic proti 8 % pri pravih poteh); brez mostov port ostaja boljši pri vseh šestih
-  celičnih metrikah pri ε = 0,5 in ε = 2, pri ε = 1 pa pri petih (F1 je znotraj razpona
-  semen). Zaostanek izvirnika pri ε = 0,5 je **najprej v modelu**: pravilo članka na njegovih
+  portovih celic proti 8 % pri pravih poteh). Brez mostov je portovo povprečje boljše pri vseh
+  sedmih ponovljenih metrikah, po enotnem merilu prekrivanja razponov čez pet semen pa je
+  portova prednost **zunaj razpona** pri Kendallu, potovanjih, podpori vzorcev in poizvedbah
+  po točkah pri vseh treh ε ter pri gostoti in F1 pri ε = 0,5 in ε = 2 (pri ε = 1 se razpona
+  pri obeh ravno še prekrivata); vroče točke so pri vseh ε znotraj razpona.
+  Zaostanek izvirnika pri ε = 0,5 je **najprej v modelu**: pravilo članka na njegovih
   lastnih zašumljenih matrikah izbere nič stanj 2. reda, njegovi trije pogoji »ALI« jih
   vsilijo 34–35 (35 % mase prehodov, 59–62 % mase začetka, 52–55 % vrstic praznih po odrezu),
-  in ko jih diagnostično odstranimo, se izvirnik izboljša pri osmih od devetih metrik z
-  mostovi in pri vseh šestih brez njih; preostanek je v njegovi poti 1. reda (začetek iz
+  in ko jih diagnostično odstranimo, se izvirnik izboljša pri **vseh devetih** metrikah z
+  mostovi (tudi pri premeru, 0,2681 → 0,2674) in pri vseh sedmih brez njih; preostanek je v
+  njegovi poti 1. reda (začetek iz
   `cvxpy`, množilniki, zavračanje), ki je nismo izklopili. Pri dolžini je izvirnik boljši pri
   ε ≥ 1, a le zato, ker so njegove hoje enakomerno prekratke (4,2–7,1 točke proti 12,0
   strnjenim stanjem pravih poti); portova lastna dolžinska pristranskost je posledica D-4.2.
