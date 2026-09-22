@@ -505,6 +505,33 @@ def test_membership_runs_against_rn_ldp_synth_arm(tmp_path: Path, beijing_maps_d
     assert 0.0 <= rn["auc"] <= 1.0
 
 
+def test_membership_inference_records_privtrace_facts(
+    tmp_path: Path, beijing_maps_dir: Path
+) -> None:
+    """The fitted privtrace target's public facts land in run.json under its arm."""
+    cfg = mia_config(tmp_path, beijing_maps_dir)
+    cfg["synthetic_generators"].append({"id": "privtrace", "params": {"epsilon": 2.0}})
+    # the ldptrace arm guards the other branch of the same fact collector
+    cfg["synthetic_generators"].append({"id": "ldptrace", "params": {"epsilon": 600.0}})
+    cfg["attacks"][0]["attacker"] = {"n_shadow": 4, "subsample": 0.5}
+    run(write_config(tmp_path, cfg))
+
+    record = json.loads((tmp_path / "out" / "run.json").read_text())
+    ldptrace_arm = record["arms"]["synthetic:ldptrace:epsilon=600.0"]
+    assert isinstance(ldptrace_arm["l_k"], int) and ldptrace_arm["l_k"] >= 1
+    assert ldptrace_arm["report_epsilon"] > 0
+    assert "n_states" not in ldptrace_arm  # the two branches stay independent
+    arm = record["arms"]["synthetic:privtrace:epsilon=2.0"]
+    assert isinstance(arm["n_states"], int) and arm["n_states"] >= 1
+    assert isinstance(arm["n_second_order"], int)
+    assert 0 <= arm["n_second_order"] <= arm["n_states"]
+    assert arm["max_redraws"] == 20  # constructor default (D-4.3 redraw guard)
+    # LiRA only fits generators, so the target never sampled a walk in this run
+    assert arm["n_capped_walks"] == 0 and arm["n_redrawn_walks"] == 0
+    # a generator without those attributes gets no facts at all
+    assert "synthetic:markov:order=1" not in record["arms"]
+
+
 def test_data_raw_guard_catches_absolute_path_from_any_cwd(
     tmp_path: Path, beijing_maps_dir: Path
 ) -> None:

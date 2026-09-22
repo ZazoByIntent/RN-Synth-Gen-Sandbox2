@@ -1397,6 +1397,26 @@ def _mia_pool(
     return base + members + nonmembers, candidates, train_m
 
 
+def _generator_facts(target: Any) -> dict[str, Any]:
+    """Public facts of a fitted generator for ``run.json``, by the attributes it exposes."""
+    facts: dict[str, Any] = {}
+    l_k = getattr(target, "l_k", None)
+    if l_k is not None:  # ldptrace: public length cap and the per-report epsilon
+        facts["l_k"] = int(l_k)
+        facts["report_epsilon"] = _finite_or_none(_opt_float_attr(target, "report_epsilon"))
+    second_order = getattr(target, "second_order_states", None)
+    if second_order is not None:  # privtrace: grid size, second-order rows, redraw guard
+        facts["n_states"] = int(getattr(target, "n_states", 0))
+        facts["n_second_order"] = len(second_order)
+        facts["max_redraws"] = int(getattr(target, "max_redraws", 0))
+        # The membership-inference path only fits generators (LiRA scores likelihoods,
+        # it never samples), so both walk counters stay 0 here by construction; they are
+        # recorded anyway so the record matches privtrace_eval's validation table.
+        facts["n_capped_walks"] = int(getattr(target, "n_capped_walks", 0))
+        facts["n_redrawn_walks"] = int(getattr(target, "n_redrawn_walks", 0))
+    return facts
+
+
 def _membership_values(
     cfg: RunConfig,
     spec: AttackSpec,
@@ -1414,7 +1434,9 @@ def _membership_values(
     ``trajguard repeat``. Returns the rows, one validity warning per (arm, fpr)
     operating point the non-members cannot resolve (S4-2; those values are NaN), and
     per-arm facts of the fitted target for ``run.json`` (``ldptrace``: the public length
-    cap ``l_k`` and the per-report ``report_epsilon``, so later readers need not refit).
+    cap ``l_k`` and the per-report ``report_epsilon``; ``privtrace``: ``n_states``,
+    ``n_second_order``, ``max_redraws`` and the two walk counters — so later readers
+    need not refit).
     """
     pool, candidates, train_m = _mia_pool(items, clean_by_id)
     n_members = sum(1 for _, is_member in candidates if is_member)
@@ -1425,12 +1447,9 @@ def _membership_values(
     for gspec, make in gen_plans:
         target = make(0)
         target.fit([_item_view(m, clean_by_id[m.traj_id]) for m in train_m])
-        l_k = getattr(target, "l_k", None)
-        if l_k is not None:
-            arm_facts[f"synthetic:{gspec.ref}"] = {
-                "l_k": int(l_k),
-                "report_epsilon": _finite_or_none(_opt_float_attr(target, "report_epsilon")),
-            }
+        facts = _generator_facts(target)
+        if facts:
+            arm_facts[f"synthetic:{gspec.ref}"] = facts
         attack = attack_cls(
             **dict(spec.mia_params),
             shadow_factory=lambda k, _make=make: _make(1000 + k),
@@ -1779,7 +1798,8 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
         for ref, pool in pools.items()
     }
     # Generator arms attacked by membership inference are not release pools; they add
-    # the fitted target's public facts (e.g. ldptrace's l_k) under ``synthetic:<ref>``.
+    # the fitted target's public facts (ldptrace's l_k, privtrace's n_states and its
+    # second-order / redraw counts) under ``synthetic:<ref>``.
     arms.update(generator_arms)
     matrix = _matrix_table(all_rows)
     over_budget = _over_budget_attacks(all_rows, cfg.attack_time_budget_s)
