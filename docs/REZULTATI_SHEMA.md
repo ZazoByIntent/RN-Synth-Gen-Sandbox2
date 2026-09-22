@@ -79,11 +79,13 @@ z `exp_id` + `git_commit` → konfiguracijska datoteka v `config/experiments/`.
 | `known_points` | celo/prazno | število točk, ki jih napadalec pozna (os »predznanje«) | reidentifikacija |
 | `n_shadow` | celo/prazno | število senčnih modelov LiRA | sklepanje o članstvu |
 | `distance` | niz/prazno | razdalja napadalca v reidentifikaciji (`dtw` = nenormirana, kot v zapisu S4; `dtw_norm` = `dtw / L`, L je dolžina optimalne poravnave) | reidentifikacija |
+| `gallery` | niz/prazno | galerija napadalca v reidentifikaciji (`rematched` = ponovno ujete točke zaščitene veje, privzeto; `release` = polna izdaja točk brez ponovnega ujemanja); prazno pri drugih družinah | reidentifikacija |
 
-Stolpec `distance` je zaradi združljivosti fizično zadnji v glavi (dodan 22. septembra
-2026, odločitev v `docs/HANDOFF.md` §2.5.1); stare datoteke brez njega bralniki
-(`results_io`, `report.merge_results_tables`) še sprejmejo in reidentifikacijskim
-vrsticam pripišejo `dtw`, ostalim prazno.
+Oba stolpca sta zaradi združljivosti na koncu glave: `gallery` je zdaj zadnji stolpec,
+`distance` pa predzadnji (oba dodana 22. septembra 2026, odločitev v `docs/HANDOFF.md`
+§2.5.1). Starejše datoteke, ki enega ali obeh stolpcev nimajo, bralniki (`results_io`,
+`report.merge_results_tables`) še sprejmejo in reidentifikacijskim vrsticam pripišejo
+`dtw` oziroma `rematched`, vrsticam drugih družin pa prazno.
 
 Ti stolpci se ob implementaciji polnijo iz strukturiranih specifikacij (`AttackSpec`,
 `MechanismSpec`), ne z razčlenjevanjem niza `target_ref` — nizov se ne razstavlja nazaj.
@@ -107,6 +109,14 @@ Ti stolpci se ob implementaciji polnijo iz strukturiranih specifikacij (`AttackS
 | `n_rematch_dropped` | celo/prazno | poti, izgubljene pri ponovnem ujemanju izdane veje | `run.json` `arms` |
 | `n_members`, `n_nonmembers` | celo/prazno | MIA: število članov in ne-članov — brez tega se `tpr@fpr` ne da brati (spodnja meja FPR je `1/n_nonmembers`). Pravilo veljavnosti (S4-2): točka `tpr@fpr=f` potrebuje vsaj `1/f` ne-članov (meja šteje kot veljavna); pod tem pragom napad zapiše NaN (prazno celico) z opozorilom v `run.json`, `trajguard report` pa shranjene starejše vrednosti zamolči in opozori v razdelku Warnings | novo (iz `_mia_pool`) |
 | `spent_budget` | število/prazno | dejansko porabljeni ε mehanizma | `run.json` `arms` |
+
+Pri reidentifikacijskih vrsticah z galerijo `release` se prva dva števca bereta drugače:
+`n_pool` je število vseh izdanih sledi veje (ne le tistih, ki so preživele ponovno
+ujemanje), `n_gallery_users` pa število uporabnikov med njimi. `n_rematch_dropped` ostaja
+nespremenjen in še naprej pove, koliko sledi je pri tej veji odpadlo pri ponovnem
+ujemanju — uničujoča veja ima zato na vrstici `release` `n_pool = N` in
+`n_rematch_dropped = N`, na vrstici `rematched` pa `n_pool = 0`. `n_probes` je pri obeh
+galerijah enak.
 
 ### Čas izvajanja in pomnilnik
 
@@ -157,38 +167,39 @@ Z O6 (5. avgust 2026) je dodan stolpec `peak_memory_mb`: orkestrator meri vršno
 pomnilnika vsakega zagona napada s `tracemalloc` (standardna knjižnica, brez novih
 odvisnosti), z izklopom prek `metrics.memory: false`.
 
-22. septembra 2026 je na konec glave dodan stolpec `distance` (razdalja napadalca v
-reidentifikaciji). Prejšnjo glavo — isti stolpci brez `distance` — imenuje konstanta
-`LEGACY_RESULTS_COLUMNS` v `results_schema.py`; bralniki jo še sprejmejo, tako da
-izmerjene tabele kampanje S4 in mehanizmov pri u20 ostanejo berljive. V `result_id`
-nosi pripono le neprivzeta razdalja, in sicer za `:k<N>` (npr.
-`reidentification:protected:none:k5:dtw_norm`); privzeti `dtw` ostane neizpisan, zato
-so današnji `result_id` nespremenjeni.
+22. septembra 2026 sta bila na konec glave dodana dva stolpca, vsak v svojem zahtevku za
+združitev: najprej `distance` (razdalja napadalca), takoj za njim `gallery` (galerija
+napadalca). Obe starejši glavi imenuje konstanta `LEGACY_RESULTS_HEADERS` v
+`results_schema.py` — glavo z `distance` in brez `gallery` (zapisana isti dan, med obema
+zahtevkoma) ter glavo brez obeh (kampanja S4 in tabele mehanizmov pri u20); ime
+`LEGACY_RESULTS_COLUMNS` ostaja vzdevek prve od njiju. Bralnika
+`results_io.read_results_csv` in `report.merge_results_tables` sprejmeta vse tri glave in
+manjkajoči celici dopolnita: reidentifikacijskim vrsticam pripišeta `dtw` in `rematched`,
+vrsticam drugih družin pa prazno, zato izmerjene tabele S4 in u20 ostanejo berljive.
 
-Isti dan je `result_id` reidentifikacije dobil še segment za galerijo napadalca, torej
-za to, kaj napadalec preiskuje: vzorec je zdaj `…:k<N>[:dtw_norm][:release]`, kjer je
-segment galerije zadnji, privzeta galerija `rematched` (ponovno ujemane zaščitene sledi)
-pa ostane neizpisana. Primer vrstice z galerijo izdanih točk:
-`reidentification:protected:gaussian_noise:sigma_m=1000.0:k3:dtw_norm:release`. Stolpca
-`gallery` v glavi še ni: načrtovan je kot naslednji zadnji stolpec v ločenem PR, šele
-tedaj bodo odjemalci obe galeriji ločili sami; do takrat `report.py` pripone `:release`
-ne razpozna, zato ju v tabeli loči le `result_id`. Pri vrstici z galerijo `release`
-pomeni `n_pool` število vseh izdanih sledi — ne le tistih, ki so preživele ponovno
-ujemanje — `n_gallery_users` število uporabnikov v izdaji, `n_rematch_dropped` pa še
-naprej poroča o ponovnem ujemanju izdane veje istega mehanizma.
+V `result_id` nosita pripono le neprivzeta razdalja in neprivzeta galerija; vzorec je
+`…:k<N>[:dtw_norm][:release]`, kjer je segment razdalje pred segmentom galerije, privzeti
+vrednosti `dtw` in `rematched` pa ostaneta neizpisani, zato so starejši `result_id`
+nespremenjeni. Primer vrstice z galerijo izdanih točk:
+`reidentification:protected:gaussian_noise:sigma_m=1000.0:k3:dtw_norm:release`.
 
 ## Odjemalci sheme — glava stolpcev je vmesnik, ne podrobnost
 
-Na točno to glavo (`RESULTS_COLUMNS`, vrstni red in imena stolpcev) so vezani štirje
-odjemalci; **preimenovanje, brisanje ali premik stolpca je zlom vmesnika** in zahteva
+Na točno to glavo (`RESULTS_COLUMNS`, vrstni red in imena stolpcev) je vezanih pet
+odjemalcev; **preimenovanje, brisanje ali premik stolpca je zlom vmesnika** in zahteva
 posodobitev vseh naštetih v istem zahtevku za združitev:
 
 - `src/trajguard/reporting/results_schema.py` — zapisovalec (`write_results_csv`);
 - `src/trajguard/reporting/report.py` — `merge_results_tables` (glavna tabela; tujo glavo
   glasno zavrne) in od popravka S4-4 tudi `load_results`, ki pri ponovitvenih zagonih bere
-  `seed<N>/results.csv` prek `results_io`;
+  `seed<N>/results.csv` prek `results_io`; vrstice loči tudi po galeriji, tako da ima
+  tabela tveganja en stolpec na par (`distance`, `gallery`), označen npr.
+  `[dtw_norm, release]`;
+- `src/trajguard/reporting/plots.py` — grafi berejo iste stolpce in narišejo eno krivuljo
+  na kombinacijo (veja, `distance`, `gallery`);
 - `src/trajguard/reporting/results_io.py` — bralnik nazaj v `ResultRow` in združevanje čez
-  semena (`read_results_csv`, `aggregate_over_seeds`; tujo glavo glasno zavrne);
+  semena (`read_results_csv`, `aggregate_over_seeds`; tujo glavo glasno zavrne); ključ
+  združevanja vsebuje tudi `distance` in `gallery`, zato se galeriji iste veje ne zmešata;
 - `notebooks/03_s4_sweep.ipynb` — analiza kampanje S4 gradi na `results_io` in na teh
   stolpcih (celice za uvoz, združevanje in grafe).
 

@@ -94,6 +94,7 @@ def reid_cells(out_dir: Path) -> dict[tuple[str, str], tuple[str, ...]]:
             r["ci_high"],
             r["known_points"],
             r["distance"],
+            r["gallery"],
         )
         for r in rows
         if r["family"] == "reidentification"
@@ -913,6 +914,15 @@ def test_results_csv_follows_schema(tmp_path: Path, beijing_maps_dir: Path) -> N
     geo = [r for r in by_family["reidentification"] if r["arm_id"] == "geo_indistinguishability"]
     assert geo and all(r["epsilon"] == "10.0" and r["unit_m"] == "25.0" for r in geo)
     assert all(float(r["attack_runtime_s"]) >= 0.0 for r in by_family["reidentification"])
+    # attacker axes: reidentification carries the defaults, no other family has them
+    assert all(
+        r["distance"] == "dtw" and r["gallery"] == "rematched"
+        for r in by_family["reidentification"]
+    )
+    assert all(
+        r["distance"] == "" and r["gallery"] == ""
+        for r in by_family["reconstruction"] + by_family["utility"]
+    )
 
     recon = by_family["reconstruction"]
     assert all(
@@ -1051,6 +1061,11 @@ def test_release_gallery_attacks_what_rematching_dropped(
     identity = rows[("reidentification:protected:none:k3:dtw_norm:release", "top1_acc")]
     assert int(identity["n_pool"]) == 8
     assert int(identity["n_rematch_dropped"]) == 0
+
+    # the `gallery` column keeps the two attackers apart in the table itself, so the
+    # report never has to re-parse the result id to tell them apart
+    assert rematched["gallery"] == "rematched"
+    assert released["gallery"] == "release" and identity["gallery"] == "release"
 
     # run.json keeps the matched-pool facts of every arm and nests the release ones
     arms = json.loads((tmp_path / "out" / "run.json").read_text())["arms"]
