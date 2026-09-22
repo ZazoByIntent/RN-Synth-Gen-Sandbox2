@@ -509,7 +509,7 @@ LDPTrace baseline candidate `ldptrace` at ε ∈ {0.5, 2.0, 8.0}. Expected outco
 Optimized-Unary-Encoding bit vectors over a 12×12 grid, no Dijkstra calibration.
 For both `rn_ldp_synth` and `ldptrace` ε is spent per trajectory (per device),
 not per point, so these rows are not comparable with the geo-indistinguishability
-ε of §7. Measured rows: `docs/HANDOFF.md` §2.3.
+ε of §7. Measured rows: `docs/HANDOFF.md` §2.3.1.
 
 The same file also carries the `privtrace` arm (ZM-4, `docs/NACRT_MEHANIZMI.md`
 §5) at ε ∈ {0.5, 2.0, 8.0}: PrivTrace (Wang et al. 2023) is a *central*
@@ -674,7 +674,7 @@ histogram on the same grid). Measured on 4 Sep 2026 (seed 42, warm raw-pool cach
 238-trace pools (`raw`, `none`); every `point_ldp` arm dropped all 238 trajectories at
 re-matching (`n_pool = 0`, reidentification 0.000 in ~0.01 s), `cell_js_divergence`
 0.42 / 0.18 / 0.03 at ε = 4 / 6 / 8, no attack over budget. Rows and the reading:
-`docs/HANDOFF.md` §2.3. A finer grid is one YAML line
+`docs/HANDOFF.md` §2.3.3. A finer grid is one YAML line
 (`params: {epsilon: [8.0], n_rows: 50, n_cols: 50}`), but needs a larger ε for the same
 survival probability (k = 2500: 0.54 at ε = 8).
 
@@ -709,12 +709,12 @@ behaves like geo-ind at ε = 1, not like a "small" perturbation. The surprise th
 not a bug: **downsampling raises `top1_acc` above the raw pool** (0.49–0.54 at k = 3
 versus 0.28) while keeping almost the whole pool, because the attack's unnormalised
 DTW favours short gallery sequences. That hypothesis was checked on 4 Sep 2026 over
-the cached u20 pools and **confirmed** (`docs/HANDOFF.md` §2.5): a normalised DTW
+the cached u20 pools and **confirmed** (`docs/HANDOFF.md` §2.5.1): a normalised DTW
 (cost divided by the alignment length) lifts the raw pool from 0.28 / 0.38 / 0.49 to
 0.52 / 0.57 / 0.60 at k = 3 / 5 / 10, the level of the downsampled arms, and the
 nearest gallery trace stops being one of the shortest — the attack code is unchanged
 (a normalised attacker distance is an open author decision, since it would change the
-whole S4 record). Rows and the reading: `docs/HANDOFF.md` §2.3.
+whole S4 record). Rows and the reading: `docs/HANDOFF.md` §2.3.4.
 
 **Sibling configs for the 50- and 182-user rungs exist and are NOT measured** (created
 4 Sep 2026): `geolife_mech_reid_u50.yaml` carries all u20 arms at threshold 0.05 /
@@ -870,7 +870,7 @@ Read it against the `markov` ceiling: on a 6×6 grid the chains are short (train
 0.58, and the `ldptrace` arms sit at chance for every ε. The public length cap L_k of
 `ldptrace` is unstable at this sample size (1 to 7 across seeds and ε; the true maximum
 is 25) — the paper works with the whole population. Measured rows and reading:
-`docs/HANDOFF.md` §2.3.
+`docs/HANDOFF.md` §2.3.2.
 
 ## 9.3 LDPTrace validation run: the authors' code vs the `ldptrace` port (Porto, hours)
 
@@ -879,7 +879,7 @@ PR C of `docs/NACRT_LDPTRACE_VALIDACIJA.md`: both implementations synthesize the
 utility metrics (`evaluation/ldptrace_metrics.py`). Three columns come out — the reference
 with its own printed metrics, the reference's synthesis with our metrics, and the port with
 our metrics — each as mean and range over seeds 1–5 at ε ∈ {0.5, 1.0, 1.5}. Measured
-table and reading: `docs/HANDOFF.md` §2.3.
+table and reading: `docs/HANDOFF.md` §2.3.2.
 
 **One-time setup of the reference code** (kept out of git; `external/` is ignored):
 
@@ -949,7 +949,7 @@ once; the port needs about 4 min per (ε, seed) (fit 24–37 s, synthesis of 367
 about 10 min, of which the diameter 6 min; 15 runs in 2 h 16 min on two workers), and
 scoring its 15 syntheses with our metrics about 27 min. Each command
 prints a table with one row per (ε, metric) and `mean [min; max]` over the seeds; the
-`--compare` table is the one recorded in `docs/HANDOFF.md` §2.3. Output stays out of git
+`--compare` table is the one recorded in `docs/HANDOFF.md` §2.3.2. Output stays out of git
 (`results/`). The grid check that precedes any measurement — the reference's
 `trajectory_point2grid` and the harness give the same chain for the first 20 000 trips
 once the closed-interval cell rule is used — is recorded in
@@ -968,7 +968,7 @@ part of the mechanism. The reference prints no metrics of its own, so every colu
 the harness `experiments/privtrace_eval.py`: port (the paper), port with the optional D-4.6
 adjacency mask, and the reference — mean and range over seeds 1–5 at ε ∈ {0.5, 1.0, 2.0}, each
 run scored twice (with and without king's-walk bridging). Measured table and reading:
-`docs/HANDOFF.md` §2.3.
+`docs/HANDOFF.md` §2.3.6.
 
 **One-time setup of the reference code** (kept out of git; `external/` is ignored). The
 authors' repository has **no licence**, so nothing from it is copied into the package; the
@@ -1123,7 +1123,7 @@ reference. The two no-OR runs take 138 s and 119 s and print no `RuntimeWarning`
 
 **Expected outcome** (measured 20 September 2026, the masked column re-measured on
 22 September 2026 after the redraw guard; table, timings and the full reading in
-`docs/HANDOFF.md` §2.3). The sides agree on the grid (159–164 leaf states on both) and on the
+`docs/HANDOFF.md` §2.3.6). The sides agree on the grid (159–164 leaf states on both) and on the
 trend: every error falls with ε in all three columns, and at ε = 2 the bridged density, hot
 spots and Kendall coefficient overlap within the seed spread. Elsewhere the port is better,
 and the honest way to say how much is a single criterion: do the two ranges over the five
