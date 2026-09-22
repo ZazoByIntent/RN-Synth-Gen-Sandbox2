@@ -520,15 +520,19 @@ is per trajectory under a different trust model than the LDP arms and its rows r
 as an upper bound on utility, not as a competitor (see the config header). The arm
 is as cheap as `ldptrace` (about 7–8 s per seed for 17 fits at the 20-user rung). At
 this rung the grid never splits and no state qualifies for the second-order model
-(36 states, training chains of about two cells): the split gate `0.05·|D|/K²` and
-the selection threshold `√2·m/ε₂` both sit far above the mass 90 trajectories can
-supply, so PrivTrace here is a noised first-order Markov model over 36 cells — the
+(36 states, training chains of about two cells) — but the two facts have different
+reasons. The split gate `0.05·|D|/K²` is 0.125 per cell at the true mass of 90
+trajectories, while a cell carries about 2.5 of that mass (90/36), so the gate **is**
+exceeded; what keeps the cell whole is the subdivision factor itself, because
+`κ = ⌈√(d/200)⌉` stays 1 for every density up to 200. Only the second-order selection
+threshold `√2·m/ε₂` = 127/ε really sits far above the mass 90 trajectories can supply.
+PrivTrace here is therefore a noised first-order Markov model over 36 cells — the
 expected behaviour of a central-DP method at a sample size two orders of magnitude
 below the paper's, not a defect. The `|D|` in that gate is the **sum of the noisy,
-post-NormCut level-1 densities**, not the true trajectory count (pure post-processing
-of the stage-1 release), so the threshold wobbles with the noise; at this rung it
-changes nothing, because `κ = ⌈√(d/200)⌉` stays 1 anyway and the cell is not split
-either way. Reproduce those facts with a refit of the target
+post-NormCut level-1 densities**, not the true trajectory count (deviation D-4.1, pure
+post-processing of the stage-1 release), so the threshold wobbles with the noise; at
+this rung that wobble changes nothing, because `κ` stays 1 either way.
+Reproduce those facts with a refit of the target
 generator (`PrivTraceGenerator(network=..., epsilon=ε, seed=<run seed>)` on the
 train-split pool items in cache order, as `_membership_values` does); `run.json` does
 not record them. The measured rows were re-run on 20 September 2026 from the committed
@@ -1025,7 +1029,8 @@ uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/p
 uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
     --max-trajectories 20000 --first-level-k 6 --eval-grid 20 --epsilons 0.5 1.0 2.0 \
     --seeds 1 2 3 4 5 --mask-non-adjacent --label port_masked \
-    --out results/privtrace_validation/port_masked.json
+    --out results/privtrace_validation/port_masked.json \
+    --save-synthesis results/privtrace_validation/port_masked_synthesis
 uv run python -m trajguard.experiments.privtrace_eval --dat data/interim/porto/porto.dat \
     --max-trajectories 20000 --eval-grid 20 --epsilons 0.5 1.0 2.0 --seeds 1 2 3 4 5 \
     --label reference \
@@ -1041,13 +1046,22 @@ given. `--mask-non-adjacent` is the second port variant (deviation D-4.6): a tra
 between two states whose level-1 cells are neither the same nor 4-adjacent is zeroed with the
 structural zeros, after the noise and before NormCut. It changes the port's own synthesis, so
 it is meaningless together with `--score-synthesis` and the harness refuses that combination.
+A walk that reaches the `max_len` cap without ever drawing the virtual END is discarded and
+redrawn from the same random stream, at most `max_redraws` = 20 times (deviation D-4.3), and
+every run records three extra keys in its JSON: `max_redraws`, `n_redrawn_walks` (how many
+walks were thrown away and drawn again) and `n_capped_walks` (how many walks were kept
+although every redraw hit the cap). The guard is post-processing of the released model — it
+reads no data and spends no budget — and in practice it only fires under the mask at ε = 0.5;
+without the mask both counters are 0 in all 15 runs.
 
 **The two scoring passes.** Every run is scored twice. The nine metrics under their plain
 names use the LDPTrace convention, where `Grid.chain` bridges a jump between non-adjacent
 cells with a straight king's walk, so the jump is charged as the whole line of cells it flies
 over. The same values under `nobridge_<name>` keep only the cells the trajectory's own points
-fall in. Only six of the nine repeat: the point queries, the diameter and the length are
-computed from points and bridging cannot touch them. The extra row `interpolated_share` is the
+fall in. Seven of the nine repeat: the six chain metrics and the point query, whose real side
+is sampled per cell of the real cell chains (one uniform point per cell), so it moves with the
+chains as well. Only the diameter and the length are computed from the raw points and stay
+identical in both passes. The extra row `interpolated_share` is the
 fraction of chain cells that bridging inserted, and the header line
 `real interpolated share (<label>)` is the same fraction for the real trips — read the two
 together, because a side whose share is far above the real one is being flattered by the
@@ -1104,20 +1118,24 @@ uv run python -m trajguard.experiments.privtrace_eval --compare \
 Revert the patch before any further main run, otherwise the reference column stops being the
 reference. The two no-OR runs take 138 s and 119 s and print no `RuntimeWarning` at all.
 
-**Expected outcome** (measured 20 September 2026; table, timings and the full reading in
+**Expected outcome** (measured 20 September 2026, the masked column re-measured on
+22 September 2026 after the redraw guard; table, timings and the full reading in
 `docs/HANDOFF.md` §2.3). The sides agree on the grid (159–164 leaf states on both) and on the
-trend: every error falls with ε in all three columns, and at ε = 2 the density, the hot spots
-and the Kendall coefficient overlap within the seed spread. They do **not** agree on trips,
-diameter, point queries and patterns, where the port is better — but read the `nobridge_*`
-block before quoting that: two thirds of the port's chain cells at ε = 0.5 are inserted by
-bridging against 8 per cent for the real trips, and without bridging the port's pattern
-metrics lose most of their lead (its pattern F1 at ε = 1 falls inside the reference's seed
-spread), while density, hot spots, Kendall, trips and pattern support stay ahead. The
-reference is better on length at ε ≥ 1, but only because its walks are uniformly too short
+trend: every error falls with ε in all three columns, and at ε = 2 the bridged density, hot
+spots and Kendall coefficient overlap within the seed spread. Elsewhere the port is better,
+and the honest way to say how much is a single criterion: do the two ranges over the five
+seeds overlap? Scored without bridging, the port's lead lies **outside** that spread on
+Kendall, trips, pattern support and the point query at every ε, and on density and pattern F1
+at ε = 0.5 and ε = 2 (at ε = 1 those two ranges just overlap), while the hot spots stay inside
+the spread at every ε. Read the `nobridge_*` block before quoting any of it: two thirds of the
+port's chain cells at ε = 0.5 are inserted by bridging against 8 per cent for the real trips.
+The reference is better on length at ε ≥ 1, but only because its walks are uniformly too short
 (4.2–7.1 points against real trips of 12.0 collapsed states), not because it controls length.
-Timings: the port's 15 runs take 8.3 minutes (8.5 with the mask), scoring the reference's 15
-syntheses 5.2 minutes, and the reference's own 15 runs 33 minutes. Output stays out of git
-(`results/privtrace_validation/`).
+With the redraw guard the masked variant at ε = 0.5 is better than, or within the seed spread
+of, the paper-faithful port on every metric; at ε ≥ 1 nothing changed there, because no walk
+reaches the cap at those budgets. Timings: the port's 15 runs take 8.3 minutes, the masked ones
+8.4, scoring the reference's 15 syntheses 5.2 minutes, and the reference's own 15 runs
+33 minutes. Output stays out of git (`results/privtrace_validation/`).
 
 ## 10. How caching works (read before re-running with changed data)
 
