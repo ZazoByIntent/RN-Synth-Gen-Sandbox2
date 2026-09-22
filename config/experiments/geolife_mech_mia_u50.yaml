@@ -1,27 +1,27 @@
 # Protection-mechanism breadth, generator branch (docs/NACRT_MEHANIZMI.md §1.4, §2):
-# membership inference against synthetic generators at the 182-user REPORTING rung.
+# membership inference against synthetic generators at the 50-user rung of the design
+# §6.4 sample ladder (20 -> 50 -> 182).
 #
-# This is the 182-rung sibling of geolife_mech_mia_u20.yaml — same arms, same attack,
-# same split — and the counterpart of the S4 reporting config geolife_synth_mia.yaml,
-# from which it takes the population settings (threshold 0.3, budget 1200 s, 182 users).
-# Because cleaning, matching and split are identical to that S4 config, the two share
-# the same cached raw pool (1770 matched traces, 114 users at threshold 0.3): the first
-# run of this file reuses that cache instead of re-matching.
+# This is the middle rung between geolife_mech_mia_u20.yaml (measured) and
+# geolife_mech_mia_u182.yaml — same arms, same attack, same split — and the counterpart
+# of the S4 config geolife_synth_mia_u50.yaml, from which it takes the population
+# settings (50 users, threshold 0.05, budget 300 s, memory: false). Because cleaning,
+# matching and split are identical to that S4 config, the two share the same cached raw
+# pool: the first run of this file reuses that cache instead of re-matching.
 #
-# Created 22 Sep 2026, NOT RUN — the author runs it. The mechanism MIA ladder now has
-# three rungs: u20 (measured), u50 and u182 (both planned). u50 is NO LONGER SKIPPED —
-# the decision of 22 Sep 2026 was revised the same day, and geolife_mech_mia_u50.yaml
-# runs FIRST, this file after it. The file name carries an explicit _u182 suffix (the S4
-# configs used no suffix for the 182 rung); the max_users column in results.csv remains
-# the source of truth for which rung a row belongs to.
+# Created 22 Sep 2026, NOT RUN — the author runs it. The u50 rung was briefly marked as
+# skipped on 22 Sep 2026; that decision was revised the same day, and this file is the
+# FIRST of the remaining mechanism runs: geolife_mech_mia_u50.yaml, then
+# geolife_mech_reid_u50.yaml, then the two u182 configs. The file name carries an
+# explicit _u50 suffix; the max_users column in results.csv remains the source of truth
+# for which rung a row belongs to.
 #
 # Arms: `markov` (non-private memorization ceiling), `rn_ldp_synth`, `ldptrace` and
 # `privtrace`, each at ε ∈ {0.5, 2.0, 8.0}. All three generators share one ε grid (the
-# rn_ldp_synth grid of S4, widened here from the single ε = 2 anchor on 22 Sep 2026) so
-# that u20, u50 and u182 compare the same arms and the comparison notebook
-# (docs/NACRT_MEHANIZMI.md §1.6) can read a generator against its competitor at equal
-# nominal ε. For reference, the LDPTrace paper uses {0.5, 1, 1.5} and the PrivTrace paper
-# sweeps 0.2–2.0 (ZM-4, docs/NACRT_MEHANIZMI.md §5).
+# rn_ldp_synth grid of S4) so that u20, u50 and u182 compare the same arms and the
+# comparison notebook (docs/NACRT_MEHANIZMI.md §1.6) can read a generator against its
+# competitor at equal nominal ε. For reference, the LDPTrace paper uses {0.5, 1, 1.5} and
+# the PrivTrace paper sweeps 0.2–2.0 (ZM-4, docs/NACRT_MEHANIZMI.md §5).
 #
 # ε unit: for both `rn_ldp_synth` and `ldptrace`, ε is spent PER TRAJECTORY (per
 # device release; sequential composition over one device's reports). It is NOT
@@ -38,21 +38,22 @@
 # candidate; decision D5 is open.
 #
 # Cost, as an ESTIMATE (not measured for this file): the whole u20 run with these
-# eight arms took 88–128 s per seed on 238 matched traces, and the S4 182 run with its
-# four arms took 101–161 s per seed on 1770 traces (74–115 s at u50). The membership
-# attack therefore costs almost the same whatever the pool size, so expect roughly
-# 5–10 min per seed here for the ten arms; three seeds as in S4. tpr@fpr = 0.001 needs
-# 1000 non-members (S4-2), far beyond this rung, so it stays NaN with a validity warning;
-# tpr@fpr = 0.01 needs 100 and resolves at threshold 0.3 (about 118 non-members, see the
-# map_matching comment).
+# arms took 88–128 s per seed on 238 matched traces, and the S4 runs took 74–115 s per
+# seed at u50 and 101–161 s at u182. The membership attack costs almost the same whatever
+# the pool size, so expect a few minutes per seed here for the ten arms — this is the
+# cheapest of the four remaining mechanism runs, which is why it goes first. tpr@fpr =
+# 0.001 needs 1000 non-members and tpr@fpr = 0.01 needs 100 (S4-2); at 50 users and
+# threshold 0.05 both are likely out of reach, so they stay NaN with a validity warning
+# and only tpr@fpr = 0.1 (10 non-members) resolves. That is expected at this rung: it is
+# the scaling step towards u182, not the reporting rung.
 #
-# Run it (the author, not a session; detached, after geolife_mech_mia_u50.yaml):
-#   $env:PYTHONHASHSEED=0; uv run trajguard repeat config/experiments/geolife_mech_mia_u182.yaml --seeds 1 2 3
+# Run it (the author, not a session; detached, first of the four):
+#   $env:PYTHONHASHSEED=0; uv run trajguard repeat config/experiments/geolife_mech_mia_u50.yaml --seeds 1 2 3
 experiment:
-  id: geolife_mech_mia_u182
+  id: geolife_mech_mia_u50
   seed: 42                   # run seed: shadow subsets, generator fit noise
   split_seed: 42             # population seed: user subsample + split; pinned across seeds
-  output_dir: results/geolife_mech_mia_u182
+  output_dir: results/geolife_mech_mia_u50
 
 map:
   source: osm
@@ -64,9 +65,7 @@ dataset:
   id: geolife
   path: data/raw/geolife
   native_region: beijing
-  max_users: 182             # full-scale reporting rung, stated explicitly: the
-                             # max_users column in results.csv and the per-rung
-                             # split in notebooks/03_s4_sweep.ipynb rely on it
+  max_users: 50              # design §6.4 sample ladder: 20/50/100/182
 
 cleaning:
   max_speed_kmh: 200
@@ -79,14 +78,11 @@ map_matching:
   k_candidates: 8
   radius_m: 50
   gps_error_m: 20
-  # S4-1 population threshold, reporting value (R3; author decision, 17 Aug 2026,
-  # from the 50-rung measurement, docs/HANDOFF.md 1.3 / notebooks/03_s4_sweep.ipynb §9):
-  # the earlier note "0.5 should suffice from the 50-user rung up" did NOT survive
-  # measurement — 0.5 projects only 81 non-members at 182 users (< 100 needed for
-  # fpr = 0.01), 0.4 reaches 100 exactly, 0.3 reaches it with margin (projected
-  # 118 non-members, 33/50 users covered at the 50 rung). 0.05 remains the
-  # measured record of the u20 rung (its config is unchanged).
-  min_match_score: 0.3
+  # S4-1 population threshold, same as the frozen S4 u50 config geolife_synth_mia_u50.yaml
+  # (docs/RUNNING.md §7.4), so the raw pool of that run is reused. The reporting value 0.3
+  # (author decision, 17 Aug 2026) starts at the 182 rung, in geolife_mech_mia_u182.yaml;
+  # 0.05 remains the measured record of the u20 and u50 rungs.
+  min_match_score: 0.05
 
 split:
   scheme: by_user
@@ -98,9 +94,9 @@ synthetic_generators:
   - id: markov               # non-private baseline (memorizes the train split)
     params: {order: 1}
   - id: rn_ldp_synth         # LDP prototype (docs/RN_LDP_SYNTH_DESIGN.md); ε = 2 is the
-    params: {epsilon: [0.5, 2.0, 8.0]}   # S4 anchor, the grid widened 22 Sep 2026 to the
-                                         # shared ε grid; same-class shadows share the
-                                         # arm's epsilon; grid/l_max keep v1 defaults
+    params: {epsilon: [0.5, 2.0, 8.0]}   # S4 anchor, the other two complete the shared ε
+                                         # grid; same-class shadows share the arm's
+                                         # epsilon; grid/l_max keep v1 defaults
   - id: ldptrace             # ZM-1 (docs/NACRT_MEHANIZMI.md §2): grid 12x12, quantile 0.9,
     params: {epsilon: [0.5, 2.0, 8.0]}   # length_share 0.1, alpha 0.3, beta 0.2 (defaults);
                                          # same-class shadows share the arm's epsilon
@@ -124,10 +120,9 @@ metrics:
   memory: false              # R0 (RUNNING.md §7.3): peak-memory tracing roughly
                              # doubles attack time; budget verdicts need untraced
                              # runs. peak_memory_mb stays empty in this campaign.
-  # Budget 1200 s, the S4 reporting value for the 182 rung (R3; author decision,
-  # 17 Aug 2026, from the 50-rung measurement, docs/HANDOFF.md 1.3) — decided for the
-  # campaign as a whole. 300 s remains the budget of the u20 rung.
-  attack_time_budget_s: 1200
+  # Budget 300 s, the value of the u20 and u50 rungs (report §6.6, X = 300 s per attack
+  # invocation); 1200 s starts at the 182 rung.
+  attack_time_budget_s: 300
 
 reporting:
   export: [csv]

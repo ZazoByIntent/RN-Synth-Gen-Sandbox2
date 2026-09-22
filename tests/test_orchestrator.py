@@ -288,6 +288,84 @@ def test_unknown_attacker_gallery_fails_loudly(tmp_path: Path) -> None:
         run(write_config(tmp_path, cfg))
 
 
+# --- the planned u50/u182 mechanism configs: arms and attackers pinned ----------------
+# The comparison notebook (docs/NACRT_MEHANIZMI.md §1.6) only compares like with like if
+# every rung of the ladder carries the same arms, so the four not-yet-run configs get
+# explicit expectations here. load_config already expands list-valued params into one arm
+# per value, so these refs are exactly the arms the orchestrator will run. Configs outside
+# this table (the measured u20 pair, frozen) only have to keep parsing.
+
+# One `none` arm plus three parameter values for each of the five mechanisms.
+_MECH_ARMS: frozenset[str] = frozenset(
+    {
+        "none",
+        "geo_indistinguishability:epsilon=0.1",
+        "geo_indistinguishability:epsilon=1.0",
+        "geo_indistinguishability:epsilon=10.0",
+        "point_ldp:epsilon=4.0",
+        "point_ldp:epsilon=6.0",
+        "point_ldp:epsilon=8.0",
+        "spatial_rounding:cell_m=100.0",
+        "spatial_rounding:cell_m=500.0",
+        "spatial_rounding:cell_m=2000.0",
+        "temporal_downsampling:interval_s=30.0",
+        "temporal_downsampling:interval_s=120.0",
+        "temporal_downsampling:interval_s=600.0",
+        "gaussian_noise:sigma_m=50.0",
+        "gaussian_noise:sigma_m=200.0",
+        "gaussian_noise:sigma_m=1000.0",
+    }
+)
+
+# markov plus the shared epsilon grid of the three private generators.
+_GENERATOR_ARMS: frozenset[str] = frozenset(
+    {"markov:order=1"}
+    | {
+        f"{gen}:epsilon={eps}"
+        for gen in ("rn_ldp_synth", "ldptrace", "privtrace")
+        for eps in (0.5, 2.0, 8.0)
+    }
+)
+
+_EXPECTED_ARMS: dict[str, frozenset[str]] = {
+    "geolife_mech_reid_u50.yaml": _MECH_ARMS,
+    "geolife_mech_reid_u182.yaml": _MECH_ARMS,
+    "geolife_mech_mia_u50.yaml": _GENERATOR_ARMS,
+    "geolife_mech_mia_u182.yaml": _GENERATOR_ARMS,
+}
+
+# (attack_type, distance, gallery, known_points, target_scopes), in config order.
+_AttackEntry = tuple[str, str, str, tuple[int, ...], tuple[str, ...]]
+
+_REID_TAIL: tuple[_AttackEntry, ...] = (
+    ("reconstruction", "dtw", "rematched", (), ("protected",)),
+    ("poi_inference", "dtw", "rematched", (), ("protected",)),
+)
+
+_EXPECTED_ATTACKS: dict[str, tuple[_AttackEntry, ...]] = {
+    # The release attacker keeps all three k at u50 and is trimmed to k = 3 at u182,
+    # where a full-release call costs hours (see the cost estimates in the configs).
+    "geolife_mech_reid_u50.yaml": (
+        ("reidentification", "dtw", "rematched", (3, 5, 10), ("raw", "protected")),
+        ("reidentification", "dtw_norm", "rematched", (3, 5, 10), ("raw", "protected")),
+        ("reidentification", "dtw_norm", "release", (3, 5, 10), ("protected",)),
+    )
+    + _REID_TAIL,
+    "geolife_mech_reid_u182.yaml": (
+        ("reidentification", "dtw", "rematched", (3, 5, 10), ("raw", "protected")),
+        ("reidentification", "dtw_norm", "rematched", (3, 5, 10), ("raw", "protected")),
+        ("reidentification", "dtw_norm", "release", (3,), ("protected",)),
+    )
+    + _REID_TAIL,
+    "geolife_mech_mia_u50.yaml": (
+        ("membership_inference", "dtw", "rematched", (), ("synthetic",)),
+    ),
+    "geolife_mech_mia_u182.yaml": (
+        ("membership_inference", "dtw", "rematched", (), ("synthetic",)),
+    ),
+}
+
+
 @pytest.mark.parametrize(
     "config_path",
     sorted((Path(__file__).parent.parent / "config" / "experiments").glob("geolife_mech_*.yaml")),
@@ -298,6 +376,17 @@ def test_experiment_configs_parse(config_path: Path) -> None:
     loaded = load_config(config_path)
     galleries = [s.gallery for s in loaded.attacks if s.attack_type == "reidentification"]
     assert all(g in GALLERIES for g in galleries)
+
+    expected_arms = _EXPECTED_ARMS.get(config_path.name)
+    if expected_arms is None:  # the frozen u20 pair: parsing is the whole contract
+        return
+    arms = {spec.ref for spec in loaded.mechanisms} | {spec.ref for spec in loaded.generators}
+    assert arms == expected_arms
+    entries = tuple(
+        (spec.attack_type, spec.distance, spec.gallery, spec.known_points, spec.target_scopes)
+        for spec in loaded.attacks
+    )
+    assert entries == _EXPECTED_ATTACKS[config_path.name]
 
 
 def test_reconstruction_rejects_reid_attacker_keys(tmp_path: Path) -> None:
