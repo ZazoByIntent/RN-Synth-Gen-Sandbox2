@@ -14,16 +14,18 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from jinja2 import Environment, PackageLoader
 
+from trajguard.attacks.base import DEFAULT_GALLERY
 from trajguard.evaluation.roc import tpr_at_fpr_measurable
 from trajguard.geometry import DEFAULT_DISTANCE
-from trajguard.reporting.plots import headline_metric, with_distance
+from trajguard.reporting.plots import gallery_sort_key, headline_metric, with_attacker
 from trajguard.reporting.results_io import (
     aggregate_over_seeds,
     legacy_distance,
+    legacy_gallery,
     read_results_csv,
 )
 from trajguard.reporting.results_schema import (
-    LEGACY_RESULTS_COLUMNS,
+    LEGACY_RESULTS_HEADERS,
     RESULTS_COLUMNS,
     ResultRow,
 )
@@ -33,9 +35,11 @@ _TRADEOFF_PRIVACY = "top1_acc"
 _TRADEOFF_UTILITY = "cell_js_divergence"
 _SPLIT_ORDER = ("train", "test", "shadow", "attack")
 _EXPORT_FORMATS = ("csv", "parquet")
-# Distances a result_id may name explicitly; the default one stays implicit, so
-# the ids of the measured S4 record keep their meaning.
+# Distances and galleries a result_id may name explicitly; the default of each stays
+# implicit, so the ids of the measured S4 record keep their meaning. In an id the
+# distance segment comes first and the gallery segment last.
 _DISTANCE_SEGMENTS = frozenset({"dtw_norm"})
+_GALLERY_SEGMENTS = frozenset({"release"})
 
 
 # --- parsed result rows -----------------------------------------------------------
@@ -53,6 +57,7 @@ class MetricRow:
     params: str  # "" or "epsilon=1.0,unit_m=25.0"
     known_points: int | None
     distance: str | None  # reidentification attacker distance: dtw | dtw_norm
+    gallery: str | None  # reidentification attacker gallery: rematched | release
     metric: str
     value: float | None
     ci_low: float | None
@@ -116,18 +121,23 @@ def _parse_target_ref(ref: str) -> tuple[str, str, str]:
     return scope, mech, params
 
 
-def _parse_result_id(result_id: str) -> tuple[str, str, int | None, str | None]:
-    """result_id → (attack family, target ref, known_points, distance); loud on junk.
+def _parse_result_id(result_id: str) -> tuple[str, str, int | None, str | None, str | None]:
+    """result_id → (attack family, target ref, known_points, distance, gallery); loud on junk.
 
     Only reidentification ids carry a ``:k<N>`` suffix, optionally followed by a
-    non-default distance (``:dtw_norm``); the default ``dtw`` is never spelled
-    out, so ids measured before the distance axis existed keep their meaning.
-    Every other family (reconstruction, poi_inference, membership_inference,
-    utility) is ``<family>:<target ref>`` with neither knob.
+    non-default distance (``:dtw_norm``) and then by a non-default gallery
+    (``:release``); the defaults ``dtw`` and ``rematched`` are never spelled out,
+    so ids measured before those axes existed keep their meaning. Every other
+    family (reconstruction, poi_inference, membership_inference, utility) is
+    ``<family>:<target ref>`` with none of the three knobs.
     """
     parts = result_id.split(":")
     if len(parts) < 2:
         raise ValueError(f"unrecognised result_id {result_id!r}")
+    gallery: str | None = None
+    if len(parts) >= 4 and parts[-1] in _GALLERY_SEGMENTS:
+        gallery = parts[-1]
+        parts = parts[:-1]
     distance: str | None = None
     if len(parts) >= 4 and parts[-1] in _DISTANCE_SEGMENTS:
         distance = parts[-1]
@@ -136,12 +146,20 @@ def _parse_result_id(result_id: str) -> tuple[str, str, int | None, str | None]:
     if tail is not None:
         target = ":".join(parts[1:-1])
         _parse_target_ref(target)
-        return parts[0], target, int(tail.group(1)), distance or DEFAULT_DISTANCE
-    if distance is not None:
-        raise ValueError(f"distance suffix without a k<N> tail in result_id {result_id!r}")
+        return (
+            parts[0],
+            target,
+            int(tail.group(1)),
+            distance or DEFAULT_DISTANCE,
+            gallery or DEFAULT_GALLERY,
+        )
+    if distance is not None or gallery is not None:
+        raise ValueError(
+            f"attacker suffix (distance/gallery) without a k<N> tail in result_id {result_id!r}"
+        )
     target = ":".join(parts[1:])
     _parse_target_ref(target)
-    return parts[0], target, None, None
+    return parts[0], target, None, None, None
 
 
 def _distance_key(distance: str | None) -> str:
@@ -182,7 +200,7 @@ def _opt_float(value: Any) -> float | None:
 
 
 def _metric_row(exp_id: str, entry: dict[str, Any]) -> MetricRow:
-    attack, target, known_points, distance = _parse_result_id(str(entry["result_id"]))
+    attack, target, known_points, distance, gallery = _parse_result_id(str(entry["result_id"]))
     scope, mechanism, params = _parse_target_ref(target)
     return MetricRow(
         exp_id=exp_id,
@@ -193,6 +211,7 @@ def _metric_row(exp_id: str, entry: dict[str, Any]) -> MetricRow:
         params=params,
         known_points=known_points,
         distance=distance,
+        gallery=gallery,
         metric=str(entry["metric"]),
         value=_opt_float(entry["value"]),
         ci_low=_opt_float(entry["ci_low"]),
@@ -467,16 +486,17 @@ def merge_results_tables(results_dir: str | Path, out_dir: Path) -> Path | None:
 
     Pure concatenation — the per-run tables already carry provenance and structured
     columns (docs/REZULTATI_SHEMA.md), so nothing is parsed or recomputed here. The
-    master table always carries the current header; a per-run table written before
-    the ``distance`` column (``LEGACY_RESULTS_COLUMNS``) has that one cell filled in
-    from its family. Any other header fails loudly: a results/ tree mixing schema
-    versions would otherwise misalign columns silently. Returns None when no per-run
-    table exists yet (runs predating the schema).
+    master table always carries the current header; a per-run table written before the
+    ``gallery`` column gets that one cell filled in from its family, and one written
+    before ``distance`` as well gets both. Any other header fails loudly: a results/
+    tree mixing schema versions would otherwise misalign columns silently. Returns
+    None when no per-run table exists yet (runs predating the schema).
     """
     files = sorted(Path(results_dir).rglob("results.csv"))
     if not files:
         return None
-    family_at = LEGACY_RESULTS_COLUMNS.index("family")
+    pre_gallery, pre_distance = LEGACY_RESULTS_HEADERS
+    family_at = RESULTS_COLUMNS.index("family")  # same index in every accepted header
     out = out_dir / "results_master.csv"
     with out.open("w", newline="") as fh:
         writer = csv.writer(fh)
@@ -487,9 +507,19 @@ def merge_results_tables(results_dir: str | Path, out_dir: Path) -> Path | None:
                 header = tuple(next(reader, ()))
                 if header == RESULTS_COLUMNS:
                     writer.writerows(reader)
-                elif header == LEGACY_RESULTS_COLUMNS:
+                elif header == pre_gallery:
                     for cells in reader:
-                        writer.writerow([*cells, legacy_distance(cells[family_at]) or ""])
+                        writer.writerow([*cells, legacy_gallery(cells[family_at]) or ""])
+                elif header == pre_distance:
+                    for cells in reader:
+                        family = cells[family_at]
+                        writer.writerow(
+                            [
+                                *cells,
+                                legacy_distance(family) or "",
+                                legacy_gallery(family) or "",
+                            ]
+                        )
                 else:
                     raise ValueError(
                         f"{f}: header does not match the results schema "
@@ -519,7 +549,8 @@ class RiskMatrix:
     config_hash: str
     exp_ids: tuple[str, ...]
     # (column label, headline metric); the label is the attack family, with a
-    # non-default attacker distance spelled out: "reidentification [dtw_norm]".
+    # non-default attacker distance and gallery spelled out:
+    # "reidentification [dtw_norm, release]".
     columns: tuple[tuple[str, str], ...]
     targets: tuple[str, ...]
     cells: dict[tuple[str, str], RiskCell]  # (target, column label) -> cell
@@ -547,12 +578,18 @@ def _group_matrix(config_hash: str, runs: list[RunInfo]) -> RiskMatrix:
         attack_rows = [r for r in rows if r.attack == attack]
         headline = headline_metric(attack, [r.metric for r in attack_rows])
         metric_rows = [r for r in attack_rows if r.metric == headline]
-        # One column per attacker distance: a family measured with both `dtw` and
-        # `dtw_norm` would otherwise look like one attack with conflicting values.
-        for distance in sorted({r.distance for r in metric_rows}, key=_distance_key):
-            column = with_distance(attack, distance)
+        # One column per attacker (distance, gallery) pair: a family measured with
+        # both `dtw` and `dtw_norm`, or against both the rematched and the released
+        # gallery, would otherwise look like one attack with conflicting values.
+        for distance, gallery in sorted(
+            {(r.distance, r.gallery) for r in metric_rows},
+            key=lambda dg: (_distance_key(dg[0]), gallery_sort_key(dg[1])),
+        ):
+            column = with_attacker(attack, distance, gallery)
             columns.append((column, headline))
-            headline_rows = [r for r in metric_rows if r.distance == distance]
+            headline_rows = [
+                r for r in metric_rows if r.distance == distance and r.gallery == gallery
+            ]
             for target in {r.target for r in headline_rows}:
                 target_rows = [r for r in headline_rows if r.target == target]
                 k_max = max(-1 if r.known_points is None else r.known_points for r in target_rows)
@@ -623,11 +660,11 @@ class AttackSection:
 
 
 def summarize_by_attack(runs: Sequence[RunInfo]) -> tuple[AttackSection, ...]:
-    """One section per (run, attack family, attacker distance), metrics pivoted into columns.
+    """One section per (run, attack family, attacker distance and gallery), metrics pivoted.
 
-    A family measured with a second distance gets its own section, labelled
-    ``reidentification [dtw_norm]``; the metric columns are shared across both
-    sections so the two are read side by side.
+    A family measured with a second distance or against the released gallery gets
+    its own section, labelled ``reidentification [dtw_norm, release]``; the metric
+    columns are shared across the sections so they are read side by side.
     """
     sections: list[AttackSection] = []
     for run in runs:
@@ -636,10 +673,15 @@ def summarize_by_attack(runs: Sequence[RunInfo]) -> tuple[AttackSection, ...]:
             present = sorted({r.metric for r in attack_rows})
             headline = headline_metric(attack, present)
             metrics = (headline, *[m for m in present if m != headline])
-            for distance in sorted({r.distance for r in attack_rows}, key=_distance_key):
-                distance_rows = [r for r in attack_rows if r.distance == distance]
+            for distance, gallery in sorted(
+                {(r.distance, r.gallery) for r in attack_rows},
+                key=lambda dg: (_distance_key(dg[0]), gallery_sort_key(dg[1])),
+            ):
+                attacker_rows = [
+                    r for r in attack_rows if r.distance == distance and r.gallery == gallery
+                ]
                 keys = sorted(
-                    {(r.target, r.known_points) for r in distance_rows},
+                    {(r.target, r.known_points) for r in attacker_rows},
                     key=lambda tk: (_target_order(tk[0]), -1 if tk[1] is None else tk[1]),
                 )
                 rows = tuple(
@@ -648,14 +690,16 @@ def summarize_by_attack(runs: Sequence[RunInfo]) -> tuple[AttackSection, ...]:
                         known_points=k,
                         cells={
                             r.metric: r
-                            for r in distance_rows
+                            for r in attacker_rows
                             if r.target == target and r.known_points == k
                         },
                     )
                     for target, k in keys
                 )
                 sections.append(
-                    AttackSection(run.exp_id, with_distance(attack, distance), metrics, rows)
+                    AttackSection(
+                        run.exp_id, with_attacker(attack, distance, gallery), metrics, rows
+                    )
                 )
     return tuple(sections)
 
@@ -685,9 +729,15 @@ def _tradeoff_points(run: RunInfo) -> list[TradeoffPoint]:
         if r.value is None:
             continue
         x = 0.0 if r.target == "raw" else utility.get(r.target)
-        # One point per (arm, attacker distance), so a run measuring both distances
-        # does not label two points of one arm identically.
-        points.append((math.nan if x is None else x, r.value, with_distance(r.target, r.distance)))
+        # One point per (arm, attacker distance, gallery), so a run measuring two
+        # attackers does not label two points of one arm identically.
+        points.append(
+            (
+                math.nan if x is None else x,
+                r.value,
+                with_attacker(r.target, r.distance, r.gallery),
+            )
+        )
     return points
 
 

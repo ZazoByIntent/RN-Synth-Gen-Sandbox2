@@ -15,6 +15,7 @@ from trajguard.reporting.plots import (
     plot_by_knowledge,
     plot_mechanisms,
     plot_runtime,
+    with_attacker,
 )
 from trajguard.reporting.results_schema import ResultRow
 
@@ -31,12 +32,15 @@ def _row(
     unit_m: float | None = None,
     known_points: int | None = None,
     distance: str | None = None,
+    gallery: str | None = None,
     ci: bool = True,
     runtime: float | None = 0.5,
 ) -> ResultRow:
     result_id = f"{family}:{target_ref}" + (f":k{known_points}" if known_points else "")
     if distance is not None and distance != "dtw":
         result_id += f":{distance}"
+    if gallery is not None and gallery != "rematched":
+        result_id += f":{gallery}"
     return ResultRow(
         value=MetricValue(
             metric_id=f"{result_id}:{metric}",
@@ -55,6 +59,7 @@ def _row(
         unit_m=unit_m,
         known_points=known_points,
         distance=distance,
+        gallery=gallery,
         attack_runtime_s=runtime,
     )
 
@@ -171,7 +176,7 @@ def test_plot_runtime_without_runtimes_writes_nothing(tmp_path: Path) -> None:
 # --- attacker distance: dtw vs dtw_norm -------------------------------------------
 
 
-def _raw_reid(value: float, k: int, distance: str) -> ResultRow:
+def _raw_reid(value: float, k: int, distance: str, gallery: str = "rematched") -> ResultRow:
     return _row(
         "reidentification",
         "raw",
@@ -181,6 +186,7 @@ def _raw_reid(value: float, k: int, distance: str) -> ResultRow:
         arm_id="",
         known_points=k,
         distance=distance,
+        gallery=gallery,
     )
 
 
@@ -256,4 +262,77 @@ def test_plot_by_epsilon_draws_one_line_per_arm_and_distance(
     assert labels == [
         "geo_indistinguishability, k=5",
         "geo_indistinguishability, k=5 [dtw_norm]",
+    ]
+
+
+# --- attacker gallery: rematched vs release ---------------------------------------
+
+
+def test_with_attacker_spells_out_only_the_non_default_axes() -> None:
+    """The label of the attacker measured before these axes existed is unchanged; every
+    stronger attacker names the axes it differs on, distance first."""
+    assert with_attacker("raw", None, None) == "raw"
+    assert with_attacker("raw", "dtw", "rematched") == "raw"
+    assert with_attacker("raw", "dtw_norm", "rematched") == "raw [dtw_norm]"
+    assert with_attacker("raw", "dtw", "release") == "raw [release]"
+    assert with_attacker("raw", "dtw_norm", "release") == "raw [dtw_norm, release]"
+
+
+def test_headline_rows_represents_an_arm_by_its_default_gallery() -> None:
+    """The released gallery is a second attacker, so it never takes over the one-row-per-arm
+    views — not even when it was measured at a larger knowledge level."""
+    both = [_raw_reid(0.3, 5, "dtw"), _raw_reid(0.9, 10, "dtw", gallery="release")]
+    _, picked = headline_rows(both, "reidentification")
+    assert [(r.known_points, r.gallery) for r in picked] == [(5, "rematched")]
+    # a run that measured only the released gallery is still represented
+    _, only_release = headline_rows([both[1]], "reidentification")
+    assert [(r.known_points, r.gallery) for r in only_release] == [(10, "release")]
+
+
+def test_plot_by_knowledge_draws_one_line_per_arm_distance_and_gallery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        _raw_reid(0.3, 3, "dtw"),
+        _raw_reid(0.4, 5, "dtw"),
+        _raw_reid(0.6, 3, "dtw_norm", gallery="release"),
+        _raw_reid(0.7, 5, "dtw_norm", gallery="release"),
+    ]
+    labels: list[str] = []
+    _capture_line_labels(monkeypatch, labels)
+    (written,) = plot_by_knowledge(rows, tmp_path)
+    assert written.name == "by_knowledge_reidentification.png"
+    assert labels == ["raw", "raw [dtw_norm, release]"]
+
+
+def test_plot_by_epsilon_draws_one_line_per_arm_distance_and_gallery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the gallery in the group key, the rematched and the released attacker of
+    one arm would share a single polyline that jumps between them at each epsilon."""
+    rows = [
+        _row(
+            "reidentification",
+            f"protected:geo_indistinguishability:epsilon={eps}",
+            "top1_acc",
+            value,
+            epsilon=eps,
+            known_points=5,
+            distance="dtw_norm",
+            gallery=gallery,
+        )
+        for eps, gallery, value in (
+            (1.0, "rematched", 0.3),
+            (10.0, "rematched", 0.5),
+            (1.0, "release", 0.6),
+            (10.0, "release", 0.8),
+        )
+    ]
+    labels: list[str] = []
+    _capture_line_labels(monkeypatch, labels)
+    (written,) = plot_by_epsilon(rows, tmp_path)
+    assert written.name == "by_epsilon_reidentification.png"
+    assert labels == [
+        "geo_indistinguishability, k=5 [dtw_norm]",
+        "geo_indistinguishability, k=5 [dtw_norm, release]",
     ]
