@@ -1,4 +1,17 @@
-"""Reidentification / linkage attack (design §6.1, de Montjoye 2013)."""
+"""Reidentification / linkage attack (design §6.1, de Montjoye 2013).
+
+The attacker's trajectory distance is a configurable knob (``attacker.distance``),
+one of the names in ``geometry.DISTANCES``:
+
+* ``dtw`` — the unnormalised dynamic-time-warping cost, and the default. Every
+  measured S4 number was produced with it, so it must keep its behaviour and its
+  result ids; the id never spells it out.
+* ``dtw_norm`` — the same cost divided by ``L``, the number of cells on the optimal
+  alignment. The unnormalised sum grows with the number of gallery points, which
+  lets short gallery traces win on length rather than on geometry; the normalised
+  distance is the per-matched-pair mean and removes that bias (decision of
+  22 Sep 2026). Its result ids carry a trailing ``:dtw_norm`` segment.
+"""
 
 import time
 from collections import defaultdict
@@ -11,7 +24,12 @@ import numpy as np
 from trajguard.attacks.base import Attack, BackgroundKnowledge
 from trajguard.datamodel import AttackResult, MatchedTrajectory
 from trajguard.experiments.registry import register
-from trajguard.geometry import dtw
+from trajguard.geometry import DEFAULT_DISTANCE, DISTANCES
+
+
+def distance_suffix(distance: str) -> str:
+    """The ``result_id`` segment naming a non-default attacker distance ("" for ``dtw``)."""
+    return "" if distance == DEFAULT_DISTANCE else f":{distance}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,16 +38,18 @@ class Ranking:
 
     true_user: str
     users: tuple[str, ...]  # gallery user ids, nearest first (deduped to min distance)
-    distances: tuple[float, ...]  # aligned DTW distances
+    distances: tuple[float, ...]  # aligned distances in the configured distance
 
 
 @register("attack", "reidentification")
 class ReidentificationAttack(Attack):
-    """Links a probe trajectory to a known individual by nearest-neighbour DTW.
+    """Links a probe trajectory to a known individual by nearest-neighbour distance.
 
-    Probes come from ``aux`` (the attacker's raw knowledge, design §6.1) when
-    given, else from ``target`` itself (leave-one-out over one pool). Every probe
-    trajectory whose user has at least two trajectories in the probe source is
+    The distance is the configured one (``dtw`` by default, ``dtw_norm`` for the
+    length-normalised variant; see the module docstring). Probes come from ``aux``
+    (the attacker's raw knowledge, design §6.1) when given, else from ``target``
+    itself (leave-one-out over one pool). Every probe trajectory whose user has
+    at least two trajectories in the probe source is
     attacked: the attacker knows ``known_points`` evenly-spaced points of it and
     searches the gallery (``target`` minus the probe's own traj_id) for the
     nearest match, deduplicated to one distance per user. Keeping the probe set
@@ -45,8 +65,11 @@ class ReidentificationAttack(Attack):
 
     def configure(self, knowledge: BackgroundKnowledge) -> None:
         """Set the attacker's background knowledge (k points, distance)."""
-        if knowledge.distance != "dtw":
-            raise ValueError(f"reidentification implements only 'dtw', got {knowledge.distance!r}")
+        if knowledge.distance not in DISTANCES:
+            raise ValueError(
+                f"reidentification supports distances {sorted(DISTANCES)}, "
+                f"got {knowledge.distance!r}"
+            )
         self._knowledge = knowledge
 
     def run(self, target: Sequence[MatchedTrajectory], aux: Any = None) -> AttackResult:
@@ -55,6 +78,7 @@ class ReidentificationAttack(Attack):
         The orchestrator stamps ``exp_id`` and ``target_data_ref`` onto the result.
         """
         started = time.perf_counter()
+        distance = DISTANCES[self._knowledge.distance]
         probes: Sequence[MatchedTrajectory] = target if aux is None else aux
         by_user: dict[str, list[int]] = defaultdict(list)
         for i, traj in enumerate(probes):
@@ -72,7 +96,7 @@ class ReidentificationAttack(Attack):
             for j, other in enumerate(target):
                 if other.traj_id == traj.traj_id:
                     continue
-                d = dtw(known, gallery_coords[j])
+                d = distance(known, gallery_coords[j])
                 if other.user_id not in best or d < best[other.user_id]:
                     best[other.user_id] = d
             ranked = sorted(best.items(), key=lambda kv: kv[1])
@@ -85,7 +109,10 @@ class ReidentificationAttack(Attack):
             )
 
         return AttackResult(
-            result_id=f"reidentification:k{self._knowledge.known_points}",
+            result_id=(
+                f"reidentification:k{self._knowledge.known_points}"
+                f"{distance_suffix(self._knowledge.distance)}"
+            ),
             attack_id="reidentification",
             exp_id="",  # stamped by the orchestrator
             target_data_ref="raw",  # stamped by the orchestrator

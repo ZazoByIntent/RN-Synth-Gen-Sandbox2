@@ -137,3 +137,41 @@ def test_unsupported_distance_rejected() -> None:
     attack = ReidentificationAttack()
     with pytest.raises(ValueError, match="dtw"):
         attack.configure(BackgroundKnowledge(known_points=4, distance="hausdorff"))
+
+
+# --- attacker distance: dtw vs dtw_norm -------------------------------------------
+
+# User A drives 590 m along a straight line; user B has a two-point decoy trace 150 m
+# off that line. A's two identical traces make A probeable (and give each probe a
+# gallery trace of its own user), B's single trace is gallery-only.
+LONG_LINE = [(i * 10.0, 0.0) for i in range(60)]
+LENGTH_BIAS_POOL = [
+    mt("A1", "A", LONG_LINE),
+    mt("A2", "A", LONG_LINE),
+    mt("B1", "B", [(295.0, 150.0), (305.0, 150.0)]),
+]
+
+
+def _top1_users(distance: str) -> set[str]:
+    attack = ReidentificationAttack()
+    attack.configure(BackgroundKnowledge(known_points=3, distance=distance))
+    result = attack.run(LENGTH_BIAS_POOL)
+    assert len(result.predictions) == 2  # only A has two trajectories, so only A is probed
+    return {r.users[0] for r in result.predictions}
+
+
+def test_dtw_norm_removes_the_short_gallery_bias() -> None:
+    """The unnormalised DTW sum grows with the gallery trace's length, so the short
+    decoy B wins against A's own 60-point trace; dividing by the alignment length
+    (decision of 22 Sep 2026) ranks the true user A first."""
+    assert _top1_users("dtw") == {"B"}
+    assert _top1_users("dtw_norm") == {"A"}
+
+
+def test_dtw_norm_is_accepted_and_named_in_the_default_result_id() -> None:
+    """Only the non-default distance is spelled out (the orchestrator restates the id)."""
+    attack = ReidentificationAttack()
+    attack.configure(BackgroundKnowledge(known_points=3, distance="dtw_norm"))
+    assert attack.run(POOL).result_id == "reidentification:k3:dtw_norm"
+    attack.configure(BackgroundKnowledge(known_points=3, distance="dtw"))
+    assert attack.run(POOL).result_id == "reidentification:k3"
