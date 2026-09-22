@@ -1163,6 +1163,23 @@ Everything under `data/interim`, `data/processed`, `data/protected`,
 `data/raw/` is your immutable input — the pipeline never writes there, and neither
 should you (except to drop in downloaded datasets).
 
+**Always set `PYTHONHASHSEED=0` for real runs.** Map matching is not reproducible
+across processes: on ties between candidate edges the `leuvenmapmatching` library picks
+one in an order that depends on Python's hash seed, so two fresh computations of the same
+pool can differ by an edge (seen on the `geolife_onroad` fixture, trace
+`006/20081206080000`). The cache makes every run over an already computed pool
+reproducible; the hash seed makes the *first* computation reproducible. Every S4 and
+mechanism run so far used `PYTHONHASHSEED=0`. The variable must be set before Python
+starts — it cannot be changed from inside a running process:
+
+```powershell
+$env:PYTHONHASHSEED = "0"; uv run trajguard repeat <config> --seeds 1 2 3
+```
+
+```sh
+PYTHONHASHSEED=0 uv run trajguard repeat <config> --seeds 1 2 3
+```
+
 ## 11. Troubleshooting
 
 | Symptom | Cause and fix |

@@ -1,6 +1,7 @@
 # Predaja dela: stanje kampanje S4 in odprte postavke
 
-**Različica:** 3. september 2026 (skrajšana). Celotna zgodovina predaje — analiza vrzeli
+**Različica:** 3. september 2026 (skrajšana); odločitve o odprtih postavkah vpisane
+22. septembra 2026 (uvod razdelka 2). Celotna zgodovina predaje — analiza vrzeli
 z dne 4. avgusta 2026, recenzija, dnevnik izvedbe valov 0–2 in prvotni zapisi kampanje —
 je v `arhiv/HANDOFF_2026-08-21.md`; načrt in izid popravkov S4-1 do S4-4 v
 `arhiv/HANDOFF_S4_POPRAVKI.md`. Ta datoteka hrani samo tisto, kar prihodnja seja
@@ -245,6 +246,21 @@ Vse spodnje je bilo odprto ob zadnjem pregledu (21. avgust 2026). Zaprte vrzeli 
 prvotne analize (O1–O6, D1–D4, S4-1 do S4-4) tu niso ponovljene; njihova zgodovina in
 commiti so v `arhiv/HANDOFF_2026-08-21.md`.
 
+**Pregled odločitev z dne 22. septembra 2026.** Avtor je ta dan odločil o vseh odprtih
+odločitvah razen pragov (čakajo mentorico) in D5 (projekt »Izbirni predmeti«). Vsaka
+odločitev je zapisana ob svoji postavki spodaj z oznako »Odločeno 22. 9. 2026«. Iz njih
+sledi zaporedje pred primerjalnim zvezkom (`docs/NACRT_MEHANIZMI.md` §1.6):
+
+1. PR kode: nova vrednost `attacker.distance: dtw_norm` (2.3, ZM-3 in 2.5).
+2. PR kode: stolpca `exp_id` in `config_hash` v `repetitions.csv` (2.5).
+3. PR kode: dejstva PrivTrace v `run.json` (2.3, ZM-4).
+4. Kopija `geolife_mech_mia_u182.yaml` (danes obstaja samo `_u20`).
+5. Avtor sam požene vse sestrske konfiguracije pri stopnji 182; stopnja 50 za mehanizme
+   se preskoči.
+6. Primerjalni zvezek nad stopnjo 182.
+
+Neodvisno od tega zaporedja sta odblokirana M3 (dve novi metriki uporabnosti) in A4.
+
 ### 2.1 Odločitve avtorja (niso koda; blokirajo poročilo, ne repozitorija)
 
 - **Pragovi zadostnosti zaščite** (poročilo §8.2): pri kateri vrednosti metrike
@@ -254,14 +270,20 @@ commiti so v `arhiv/HANDOFF_2026-08-21.md`.
   povprečna napaka ≥ 500 m; dom/delo lokalizirana ≤ 10 %. **Čaka potrditev
   mentorice**; v repozitoriju pragovi niso kodirani.
 - **Pomen »odstopanja statistik gibanja«** (M3, poročilo §7.5): `UTILITY_METRICS` že
-  ima `cell_js_divergence` in `length_dist_error`; manjkata analogiji za trajanje in
-  hitrost, a najprej mora biti jasno, kaj metrika sploh meri.
+  ima `cell_js_divergence` in `length_dist_error`. **Odločeno 22. 9. 2026:** M3 je
+  razlika porazdelitev čez vse poti izdaje, v isti obliki kot `length_dist_error`, za
+  dolžino, trajanje in hitrost. Dodata se `duration_dist_error` in `speed_dist_error`.
+  Ker sintetične poti (`markov`, `ldptrace`, `privtrace`, `rn_ldp_synth`) nimajo časov,
+  veljata novi metriki samo za perturbacijske mehanizme; pri sintezi M3 ostane dolžina
+  in celice. Postavka je zdaj koda (val 3, 2.2).
 - **Definicija »poznanega vhodnega vzorca«** za rekonstrukcijo z delnim predznanjem
-  (A4, poročilo §6.3). Dokler ni določena, je A4 blokiran.
+  (A4, poročilo §6.3). **Odločeno 22. 9. 2026:** napadalec pozna k enakomerno
+  razporejenih točk tarčne poti (k = 3 / 5 / 10), enako predznanje kot pri
+  reidentifikaciji (`known_points`, `_evenly_spaced` v `attacks/reidentification.py`);
+  rekonstrukcija jih uporabi kot sidra. A4 ni več blokiran (2.2).
 - **Prekoračitve proračuna pri 182** (sedem klicev reidentifikacije na seme, glej 1.4)
-  so sprejete po pravilu R1. Če bo poročilo zahtevalo klic `k10` pod proračunom, sta
-  naslednja koraka lestvice (`docs/RUNNING.md` §7.3) opustitev `k10` ali nižja
-  stopnja — oboje spremeni zasnovo in je avtorjeva odločitev.
+  so sprejete po pravilu R1. **Odločeno 22. 9. 2026:** ostane tako; poročilo prekoračitev
+  samo navede, `k10` in stopnja 182 ostaneta. Postavka je zaprta.
 
 ### 2.2 Val 3 — dopolnitve znotraj obstoječih štirih scenarijev
 
@@ -272,7 +294,10 @@ commiti so v `arhiv/HANDOFF_2026-08-21.md`.
 - **M2 — top-k točnost POI** (poročilo §7.5) skupaj s pogledom `as_poi_visits()`
   (`representation/views.py`, danes `NotImplementedError`). Predpogoj: v repozitoriju
   ni vira točk interesa in testi ne smejo na omrežje — potreben je fixture sloj POI.
-- **A4** — glej 2.1.
+- **M3 — `duration_dist_error` in `speed_dist_error`** (definicija v 2.1): metriki
+  uporabnosti po vzoru `length_dist_error`, samo za perturbacijske mehanizme. Brez blokad.
+- **A4 — rekonstrukcija z delnim predznanjem** (definicija v 2.1: k enakomerno
+  razporejenih točk tarče kot sidra). Brez blokad.
 
 ### 2.3 Val 4 — širina mehanizmov in LDPTrace
 
@@ -324,8 +349,11 @@ celic, mediana 3, na mreži 12 × 12):
   182 je pričakovati stabilnejši L_k.
 - Roka je **poceni**: ~9,5 s na seme za 17 prilagajanj (16 senčnih modelov + tarča),
   brez umerjanja z Dijkstro, zato so kopije konfiguracije za u50 in 182 računsko
-  neproblematične. Odprto (ločen PR): dekodiranje celic v odseke in roka `ldptrace` v
-  `experiments/rnldp_eval.py`.
+  neproblematične. **Odločeno 22. 9. 2026:** dekodiranja celic v odseke ne bo (tudi ne
+  za `privtrace`) in roke `ldptrace` v `experiments/rnldp_eval.py` ne bo — članka LDPTrace
+  in PrivTrace cestnega omrežja ne uporabljata, izhod ostane zaporedje celic; kjer so
+  potrebne točke, velja pravilo člankov (ena naključna točka v celici, s semenom).
+  Postavka je zaprta.
 - **Validacija proti izvirni kodi** (metrike članka, način surovih koordinat na mreži
   v konfiguraciji, primerjalni pogon nad javnim Portom): načrt, predaja in prompt v
   `docs/NACRT_LDPTRACE_VALIDACIJA.md`. Ponovitev številk iz članka ni mogoča (izvirnik
@@ -561,9 +589,10 @@ Branje:
   mreža (50 × 50, k = 2.500) bi za isti delež pravih celic zahtevala ε ≳ 10 in bi izdano
   točko še vedno premaknila za ~300 m. To je pričakovana lastnost LDP na točko, ne napaka
   izvedbe. Točkovni LDP ostaja kandidat za baseline (odločitev D5 je odprta).
-- Odprto: kopiji konfiguracije za stopnji 50 in 182 (cena je majhna: reidentifikacija nad
-  praznimi bazeni traja ~0,01 s, plača se samo ponovno ujemanje vsake roke, ~1–2 min pri
-  u20) in ponovitve čez semena, če bo poročilo potrebovalo interval čez semena.
+- Kopiji konfiguracije za stopnji 50 in 182 obstajata (`geolife_mech_reid_u50/u182`, glej
+  ZM-3 spodaj; `point_ldp` ε = 8 je roka pri 182). **Odločeno 22. 9. 2026:** stopnja 50 se
+  za mehanizme preskoči; avtor požene stopnjo 182 pred primerjalnim zvezkom, s ponovitvami
+  čez semena, kjer ima roka seme.
 
 **ZM-3 naivna trojica — zaključen (4. september 2026, PR #39, veja
 `claude/zm3-naive-baselines`).**
@@ -674,9 +703,16 @@ Branje:
   `point_ldp`; redčenje ne uniči ničesar in reidentifikacijo celo poveča. Za sklepanje o
   domu/delu sta zaokroževanje 100 m in Gauss 50 m praktično brez učinka. Vsi trije
   ostajajo kandidati za baseline (odločitev D5 je odprta).
-- Odprto: (1) hipoteza o dolžinski pristranskosti DTW je **preverjena in potrjena** (4.
-  september 2026, 2.5); odprta ostaja avtorjeva odločitev med normirano razdaljo
-  napadalca in kontrolo dolžine v poročilu; (2) kopiji konfiguracije za stopnji 50 in 182
+- **Odločeno 22. 9. 2026** (točke 1–3 spodaj): (1) dolžinska pristranskost DTW —
+  kombinacija obeh možnosti iz 2.5: nova vrednost `attacker.distance: dtw_norm` (`dtw / L`,
+  L = dolžina optimalne poravnave) v `attacks/reidentification.py`, `dtw` ostane privzeta,
+  zato izmerjeni zapis S4 ostane nedotaknjen; nove meritve mehanizmov poročajo obe
+  razdalji, S4 dobi v poročilu opombo in kontrolno vrstico, ne ponovnega pogona;
+  (2) stopnja 50 se za mehanizme preskoči, avtor pred primerjalnim zvezkom sam požene
+  `geolife_mech_reid_u182.yaml` (z `dtw_norm`, ko bo v kodi); (3) Gaussov šum dobi
+  ponovitve čez semena pri tem pogonu 182, ne pri u20.
+- Ozadje (stanje pred odločitvijo): (1) hipoteza o dolžinski pristranskosti DTW je
+  **preverjena in potrjena** (4. september 2026, 2.5); (2) kopiji konfiguracije za stopnji 50 in 182
   **obstajata in nista pognani** (4. september 2026): `config/experiments/geolife_mech_reid_u50.yaml`
   (vse roke iz u20, prag 0,05, proračun 300 s — merilna stopnja odloči, kaj gre na 182, kot
   pri S4) in `config/experiments/geolife_mech_reid_u182.yaml` (prag 0,3 in proračun 1.200 s,
@@ -782,7 +818,11 @@ Branje:
   2. reda po NormCut preživi samo diagonala, hoja postane vsrkajoča in teče do `max_len`
   (videno enkrat na 200 hoj na majhni testni zbirki); ujame jo varovalka D-4.3 (zdaj s
   ponovnim žrebom).
-- Odprto: (2) roka z gostejšo mrežo (npr. `first_level_k: 12`, kot `ldptrace`) in kopiji
+- **Odločeno 22. 9. 2026:** (3) se izvede — `run.json` bo zapisoval dejstva PrivTrace
+  (`n_states`, število stanj 2. reda, število ponovnih žrebov), majhen PR pred pogonom 182;
+  (2) in (4) ostaneta odprti za kasneje, ker ju primerjalni zvezek ne potrebuje; kopija
+  `geolife_mech_mia_u182.yaml` se naredi pred pogonom 182 (stopnja 50 se preskoči).
+- Ozadje (stanje pred odločitvijo): (2) roka z gostejšo mrežo (npr. `first_level_k: 12`, kot `ldptrace`) in kopiji
   konfiguracije za stopnji 50 in 182 (roka je poceni: ~8 s na seme); (3) `run.json` ne
   zapisuje dejstev PrivTrace (`n_states`, stanja 2. reda) — dobijo se s ponovno
   prilagoditvijo, kot L_k pri LDPTrace pred PR C; (4) **reševalec potovanj ali eksplicitni
@@ -1166,17 +1206,21 @@ federativni pristopi, diffusion generatorji. Vse se priključi prek obstoječih 
 
 - **D5 — zvezkov ne poganja nobena avtomatika** (CI: ruff, mypy, pytest); po
   spremembah, ki vplivajo na izhode, jih je treba ročno ponovno izvesti
-  (`docs/RUNNING.md` §3).
+  (`docs/RUNNING.md` §3). **Odločeno 22. 9. 2026:** ostane ročno — zvezki berejo lokalne
+  rezultate v `results/`, ki jih v CI ni. Postavka je zaprta.
 - **Grafi na ravni poročila čez več zagonov ali čez ponovitve** (`results_master.csv`,
   `repetitions.csv`): funkcije v `reporting/plots.py` berejo vrstice enotne tabele,
   zato je priključitev poceni; `report.py` danes riše samo reidentifikacijski graf
-  kompromisa na zagon. Zvezek 03 to pokriva ročno.
+  kompromisa na zagon. Zvezek 03 to pokriva ročno. **Odločeno 22. 9. 2026:** `report.py`
+  se ne razširi; grafe čez mehanizme in semena da primerjalni zvezek 04. Postavka je zaprta.
 - **Predpomnjenje sintetičnih izdaj** (`data/synthetic/`) in utility metrike nad
   sintezo: LiRA sprašuje model po verjetnosti poti, ne po vzorcih, zato ni bilo
   potrebno; odpre se s prvim korakom, ki ga potrebuje (npr. razdelek 7.3 poročila).
   `rnldp_eval` to pokriva na fixturih.
 - **Neobvezno iz sheme rezultatov** (`docs/REZULTATI_SHEMA.md`): `.parquet` zrcalo
-  glavne tabele; stolpca `exp_id` in `config_hash` v `repetitions.csv`.
+  glavne tabele; stolpca `exp_id` in `config_hash` v `repetitions.csv`. **Odločeno
+  22. 9. 2026:** stolpca se dodata (majhen PR pred pogonom 182, ker primerjalni zvezek
+  bere več eksperimentov skupaj); `.parquet` zrcala ne bo.
 - **A2 (reidentifikacija nad sintetičnimi potmi)** je rešen v poročilu, ne v kodi:
   perturbacija se ocenjuje z reidentifikacijo, sinteza s sklepanjem o članstvu.
 - **Strop memorizacije `markov`** je odvisen od stopnje (AUC ~1,0 pri 20, 0,54 pri 50,
@@ -1188,14 +1232,16 @@ federativni pristopi, diffusion generatorji. Vse se priključi prek obstoječih 
   stara in nova koda dasta isto. Vzrok je izenačenje kandidatov v knjižnici
   `leuvenmapmatching`, ne v najini kodi. Predpomnilnik bazena zagotavlja ponovljivost
   vseh zagonov nad enkrat izračunanim bazenom; dva sveža izračuna pa lahko pri
-  izenačenjih odstopata za rob. Odprto: preveriti pri pravih podatkih in po potrebi
-  fiksirati `PYTHONHASHSEED` v `RUNNING.md` ali v CLI.
+  izenačenjih odstopata za rob. **Odločeno 22. 9. 2026:** pravilo `PYTHONHASHSEED=0` je
+  zapisano v `docs/RUNNING.md` §10; CLI se ne spreminja. Postavka je zaprta.
 - **Točka na meji celice v načinu celic** (ugotovljeno 4. septembra 2026 v PR C): `Grid.cell_of`
   uporablja polodprte intervale, izvirnik LDPTrace zaprte s prvo zadeto celico; nad Portom
   meja lon −8,620002 zadene 0,5 % poti in da drugačno verigo. Ogrodje validacije
   (`reference_cells` v `experiments/ldptrace_eval.py`) uporablja izvirnikovo pravilo,
   orkestratorjev `_cell_pool` pa še `Grid.cell_of`; za MIA nad Portom to ni pomembno.
-  Odprto: ali `_cell_pool` preklopiti na isto pravilo (spremeni hash predpomnilnika).
+  **Odločeno 22. 9. 2026:** `_cell_pool` ostane pri `Grid.cell_of` — preklop bi spremenil
+  hash predpomnilnika in zahteval ponovni pogon Porta brez vpliva na rezultate MIA.
+  Postavka je zaprta.
 - **Dolžinska pristranskost DTW v reidentifikaciji — preverjena in potrjena** (ugotovljeno
   4. septembra 2026 pri ZM-3, preverjeno isti dan na veji `claude/zm3-naive-baselines`,
   glej 2.3): časovno redčenje izdaje na 30 / 120 / 600 s dvigne `top1_acc` pri k = 3 z
@@ -1258,6 +1304,12 @@ federativni pristopi, diffusion generatorji. Vse se priključi prek obstoječih 
   sondami oziroma galerijo enake dolžine, redčenje pa se bere kot vzvod, ki napadalcu
   odpravi pristranskost). Do odločitve poročilo redčenja ne sme brati kot »zaščita, ki
   poveča tveganje«, temveč kot razkritje pristranskosti napadalca.
+
+  **Odločeno 22. 9. 2026: kombinacija obeh možnosti.** V kodo pride nova vrednost
+  `attacker.distance: dtw_norm` (`dtw / L`); `dtw` ostane privzeta, zato izmerjeni zapis
+  S4 ostane veljaven kot zapis nenormiranega napadalca. Nove meritve mehanizmov (pogon
+  182) poročajo obe razdalji; S4 v poročilu dobi opombo o pristranskosti in kontrolno
+  vrstico z `dtw_norm` namesto ponovnega pogona lestvice.
 
 ---
 
