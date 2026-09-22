@@ -383,7 +383,9 @@ utility damage) plus one `tradeoff_<family>.png` per further attack family whose
 arms carry utility values (e.g. `tradeoff_reconstruction.png`; membership
 inference gets none — utility is only measured over protected releases, and its
 arms are synthetic), and utility metrics (`cell_js_divergence`,
-`length_dist_error`) quantify how much the noise distorted the data.
+`length_dist_error`, `duration_dist_error`, `speed_dist_error`) quantify how much
+the noise distorted the data, the two time-based ones applying to perturbation
+releases only.
 
 Beyond `tradeoff`, `reporting.plots` accepts the four planned report figures
 (report §6.8, §7.2–7.6), all drawn from the same rows that go into `results.csv`:
