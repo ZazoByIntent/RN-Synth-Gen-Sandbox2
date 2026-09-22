@@ -26,9 +26,11 @@ ob spremembi sheme se popravita oba, v istem zahtevku za združitev.
 
 - `results/<exp_id>/results.csv` — na zagon; pri ponovitvah `results/<exp_id>/seed<N>/results.csv`.
 - `reports/results_master.csv` — `trajguard report` zlepi vse zagone pod `results/` v eno
-  glavno tabelo (po želji še `.parquet` zrcalo za pandas/DuckDB).
-- `repetitions.csv` ostane nespremenjena (raven čez semena); val 2 ji lahko doda stolpca
-  `exp_id` in `config_hash`, da je samostojno berljiva.
+  glavno tabelo. `.parquet` zrcala ni (odločitev avtorja 22. septembra 2026: primerjalni
+  zvezek bere CSV).
+- `repetitions.csv` (raven čez semena) dobi stolpca `exp_id` in `config_hash`, da je
+  samostojno berljiva, ko primerjalni zvezek bere več eksperimentov skupaj (odločitev
+  avtorja 22. septembra 2026; izvedba še ni narejena — PR, ki ju doda, posodobi ta odstavek).
 
 Vrednosti, ki niso končna števila (NaN/inf pri degeneriranih vejah), se zapišejo kot prazna
 celica — enako kot danes v `metrics.csv`.

@@ -247,8 +247,11 @@ further RN-LDP-Synth development happens only on explicit request, and the bench
 must keep running on baseline mechanisms without it. The first external baseline
 candidate is in: `LDPTraceGenerator` (registered as `ldptrace`, plan in
 `docs/NACRT_MEHANIZMI.md` §2) synthesizes grid-cell walks under per-trajectory
-ε-LDP and emits cell indices, not edge sequences — decoding cells back to roads is a
-separate, later step. The second one, `PrivTraceGenerator` (registered as
+ε-LDP and emits cell indices, not edge sequences. Cells are deliberately not decoded
+back to roads (author's decision, 22 Sep 2026): neither the LDPTrace nor the PrivTrace
+paper uses a road network, so decoding would be our extension, not their method; where
+points are needed, the papers' rule applies — one seeded uniformly random point inside
+each cell. The second one, `PrivTraceGenerator` (registered as
 `privtrace`, plan in `docs/NACRT_MEHANIZMI.md` §5), is the central-DP counterpart: a
 trusted curator noises a two-layer adaptive grid (`synthesis/adaptive_grid.py`) and
 first-/second-order Markov counts over its leaf cells and emits leaf-cell walks; its

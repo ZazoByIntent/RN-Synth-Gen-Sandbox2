@@ -162,6 +162,14 @@ mehanizmov** (predlog imena `notebooks/04_mechanisms_comparison.ipynb`, po vzoru
 To je ločen korak po ZM-4 (lastna seja in PR), ne del nobenega od korakov ZM-1 do ZM-4;
 do takrat vsak korak zapiše svoje vrstice v `HANDOFF.md` §2.3.
 
+**Zaporedje pred zvezkom (odločitev avtorja, 22. september 2026).** Zvezek se piše nad
+stopnjo 182, ne nad 20; stopnja 50 za mehanizme se preskoči. Pred njim: (1) majhni PR-ji
+kode — normirana razdalja napadalca `dtw_norm` (`HANDOFF.md` §2.3, ZM-3), stolpca
+`exp_id` in `config_hash` v `repetitions.csv`, dejstva PrivTrace v `run.json`; (2) avtor
+sam požene vse sestrske konfiguracije pri 182 (reidentifikacija z `dtw_norm`, Gaussov šum
+z več semeni). Zvezek poroča reidentifikacijo z obema razdaljama, sidra S4 pa z `dtw` in
+opombo o dolžinski pristranskosti.
+
 ---
 
 ## 2. ZM-1 LDPTrace kot generator (`synthesis/ldptrace.py`, registrsko ime `ldptrace`) — ZAKLJUČEN
@@ -239,8 +247,10 @@ zemljevida.
   priporočeno: odseki.
 - **D-1.2 Izhod.** `payload` = zaporedje indeksov celic (kot izvirnik), ne dekodirana
   zaporedja odsekov. Napadi payloada ne berejo; utility nad sintezo še ni priključena.
-  Če bo poglavje 7.3 zahtevalo primerjavo utility na ravni odsekov, se dekodiranje doda
-  kasneje s ponovno uporabo `_decode` iz `rn_ldp_synth.py` (ločen PR).
+  **Odločitev avtorja (22. september 2026): dekodiranja v odseke ne bo**, ne za `ldptrace`
+  ne za `privtrace` — članka cestnega omrežja ne uporabljata, zato bi bilo dekodiranje
+  najina razširitev, ne njuna metoda. Kjer so potrebne točke, velja pravilo člankov:
+  ena naključna točka v vsaki celici (s semenom).
 - **D-1.3 Statistika za MIA.** `sequence_log_prob(edge_seq)` = log P(začetek) +
   Σ log P(prehod) + log P(konec | zadnja celica) po agregiranem modelu **brez** α/β
   uteži (ki so pravilo generiranja, ne verjetnostni model). Prehodi z oceno 0 ali med
