@@ -11,7 +11,7 @@ recept) in svoj razdelek ZM-x; prompt za vsako sejo je v §7.
 uporablja samo RN-LDP-Synth. Napadi: reidentifikacija, rekonstrukcija (vezana na
 geo-ind), sklepanje o domu/delu, sklepanje o članstvu (LiRA) nad generatorji.
 
-**Izbor (avtor, 2. september 2026).** Iz nabora v zasnovi §7 in `HANDOFF.md` §2.3 ter iz
+**Izbor (avtor, 2. september 2026).** Iz nabora v zasnovi §7 in `HANDOFF.md` §2.3.0 ter iz
 zapiskov projekta »Izbirni predmeti« (blueprint članka, 45 analiziranih del) so izbrani:
 
 | Korak | Mehanizem | Vmesnik | Garancija | Javna koda | Obseg | Stanje |
@@ -164,7 +164,7 @@ do takrat vsak korak zapiše svoje vrstice v `HANDOFF.md` §2.3.
 
 **Zaporedje pred zvezkom (odločitev avtorja, 22. september 2026).** Zvezek se piše nad
 stopnjo 182, ne nad 20; stopnja 50 za mehanizme se preskoči. Pred njim: (1) majhni PR-ji
-kode — normirana razdalja napadalca `dtw_norm` (`HANDOFF.md` §2.3, ZM-3), stolpca
+kode — normirana razdalja napadalca `dtw_norm` (`HANDOFF.md` §2.3.4), stolpca
 `exp_id` in `config_hash` v `repetitions.csv`, dejstva PrivTrace v `run.json`, metriki
 M3 `duration_dist_error` in `speed_dist_error` (`HANDOFF.md` §2.1); (2) avtor
 sam požene vse sestrske konfiguracije pri 182 (reidentifikacija z `dtw_norm`, Gaussov šum
@@ -196,7 +196,7 @@ odločitve, kjer je načrt spodaj puščal izbiro ali kjer se je izvedba od njeg
 - Test uporabnosti pri »absurdno velikem ε« uporablja ε = 600, ne 80: ε se deli na
   L_k + 1 ≈ 12–20 poročil, zato pri ε = 80 na poročilo ostane le ≈ 5 in šum OUE nad
   100–800 položaji je še viden; nad ≈ 709 `exp` prekorači obseg.
-- Izmerjene vrstice pri stopnji 20 (tri semena): `docs/HANDOFF.md` §2.3. Dekodiranje
+- Izmerjene vrstice pri stopnji 20 (tri semena): `docs/HANDOFF.md` §2.3.1. Dekodiranje
   celic v odseke in roka `ldptrace` v `experiments/rnldp_eval.py` ostajata odprta
   (ločen PR, glej D-1.2). Validacija porta proti izvirni kodi (metrike članka, način
   surovih koordinat, Porto) ima lasten načrt: `docs/NACRT_LDPTRACE_VALIDACIJA.md`.
@@ -204,7 +204,7 @@ odločitve, kjer je načrt spodaj puščal izbiro ali kjer se je izvedba od njeg
   PR #33–#36 so združeni v `main` 4. septembra 2026):** port in izvirnik (klon
   `2d30e41`, popravek samo za seme) sta bila pognana nad istimi 367.008 potmi Porta na
   mreži 6 × 6 pri ε ∈ {0,5, 1, 1,5} s petimi semeni; tabela devetih metrik in branje sta
-  v `docs/HANDOFF.md` §2.3, dejanske odločitve v `docs/NACRT_LDPTRACE_VALIDACIJA.md`
+  v `docs/HANDOFF.md` §2.3.2, dejanske odločitve v `docs/NACRT_LDPTRACE_VALIDACIJA.md`
   §12.5. LDPTrace ostaja kandidat za baseline (odločitev D5 je še odprta).
 
 ### 2.1 Kaj mehanizem počne (Du et al., PVLDB 2023; koda `zealscott/LDPTrace`)
@@ -342,7 +342,7 @@ je izvedba od njega razlikovala:
   na zunanjem robu mreže); `params_hash` vključuje bbox; mreža 1 × 1 je zavrnjena (GRR
   potrebuje k ≥ 2).
 - Izmerjene vrstice pri stopnji 20 (seme 42, pogon 864 s = 14,4 min, torej nad pragom
-  10 min na seme in brez ponovitev `repeat`): `docs/HANDOFF.md` §2.3. Napoved iz D-2.3 se
+  10 min na seme in brez ponovitev `repeat`): `docs/HANDOFF.md` §2.3.3. Napoved iz D-2.3 se
   je potrdila: ponovno ujemanje odvrže vseh 238 sledi pri vseh treh ε (reidentifikacija
   0 nad praznim bazenom), medtem ko `cell_js_divergence` sledi deležu pravih celic (0,42 /
   0,18 / 0,03 pri ε = 4 / 6 / 8) in sklepanje o domu/delu ne umesti nikogar. Točkovni
@@ -449,13 +449,13 @@ njega razlikovala:
   `apply` (kot geo-ind); RMS premik σ·√2, test pri n = 2000 s toleranco 10 %.
 - Izmerjene vrstice pri stopnji 20 (seme 42, pogon 1.054 s = 17,6 min, nad pragom 10 min
   na seme, brez ponovitev `repeat`; vrstice ZM-2 se reproducirajo do decimalke):
-  `docs/HANDOFF.md` §2.3. Ponovno ujemanje obdrži 104 / 32 / 10 od 238 sledi pri
+  `docs/HANDOFF.md` §2.3.4. Ponovno ujemanje obdrži 104 / 32 / 10 od 238 sledi pri
   zaokroževanju 100 / 500 / 2000 m, 222 / 207 / 212 pri redčenju 30 / 120 / 600 s in
   11 / 1 / 0 pri Gaussu 50 / 200 / 1000 m. Napoved iz 4.5 se je potrdila za
   zaokroževanje in Gauss (zaščita z uničenjem izdaje kot pri `point_ldp`), redčenje pa je
   presenetilo: reidentifikacija se dvigne **nad** surovo (0,49–0,54 pri k = 3 proti 0,28)
   ob skoraj nedotaknjenem bazenu — zaradi dolžinske pristranskosti nenormirane DTW v
-  napadu, kar je bilo 4. septembra 2026 preverjeno in potrjeno (`HANDOFF.md` §2.5:
+  napadu, kar je bilo 4. septembra 2026 preverjeno in potrjeno (`HANDOFF.md` §2.5.1:
   normirana razdalja surovi bazen dvigne na 0,52 / 0,57 / 0,60, koda napada se ni
   spremenila, odločitev avtorja je odprta). Kopiji konfiguracije za stopnji 50 in 182
   (`geolife_mech_reid_u50.yaml` z vsemi rokami, `geolife_mech_reid_u182.yaml` s po eno roko
@@ -619,7 +619,7 @@ njega razlikovala:
   velikosti pod obsegom članka, ne napaka. Vrstice so bile 20. septembra 2026 zvečer
   **ponovno izmerjene iz zavezanega drevesa** (`run.json`: `git_commit b0a7dae`) po
   popravkih pregleda; premaknile so se samo vrstice pri ε = 0,5 (deljeni zasilni začetek),
-  vse ostalo je enako do zadnje decimalke. Izmerjene vrstice: `docs/HANDOFF.md` §2.3.
+  vse ostalo je enako do zadnje decimalke. Izmerjene vrstice: `docs/HANDOFF.md` §2.3.5.
 - **Validacija proti izvirniku** (`experiments/privtrace_eval.py`, `scripts/privtrace_reference.patch`
   in diagnostični `scripts/privtrace_reference_no_or.patch`,
   `docs/RUNNING.md` §9.4): isti podvzorec Porta (prvih 20.000 poti), K = 6 na obeh
@@ -652,7 +652,7 @@ njega razlikovala:
   `cvxpy`, množilniki, zavračanje), ki je nismo izklopili. Pri dolžini je izvirnik boljši pri
   ε ≥ 1, a le zato, ker so njegove hoje enakomerno prekratke (4,2–7,1 točke proti 12,0
   strnjenim stanjem pravih poti); portova lastna dolžinska pristranskost je posledica D-4.2.
-  Tabela in branje: `docs/HANDOFF.md` §2.3.
+  Tabela in branje: `docs/HANDOFF.md` §2.3.6.
 
 ### 5.1 Kaj mehanizem počne (Wang et al., USENIX Security 2023; koda `DpTrace/PrivTrace`)
 
@@ -797,7 +797,7 @@ sidrnima rokama markov in rn_ldp_synth ε=2 ter roko ldptrace ε ∈ {0.5, 2.0, 
 konfiguracije S4 ostanejo nespremenjene). Definicija končanega: uv run ruff check ., uv run
 mypy src, uv run pytest -q čisti, izpis prilepljen. Če imam lokalno Geolife in
 maps/beijing, poženi še uv run trajguard run config/experiments/geolife_mech_mia_u20.yaml
-in izmerjene vrstice zapiši v docs/HANDOFF.md §2.3. V istem PR posodobi vrstico stanja v
+in izmerjene vrstice zapiši v docs/HANDOFF.md §2.3.1. V istem PR posodobi vrstico stanja v
 CLAUDE.md, docs/RUNNING.md §7.2, docs/CODEBASE_STRUCTURE.md (seznam registriranih imen) in
 označi ZM-1 kot zaključen v docs/NACRT_MEHANIZMI.md. Docstring naj pove, da je LDPTrace
 kandidat za baseline (odločitev D5 v projektu Izbirni predmeti je odprta). Koda,
@@ -828,7 +828,7 @@ sidrnima rokama none in geo_indistinguishability ε=1 ter roko point_ldp ε ∈ 
 Postopek: plan mode in moja potrditev, veja claude/zm2-point-ldp, modul, uvoz v
 builtins.py, tests/test_point_ldp.py po §3.4, ruff/mypy/pytest z izpisom; po možnosti
 uv run trajguard run config/experiments/geolife_mech_reid_u20.yaml in vrstice (vključno
-n_rematch_dropped) v docs/HANDOFF.md §2.3. Posodobi CLAUDE.md (stanje), docs/RUNNING.md
+n_rematch_dropped) v docs/HANDOFF.md §2.3.3. Posodobi CLAUDE.md (stanje), docs/RUNNING.md
 §7, docs/CODEBASE_STRUCTURE.md in označi ZM-2 v docs/NACRT_MEHANIZMI.md. Koda in testi v
 angleščini, pogovor v slovenščini brez nepojasnjenih kratic.
 ```
@@ -853,7 +853,7 @@ cell_m [100, 500, 2000], interval_s [30, 120, 600], sigma_m [50, 200, 1000].
 Postopek: plan mode in moja potrditev, veja claude/zm3-naive-baselines, modul, uvoz v
 builtins.py, tests/test_naive.py po §4.4 vključno z end-to-end testom orkestratorja s
 temporal_downsampling, ruff/mypy/pytest z izpisom; po možnosti zagon
-geolife_mech_reid_u20.yaml in vrstice v docs/HANDOFF.md §2.3. Posodobi CLAUDE.md,
+geolife_mech_reid_u20.yaml in vrstice v docs/HANDOFF.md §2.3.4. Posodobi CLAUDE.md,
 docs/RUNNING.md, docs/CODEBASE_STRUCTURE.md in označi ZM-3 v docs/NACRT_MEHANIZMI.md. Koda
 in testi v angleščini, pogovor v slovenščini brez nepojasnjenih kratic.
 ```
@@ -884,7 +884,7 @@ Postopek: plan mode in moja potrditev (predlagaj razrez, če bi modul presegel ~
 vrstic), veja claude/zm4-privtrace, modul, uvoz v builtins.py, tests/test_privtrace.py po
 §5.4, roka privtrace ε ∈ {0.5, 2.0, 8.0} v config/experiments/geolife_mech_mia_u20.yaml s
 komentarjem o modelu zaupanja, ruff/mypy/pytest z izpisom; po možnosti zagon in vrstice v
-docs/HANDOFF.md §2.3. Posodobi CLAUDE.md, docs/RUNNING.md §7.2, docs/CODEBASE_STRUCTURE.md
+docs/HANDOFF.md §2.3.5. Posodobi CLAUDE.md, docs/RUNNING.md §7.2, docs/CODEBASE_STRUCTURE.md
 in označi ZM-4 v docs/NACRT_MEHANIZMI.md. Koda in testi v angleščini, pogovor v
 slovenščini brez nepojasnjenih kratic.
 ```

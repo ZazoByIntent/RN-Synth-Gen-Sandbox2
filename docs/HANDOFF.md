@@ -1,7 +1,8 @@
 # Predaja dela: stanje kampanje S4 in odprte postavke
 
 **Različica:** 3. september 2026 (skrajšana); odločitve o odprtih postavkah vpisane
-22. septembra 2026 (uvod razdelka 2). Celotna zgodovina predaje — analiza vrzeli
+22. septembra 2026 (uvod razdelka 2); prestrukturirano 22. septembra 2026 (kazalo,
+podrazdelki §2.3.0–2.3.6 in §2.5.1; vsebina in številke nespremenjene). Celotna zgodovina predaje — analiza vrzeli
 z dne 4. avgusta 2026, recenzija, dnevnik izvedbe valov 0–2 in prvotni zapisi kampanje —
 je v `arhiv/HANDOFF_2026-08-21.md`; načrt in izid popravkov S4-1 do S4-4 v
 `arhiv/HANDOFF_S4_POPRAVKI.md`. Ta datoteka hrani samo tisto, kar prihodnja seja
@@ -13,6 +14,32 @@ razdelkov in poti do arhiviranih datotek.
 številko, ali ko se naročilo sklicuje na kampanjo S4, stopnjo lestvice (20/50/182) ali
 oznako S4-x. Seja, ki spremeni stanje (nov pogon, zaprta postavka), posodobi ta dokument
 in statusno vrstico v `CLAUDE.md` v istem PR-ju.
+
+**Kazalo — najprej preberi to, nato samo potrebni odsek** (`grep -n '^#' docs/HANDOFF.md`
+da vrstice naslovov, `sed -n 'a,bp'` prebere odsek; nikoli cele datoteke):
+
+- §1 Kampanja S4 — izmerjeni zapis po stopnjah lestvice vzorcev (konfiguraciji, poti do rezultatov)
+  - §1.1 stopnja 20, prvi pogon (15.–16. avgust 2026) in vrzeli S4-1 do S4-5
+  - §1.2 stopnja 20, validacijski pogon (17. avgust 2026) — merilo in izid popravkov
+  - §1.3 stopnja 50, prva izmeritev (17. avgust 2026) — prag populacije, proračun
+  - §1.4 stopnja 182, poročevalski pogon (18.–21. avgust 2026) — številke za poročilo
+- §2 Odprte postavke; uvod: pregled odločitev z dne 22. septembra 2026 in zaporedje
+  sedmih korakov pred primerjalnim zvezkom (PR-ji kode, pogon 182, zvezek)
+  - §2.1 odločitve avtorja (pragovi zadostnosti, M3, A4, prekoračitve proračuna pri 182)
+  - §2.2 val 3 — dopolnitve v obstoječih scenarijih (A3, M2, M3, A4)
+  - §2.3 val 4 — širina mehanizmov in LDPTrace
+    - §2.3.0 načrt in prioritete (manjkajoči mehanizmi, štirje koraki ZM-1 do ZM-4)
+    - §2.3.1 ZM-1 LDPTrace (u20): odločitve, vrstice MIA, kaj je odprto
+    - §2.3.2 validacija `ldptrace` proti izvirni kodi (Porto: MIA v načinu celic, PR C, tabela devetih metrik)
+    - §2.3.3 ZM-2 točkovni LDP (u20): mreža 20 × 20, ponovno ujemanje, vrstice
+    - §2.3.4 ZM-3 naivna trojica (u20): zaokroževanje, redčenje, Gaussov šum; odločitve 22. 9. 2026
+    - §2.3.5 ZM-4 PrivTrace (u20): odstopanja od članka, vrstice MIA in uporabnosti
+    - §2.3.6 validacija `privtrace` proti izvirni kodi (Porto, port proti izvirniku, varovalka D-4.3)
+  - §2.4 val 5 — horizont B (2. letnik)
+  - §2.5 manjše, tehnične (zvezki, grafi, predpomnjenje sinteze, shema rezultatov, A2, strop
+    `markov`, ujemanje in `PYTHONHASHSEED`, meja celice)
+    - §2.5.1 dolžinska pristranskost DTW v reidentifikaciji (preverba, tabela, odločitev `dtw_norm`)
+- §3 Kje je zgodovina (arhivirane datoteke)
 
 ---
 
@@ -251,9 +278,9 @@ odločitvah razen pragov (čakajo mentorico) in D5 (projekt »Izbirni predmeti«
 odločitev je zapisana ob svoji postavki spodaj z oznako »Odločeno 22. 9. 2026«. Iz njih
 sledi zaporedje pred primerjalnim zvezkom (`docs/NACRT_MEHANIZMI.md` §1.6):
 
-1. PR kode: nova vrednost `attacker.distance: dtw_norm` (2.3, ZM-3 in 2.5).
+1. PR kode: nova vrednost `attacker.distance: dtw_norm` (2.3.4 in 2.5.1).
 2. PR kode: stolpca `exp_id` in `config_hash` v `repetitions.csv` (2.5).
-3. PR kode: dejstva PrivTrace v `run.json` (2.3, ZM-4).
+3. PR kode: dejstva PrivTrace v `run.json` (2.3.5).
 4. PR kode: M3 — metriki uporabnosti `duration_dist_error` in `speed_dist_error` (2.1,
    2.2). Avtor želi obe v primerjalnem zvezku, zato mora PR priti pred pogon 182, ki ju
    izračuna.
@@ -304,9 +331,11 @@ Neodvisno od tega zaporedja je odblokiran A4.
 
 ### 2.3 Val 4 — širina mehanizmov in LDPTrace
 
+#### 2.3.0 Načrt in prioritete
+
 - Mehanizmi iz zasnove §7, ki manjkajo: prostorsko zaokroževanje, časovno redčenje,
   Gaussov šum, SquareWave, segmentna perturbacija, k-anonimnost, kombinacije (točkovni
-  LDP je izveden kot ZM-2, glej spodaj). Dodajaj po naraščajoči zahtevnosti; segmentna
+  LDP je izveden kot ZM-2, glej 2.3.3). Dodajaj po naraščajoči zahtevnosti; segmentna
   perturbacija zadnja (najbližja RN-LDP-Synth, zato najkoristnejša primerjava).
 - **LDPTrace** prednostno: brez njega se razdelek 7.3 poročila primerja samo proti
   nezasebnemu Markovu. Točkovni LDP in LDPTrace gradita na `privacy/ldp.py` (GRR, OUE).
@@ -315,6 +344,8 @@ Neodvisno od tega zaporedja je odblokiran A4.
   (prostorsko zaokroževanje, časovno redčenje, Gaussov šum), ZM-4 PrivTrace. Odločitve,
   datoteke, testi in prompti za seje so v tistem dokumentu. Nabor baseline-ov za članek
   (odločitev D5 v projektu »Izbirni predmeti«) ostaja odprt; ti mehanizmi so kandidati.
+
+#### 2.3.1 ZM-1 LDPTrace (u20)
 
 **ZM-1 LDPTrace — zaključen (2. september 2026, PR #32, združen v `main` 2. septembra
 2026).** Generator `ldptrace` (`src/trajguard/synthesis/ldptrace.py`; dejanske odločitve
@@ -384,7 +415,9 @@ celic, mediana 3, na mreži 12 × 12):
   `tests/test_cells_mode.py`; današnja pot `segments` je nespremenjena (isti hash
   predpomnilnika, zlati izpis pred in po spremembi enak). **PR C je izveden** (4. september
   2026, PR #36, združeno v `main` 4. septembra 2026; tabela z devetimi metrikami × tremi ε
-  in branje sta spodaj).
+  in branje sta v 2.3.2).
+
+#### 2.3.2 Validacija `ldptrace` proti izvirni kodi
 
 **Porto, napad na članstvo v načinu celic (izmerjeno 3. septembra 2026, commit `829e69f`).**
 Ukaza `uv run trajguard run config/experiments/porto_cells_mia.yaml` in
@@ -516,6 +549,8 @@ Sklep: port je nad istim vhodom funkcionalno enakovreden izvirniku (isti postope
 metrike do zadnje decimalke, razlike v razponu semen); LDPTrace ostaja kandidat za
 baseline (odločitev D5 je odprta).
 
+#### 2.3.3 ZM-2 točkovni LDP (u20)
+
 **ZM-2 točkovni LDP — zaključen (4. september 2026, PR #38, veja
 `claude/zm2-point-ldp`).** Mehanizem `point_ldp` (`src/trajguard/privacy/point_ldp.py`; dejanske
 odločitve v `docs/NACRT_MEHANIZMI.md` §3, uvodni odstavek): vsaka GPS točka se preslika
@@ -593,9 +628,11 @@ Branje:
   točko še vedno premaknila za ~300 m. To je pričakovana lastnost LDP na točko, ne napaka
   izvedbe. Točkovni LDP ostaja kandidat za baseline (odločitev D5 je odprta).
 - Kopiji konfiguracije za stopnji 50 in 182 obstajata (`geolife_mech_reid_u50/u182`, glej
-  ZM-3 spodaj; `point_ldp` ε = 8 je roka pri 182). **Odločeno 22. 9. 2026:** stopnja 50 se
+  ZM-3 v 2.3.4; `point_ldp` ε = 8 je roka pri 182). **Odločeno 22. 9. 2026:** stopnja 50 se
   za mehanizme preskoči; avtor požene stopnjo 182 pred primerjalnim zvezkom, s ponovitvami
   čez semena, kjer ima roka seme.
+
+#### 2.3.4 ZM-3 naivna trojica (u20)
 
 **ZM-3 naivna trojica — zaključen (4. september 2026, PR #39, veja
 `claude/zm3-naive-baselines`).**
@@ -618,7 +655,7 @@ nad `raw` in `none`, ponovno ujemanje vseh devetih rok skupaj ~75 s, ostalo napa
 preživelimi bazeni), torej nad pragom 10 min na seme in brez ponovitev `repeat`;
 `over_budget.attacks` in opozorila so prazni. **Regresija:** vrstice `raw`, `none`,
 geo-ind ε = 1 in vse tri roke `point_ldp` (reidentifikacija, sklepanje o domu/delu,
-uporabnost, rekonstrukcija) se do zadnje izpisane decimalke ujemajo z zapisom ZM-2 zgoraj
+uporabnost, rekonstrukcija) se do zadnje izpisane decimalke ujemajo z zapisom ZM-2 (2.3.3)
 (isto seme, predpomnjeni bazeni), zato spodaj niso ponovljene. Vrednosti iz
 `results/geolife_mech_reid_u20/` (`run.json`, `results.csv`; interval je bootstrap
 95-odstotni interval znotraj pogona; rezultati ostajajo lokalni):
@@ -676,7 +713,7 @@ Branje:
   zaradi napadalca, ne mehanizma.** Pri 30 / 120 / 600 s preživi 222 / 207 / 212 sledi
   (vseh 16 uporabnikov), `top1_acc` pri k = 3 pa je 0,49 / 0,54 / 0,49 proti 0,28 nad
   surovim bazenom, in to pri 20–100-krat krajšem času napada. Razlaga je **preverjena in
-  potrjena** (4. september 2026; tabela, merilo in odprta odločitev v 2.5): napad računa
+  potrjena** (4. september 2026; tabela, merilo in odprta odločitev v 2.5.1): napad računa
   nenormirano DTW razdaljo, ki sešteva po celotni poravnavi, zato nad surovim bazenom
   skoraj vedno zmaga ena najkrajših galerijskih sledi (mediana razmerja med dolžino
   zmagovalca in mediano galerije 0,06 pri k = 3); redčenje galerijske sledi skrajša s
@@ -707,15 +744,12 @@ Branje:
   domu/delu sta zaokroževanje 100 m in Gauss 50 m praktično brez učinka. Vsi trije
   ostajajo kandidati za baseline (odločitev D5 je odprta).
 - **Odločeno 22. 9. 2026** (točke 1–3 spodaj): (1) dolžinska pristranskost DTW —
-  kombinacija obeh možnosti iz 2.5: nova vrednost `attacker.distance: dtw_norm` (`dtw / L`,
-  L = dolžina optimalne poravnave) v `attacks/reidentification.py`, `dtw` ostane privzeta,
-  zato izmerjeni zapis S4 ostane nedotaknjen; nove meritve mehanizmov poročajo obe
-  razdalji, S4 dobi v poročilu opombo in kontrolno vrstico, ne ponovnega pogona;
+  kombinacija obeh možnosti (`dtw_norm` pride v kodo, `dtw` ostane privzeta), glej 2.5.1;
   (2) stopnja 50 se za mehanizme preskoči, avtor pred primerjalnim zvezkom sam požene
   `geolife_mech_reid_u182.yaml` (z `dtw_norm`, ko bo v kodi); (3) Gaussov šum dobi
   ponovitve čez semena pri tem pogonu 182, ne pri u20.
 - Ozadje (stanje pred odločitvijo): (1) hipoteza o dolžinski pristranskosti DTW je
-  **preverjena in potrjena** (4. september 2026, 2.5); (2) kopiji konfiguracije za stopnji 50 in 182
+  **preverjena in potrjena** (4. september 2026, 2.5.1); (2) kopiji konfiguracije za stopnji 50 in 182
   **obstajata in nista pognani** (4. september 2026): `config/experiments/geolife_mech_reid_u50.yaml`
   (vse roke iz u20, prag 0,05, proračun 300 s — merilna stopnja odloči, kaj gre na 182, kot
   pri S4) in `config/experiments/geolife_mech_reid_u182.yaml` (prag 0,3 in proračun 1.200 s,
@@ -730,9 +764,11 @@ Branje:
   (zaokroževanje in redčenje sta deterministična, njuni intervali so samo bootstrap
   znotraj pogona).
 
+#### 2.3.5 ZM-4 PrivTrace (u20)
+
 **ZM-4 PrivTrace — zaključen (20. september 2026, PR #40, združen v `main` z zlivnim commitom
 `5cb6c50`; validacija proti izvirniku v PR #41, združenem istega dne z zlivnim commitom
-`e82e1fd`, tabela spodaj; postavke končnega pregleda so zaprte v PR #42, 22. september 2026).**
+`e82e1fd`, tabela v 2.3.6; postavke končnega pregleda so zaprte v PR #42, 22. september 2026).**
 Generator `privtrace` (`src/trajguard/synthesis/privtrace.py`, dvoplastna mreža v
 `src/trajguard/synthesis/adaptive_grid.py`; dejanske odločitve v `docs/NACRT_MEHANIZMI.md`
 §5, uvodni odstavek). **Model zaupanja je drugačen od vseh drugih rok:** PrivTrace je
@@ -758,7 +794,7 @@ commit **brez** kode PrivTrace, ker je bil pognan iz nezavezanega drevesa — to
 popravljeno. Bazen napada: 90 članov, 15 nečlanov (`n_pool = 105`). Cel pogon 128 / 125 / 88 /
 88 s na seme (42 / 1 / 2 / 3); roka `privtrace` 7,0–8,0 s na seme za 17 prilagajanj (16 senčnih
 + tarča). **Regresija:** vseh 20 vrstic starih rok v `repetitions.csv` (markov, rn_ldp_synth,
-ldptrace; povprečje in interval) je do zadnje decimalke enakih zapisu ZM-1 zgoraj, prav tako
+ldptrace; povprečje in interval) je do zadnje decimalke enakih zapisu ZM-1 (2.3.1), prav tako
 sta vrstici `privtrace` pri ε = 2 in ε = 8 enaki prejšnjemu zapisu; premaknile so se samo
 vrstice pri ε = 0,5, ker vzorčenje in točkovanje zdaj uporabljata isti enakomerni zasilni
 začetek (točkovanje je prej jemalo prag 10⁻¹²), prilagoditve tarče in senc pri tem ε pa imajo
@@ -812,7 +848,7 @@ Branje:
 - **Napovedana asimetrija (§5.5 načrta: nižja AUC in boljša uporabnost kot LDP roke) se
   pri stopnji 20 ne vidi**, ker sta obe strani na ravni naključja in uporabnost sinteze v
   orkestratorju ni priključena (2.5); primerjava uporabnosti je narejena nad Portom v
-  ogrodju validacije (spodaj), kjer PrivTrace dela z 20.000 potmi in mreža zares deli.
+  ogrodju validacije (2.3.6), kjer PrivTrace dela z 20.000 potmi in mreža zares deli.
 - (1) **Zaprto (odločitev avtorja, 20. september 2026):** šum na diagonali matrike 1. reda
   (prava vrednost 0, ker so zaporedni dvojniki strnjeni) ostane, kot je v članku in v
   izvirniku. Izmerjen učinek je premajhen, da bi upravičil še eno odstopanje: diagonala nosi
@@ -832,7 +868,9 @@ Branje:
   model dolžine**: odstopanje D-4.2 opusti prav tisti popravek pristranskosti, zaradi
   katerega je reševalec v članku (§4.4: normalizacija 1/(L+1) prešteje kratke poti preveč in
   dolge premalo), in to se vidi v dolžini — prave poti Porta imajo 12,0 strnjenih stanj,
-  port brez šuma 8,6 (30 % prekratko; meritev v bloku validacije spodaj).
+  port brez šuma 8,6 (30 % prekratko; meritev v 2.3.6).
+
+#### 2.3.6 Validacija `privtrace` proti izvirni kodi
 
 **Validacija `privtrace` proti izvirni kodi nad Portom (izmerjeno 20. septembra 2026, PR #41,
 združen v `main` z zlivnim commitom `e82e1fd`; stolpec `port_masked` je bil 22. septembra 2026
@@ -1245,74 +1283,77 @@ federativni pristopi, diffusion generatorji. Vse se priključi prek obstoječih 
   **Odločeno 22. 9. 2026:** `_cell_pool` ostane pri `Grid.cell_of` — preklop bi spremenil
   hash predpomnilnika in zahteval ponovni pogon Porta brez vpliva na rezultate MIA.
   Postavka je zaprta.
-- **Dolžinska pristranskost DTW v reidentifikaciji — preverjena in potrjena** (ugotovljeno
-  4. septembra 2026 pri ZM-3, preverjeno isti dan na veji `claude/zm3-naive-baselines`,
-  glej 2.3): časovno redčenje izdaje na 30 / 120 / 600 s dvigne `top1_acc` pri k = 3 z
-  0,28 na 0,49–0,54 ob skoraj celem bazenu. Hipoteza: `geometry.dtw` vrne nenormirano
-  vsoto po poravnavi, zato je razdalja med k znanimi točkami in galerijsko sledjo
-  sorazmerna s številom njenih točk in kratke sledi zmagujejo. **Preverba:** skript zunaj
-  repozitorija (koda napada se ni spremenila), ki bere samo predpomnjene bazene u20 s
-  semenom 42 (surovi `data/processed/56dcf747ce5967f6`, 238 sledi, in tri izdaje redčenja
-  v `data/protected/`) in ponovi zanko napada iz `attacks/reidentification.py` (sonde iz
-  surovega bazena, `_evenly_spaced` k točk, galerija brez lastne sledi, ena razdalja na
-  uporabnika) s tremi razdaljami iz enega prehoda dinamičnega programiranja: nenormirana
-  `dtw`, `dtw / L` (L je dolžina optimalne poravnave, vračanje po matriki stroškov) in
-  `dtw / max(n, m)`; `top1_acc` z bootstrapom 1.000 / seme 42 kot v pogonu; 59 s. Nenormirana
-  razdalja reproducira izmerjeni zapis do zadnje decimalke, vključno z intervali (sidro).
-  Napad dela nad ujetimi točkami (`matched_points`), ki jih je v povprečju 106 / 21 / 4,7 /
-  1,4 na sled (mediana 64 / 15 / 4 / 1; največ 601) — manj kot izdanih točk (352 / 74 / 23 /
-  6,5), a z isto težko desno repo.
 
-  | Bazen | k | `dtw` (kot v pogonu) | `dtw / L` | `dtw / max(n, m)` |
-  |---|---|---|---|---|
-  | surovi | 3 | 0,283 [0,228; 0,338] | 0,523 [0,460; 0,586] | 0,523 [0,460; 0,586] |
-  | surovi | 5 | 0,384 [0,325; 0,447] | 0,565 [0,506; 0,624] | 0,565 [0,506; 0,624] |
-  | surovi | 10 | 0,489 [0,426; 0,557] | 0,603 [0,544; 0,667] | 0,603 [0,544; 0,667] |
-  | redčenje 30 s | 3 | 0,485 [0,418; 0,549] | 0,591 [0,523; 0,654] | 0,591 [0,523; 0,654] |
-  | redčenje 30 s | 5 | 0,473 [0,409; 0,536] | 0,612 [0,549; 0,675] | 0,608 [0,544; 0,667] |
-  | redčenje 30 s | 10 | 0,570 [0,506; 0,633] | 0,595 [0,532; 0,658] | 0,586 [0,523; 0,646] |
-  | redčenje 120 s | 3 | 0,544 [0,481; 0,608] | 0,574 [0,511; 0,641] | 0,574 [0,511; 0,641] |
-  | redčenje 120 s | 5 | 0,536 [0,473; 0,599] | 0,570 [0,506; 0,633] | 0,565 [0,502; 0,629] |
-  | redčenje 120 s | 10 | 0,557 [0,494; 0,624] | 0,570 [0,506; 0,637] | 0,557 [0,494; 0,624] |
-  | redčenje 600 s | 3 | 0,485 [0,422; 0,549] | 0,481 [0,418; 0,544] | 0,481 [0,418; 0,544] |
-  | redčenje 600 s | 5 | 0,494 [0,430; 0,557] | 0,489 [0,426; 0,553] | 0,494 [0,430; 0,557] |
-  | redčenje 600 s | 10 | 0,498 [0,430; 0,561] | 0,498 [0,430; 0,561] | 0,498 [0,430; 0,561] |
+#### 2.5.1 Dolžinska pristranskost DTW
 
-  Diagnostika nad surovim bazenom (razmerje med številom točk najbližje galerijske sledi
-  in mediano števila točk v galeriji; mediana / povprečje / delež sond, pri katerih je
-  zmagovalec krajši od mediane): nenormirana 0,06 / 0,13 / 1,00 pri k = 3, 0,08 / 0,19 /
-  0,98 pri k = 5, 0,23 / 0,37 / 0,92 pri k = 10 — zmagovalec je skoraj vedno ena najkrajših
-  sledi v galeriji; normirana `dtw / L` 0,59 / 1,03 / 0,66, 0,91 / 1,26 / 0,57, 0,95 /
-  1,58 / 0,51 — razmerje se premakne k 1. Vnaprej določeno merilo je izpolnjeno v vseh
-  treh delih: (a) normirana razdalja surovi bazen dvigne na 0,52 / 0,57 / 0,60, torej na
-  raven redčenih rok pod nenormirano razdaljo (0,47–0,57) ali nad njo; (b) prednost
-  redčenih rok pred surovim bazenom pade v bootstrap interval surovega bazena v šestih od
-  devetih celic, pri 30 s in k = 3 ostane tik nad njim (+0,07; 0,591 proti zgornji meji
-  0,586), pri 600 s in k ≥ 5 se obrne (−0,08 / −0,10: galerija z 1–2 ujetima točkama
-  normiranega napadalca ovira); (c) razmerje dolžin zmagovalcev gre od < 0,25 proti ≈ 1.
-  Razdalji `dtw / L` in `dtw / max(n, m)` dasta praktično isto (pri k ≪ m je dolžina
-  poravnave ≈ m); pri 600 s vse tri sovpadajo, ker galerijska sled z eno točko poravnavo
-  fiksira.
+**Dolžinska pristranskost DTW v reidentifikaciji — preverjena in potrjena** (ugotovljeno
+4. septembra 2026 pri ZM-3, preverjeno isti dan na veji `claude/zm3-naive-baselines`,
+glej 2.3.4): časovno redčenje izdaje na 30 / 120 / 600 s dvigne `top1_acc` pri k = 3 z
+0,28 na 0,49–0,54 ob skoraj celem bazenu. Hipoteza: `geometry.dtw` vrne nenormirano
+vsoto po poravnavi, zato je razdalja med k znanimi točkami in galerijsko sledjo
+sorazmerna s številom njenih točk in kratke sledi zmagujejo. **Preverba:** skript zunaj
+repozitorija (koda napada se ni spremenila), ki bere samo predpomnjene bazene u20 s
+semenom 42 (surovi `data/processed/56dcf747ce5967f6`, 238 sledi, in tri izdaje redčenja
+v `data/protected/`) in ponovi zanko napada iz `attacks/reidentification.py` (sonde iz
+surovega bazena, `_evenly_spaced` k točk, galerija brez lastne sledi, ena razdalja na
+uporabnika) s tremi razdaljami iz enega prehoda dinamičnega programiranja: nenormirana
+`dtw`, `dtw / L` (L je dolžina optimalne poravnave, vračanje po matriki stroškov) in
+`dtw / max(n, m)`; `top1_acc` z bootstrapom 1.000 / seme 42 kot v pogonu; 59 s. Nenormirana
+razdalja reproducira izmerjeni zapis do zadnje decimalke, vključno z intervali (sidro).
+Napad dela nad ujetimi točkami (`matched_points`), ki jih je v povprečju 106 / 21 / 4,7 /
+1,4 na sled (mediana 64 / 15 / 4 / 1; največ 601) — manj kot izdanih točk (352 / 74 / 23 /
+6,5), a z isto težko desno repo.
 
-  **Pomen.** Pristranskost je lastnost napadalca iz zasnove §6.1, ne mehanizma: v vsem
-  izmerjenem zapisu S4 (stopnje 20 / 50 / 182, vse roke) nenormirani napadalec razvršča
-  galerijo pretežno po številu ujetih točk in ne po geometriji, zato so vrednosti
-  reidentifikacije nad surovim bazenom **podcenjene** (pri u20 0,28 → 0,52 pri k = 3) in
-  redčenje »pomaga« samo zato, ker to pristranskost odpravi. Koda napada se ni spremenila,
-  ker bi sprememba razdalje spremenila celoten izmerjeni zapis S4. **Odprta odločitev
-  avtorja** z dvema možnostma: (1) normirana razdalja napadalca (`dtw / L` ali `dtw /
-  max(n, m)` v `attacks/reidentification.py`, smiselno kot nova vrednost
-  `attacker.distance`, da `dtw` ostane zapis S4) s ponovnim pogonom lestvice; ali (2)
-  kontrola dolžine v poročilu (napadalec ostane, poleg vrstic pogona se poroča kontrola s
-  sondami oziroma galerijo enake dolžine, redčenje pa se bere kot vzvod, ki napadalcu
-  odpravi pristranskost). Do odločitve poročilo redčenja ne sme brati kot »zaščita, ki
-  poveča tveganje«, temveč kot razkritje pristranskosti napadalca.
+| Bazen | k | `dtw` (kot v pogonu) | `dtw / L` | `dtw / max(n, m)` |
+|---|---|---|---|---|
+| surovi | 3 | 0,283 [0,228; 0,338] | 0,523 [0,460; 0,586] | 0,523 [0,460; 0,586] |
+| surovi | 5 | 0,384 [0,325; 0,447] | 0,565 [0,506; 0,624] | 0,565 [0,506; 0,624] |
+| surovi | 10 | 0,489 [0,426; 0,557] | 0,603 [0,544; 0,667] | 0,603 [0,544; 0,667] |
+| redčenje 30 s | 3 | 0,485 [0,418; 0,549] | 0,591 [0,523; 0,654] | 0,591 [0,523; 0,654] |
+| redčenje 30 s | 5 | 0,473 [0,409; 0,536] | 0,612 [0,549; 0,675] | 0,608 [0,544; 0,667] |
+| redčenje 30 s | 10 | 0,570 [0,506; 0,633] | 0,595 [0,532; 0,658] | 0,586 [0,523; 0,646] |
+| redčenje 120 s | 3 | 0,544 [0,481; 0,608] | 0,574 [0,511; 0,641] | 0,574 [0,511; 0,641] |
+| redčenje 120 s | 5 | 0,536 [0,473; 0,599] | 0,570 [0,506; 0,633] | 0,565 [0,502; 0,629] |
+| redčenje 120 s | 10 | 0,557 [0,494; 0,624] | 0,570 [0,506; 0,637] | 0,557 [0,494; 0,624] |
+| redčenje 600 s | 3 | 0,485 [0,422; 0,549] | 0,481 [0,418; 0,544] | 0,481 [0,418; 0,544] |
+| redčenje 600 s | 5 | 0,494 [0,430; 0,557] | 0,489 [0,426; 0,553] | 0,494 [0,430; 0,557] |
+| redčenje 600 s | 10 | 0,498 [0,430; 0,561] | 0,498 [0,430; 0,561] | 0,498 [0,430; 0,561] |
 
-  **Odločeno 22. 9. 2026: kombinacija obeh možnosti.** V kodo pride nova vrednost
-  `attacker.distance: dtw_norm` (`dtw / L`); `dtw` ostane privzeta, zato izmerjeni zapis
-  S4 ostane veljaven kot zapis nenormiranega napadalca. Nove meritve mehanizmov (pogon
-  182) poročajo obe razdalji; S4 v poročilu dobi opombo o pristranskosti in kontrolno
-  vrstico z `dtw_norm` namesto ponovnega pogona lestvice.
+Diagnostika nad surovim bazenom (razmerje med številom točk najbližje galerijske sledi
+in mediano števila točk v galeriji; mediana / povprečje / delež sond, pri katerih je
+zmagovalec krajši od mediane): nenormirana 0,06 / 0,13 / 1,00 pri k = 3, 0,08 / 0,19 /
+0,98 pri k = 5, 0,23 / 0,37 / 0,92 pri k = 10 — zmagovalec je skoraj vedno ena najkrajših
+sledi v galeriji; normirana `dtw / L` 0,59 / 1,03 / 0,66, 0,91 / 1,26 / 0,57, 0,95 /
+1,58 / 0,51 — razmerje se premakne k 1. Vnaprej določeno merilo je izpolnjeno v vseh
+treh delih: (a) normirana razdalja surovi bazen dvigne na 0,52 / 0,57 / 0,60, torej na
+raven redčenih rok pod nenormirano razdaljo (0,47–0,57) ali nad njo; (b) prednost
+redčenih rok pred surovim bazenom pade v bootstrap interval surovega bazena v šestih od
+devetih celic, pri 30 s in k = 3 ostane tik nad njim (+0,07; 0,591 proti zgornji meji
+0,586), pri 600 s in k ≥ 5 se obrne (−0,08 / −0,10: galerija z 1–2 ujetima točkama
+normiranega napadalca ovira); (c) razmerje dolžin zmagovalcev gre od < 0,25 proti ≈ 1.
+Razdalji `dtw / L` in `dtw / max(n, m)` dasta praktično isto (pri k ≪ m je dolžina
+poravnave ≈ m); pri 600 s vse tri sovpadajo, ker galerijska sled z eno točko poravnavo
+fiksira.
+
+**Pomen.** Pristranskost je lastnost napadalca iz zasnove §6.1, ne mehanizma: v vsem
+izmerjenem zapisu S4 (stopnje 20 / 50 / 182, vse roke) nenormirani napadalec razvršča
+galerijo pretežno po številu ujetih točk in ne po geometriji, zato so vrednosti
+reidentifikacije nad surovim bazenom **podcenjene** (pri u20 0,28 → 0,52 pri k = 3) in
+redčenje »pomaga« samo zato, ker to pristranskost odpravi. Koda napada se ni spremenila,
+ker bi sprememba razdalje spremenila celoten izmerjeni zapis S4. **Odprta odločitev
+avtorja** z dvema možnostma: (1) normirana razdalja napadalca (`dtw / L` ali `dtw /
+max(n, m)` v `attacks/reidentification.py`, smiselno kot nova vrednost
+`attacker.distance`, da `dtw` ostane zapis S4) s ponovnim pogonom lestvice; ali (2)
+kontrola dolžine v poročilu (napadalec ostane, poleg vrstic pogona se poroča kontrola s
+sondami oziroma galerijo enake dolžine, redčenje pa se bere kot vzvod, ki napadalcu
+odpravi pristranskost). Do odločitve poročilo redčenja ne sme brati kot »zaščita, ki
+poveča tveganje«, temveč kot razkritje pristranskosti napadalca.
+
+**Odločeno 22. 9. 2026: kombinacija obeh možnosti.** V kodo pride nova vrednost
+`attacker.distance: dtw_norm` (`dtw / L`); `dtw` ostane privzeta, zato izmerjeni zapis
+S4 ostane veljaven kot zapis nenormiranega napadalca. Nove meritve mehanizmov (pogon
+182) poročajo obe razdalji; S4 v poročilu dobi opombo o pristranskosti in kontrolno
+vrstico z `dtw_norm` namesto ponovnega pogona lestvice.
 
 ---
 

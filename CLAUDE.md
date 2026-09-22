@@ -42,7 +42,9 @@ question (a section, not the file). For a typical coding task this file plus
 - `docs/HANDOFF.md` (Slovenian) — measured record of the S4 campaign per rung
   (20/50/182) and the list of open items. **Read when planning the next piece of
   work, when the report needs a measured number, or when the user mentions S4, a
-  rung, or a label such as S4-2, A3, M2.**
+  rung, or a label such as S4-2, A3, M2.** Read the table of contents at the top
+  first, then only the subsection you need (one mechanism is one `§2.3.x`, the DTW
+  bias is §2.5.1); find it with `grep -n '^#'` and read it with `sed -n`.
 - `docs/NACRT_MEHANIZMI.md` (Slovenian) — implementation plan for the next protection
   mechanisms, one section per step: ZM-1 LDPTrace, ZM-2 point LDP, ZM-3 naive
   baselines, ZM-4 PrivTrace, with design decisions, files to touch, tests, and the

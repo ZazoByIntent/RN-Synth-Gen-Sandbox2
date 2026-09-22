@@ -22,7 +22,7 @@ na mreži kot alternativo ujetim zaporedjem odsekov, izbirljiv v konfiguraciji, 
 `ldptrace` (`src/trajguard/synthesis/ldptrace.py`, ZM-1) je port članka Du et al.,
 PVLDB 2023, z dokumentiranimi odstopanji (celice iz javnega cestnega omrežja namesto
 iz surovih točk, prava zadnja celica, payload = celice). Napad na članstvo (MIA) pri
-stopnji 20 ne loči porta od naključja (`docs/HANDOFF.md` §2.3), a to ne pove, ali port
+stopnji 20 ne loči porta od naključja (`docs/HANDOFF.md` §2.3.1), a to ne pove, ali port
 **zvesto** posnema izvirnik po uporabnosti. Poročilo (razdelek 7.3) in članek
 potrebujeta argument, da je baseline pošten.
 
@@ -218,7 +218,7 @@ Prebral podagent 2. septembra 2026; seja jih ne preverja znova, razen kjer piše
   iz `external/LDPTrace/LDPTrace/code/`.
 - **D-V.10 Mreža primerjave.** ε ∈ {0,5, 1,0, 1,5} (članek), mreža 6 × 6, kvantil 0,9,
   semena 1–5, obe strani. Neobvezno še ε = 2, mreža 12 × 12 (privzetki trajguarda), da
-  se rezultat veže na stopnjo iz `HANDOFF.md` §2.3.
+  se rezultat veže na stopnjo iz `HANDOFF.md` §2.3.1.
 
 ## 4. Razrez na PR-je in datoteke
 
@@ -256,12 +256,12 @@ B1 in skica B2 sta v §10. *B1 izveden 3. septembra 2026* (dejanske datoteke in
 odstopanja v §10.4, številke Porta v §2 in §10.6). *B2 izveden 3. septembra 2026* (veja
 `claude/cells-mode-orchestrator`, PR #35, skladana na PR #34): `experiments/orchestrator.py`,
 `config/experiments/porto_cells_mia.yaml`, `tests/test_cells_mode.py`, `docs/ARCHITECTURE.md`,
-`docs/RUNNING.md` (§9.2, §10), `docs/HANDOFF.md` §2.3, `CLAUDE.md`; dejanske odločitve in
+`docs/RUNNING.md` (§9.2, §10), `docs/HANDOFF.md` §2.3.2, `CLAUDE.md`; dejanske odločitve in
 odstopanja v §11.4, izmerjeni pogon Porta v §11.5.
 
 **PR C — validacijski pogon (`claude/ldptrace-validation`).** Novo:
 `src/trajguard/experiments/ldptrace_eval.py`, `tests/test_ldptrace_eval.py` (na
-`tiny.dat`), `scripts/ldptrace_reference.patch`. Spremenjeno: `docs/HANDOFF.md` §2.3
+`tiny.dat`), `scripts/ldptrace_reference.patch`. Spremenjeno: `docs/HANDOFF.md` §2.3.2
 (tabela primerjave, commit klona, bbox in števila Porta), `docs/RUNNING.md` (nov §9.3 in
 kazalo; §9.1 je pretvorba, §9.2 pogon MIA v načinu celic), `CLAUDE.md` (vrstica stanja),
 `docs/NACRT_MEHANIZMI.md` §2 (validacija zaključena), ta dokument (oznaka zaključka in
@@ -305,7 +305,7 @@ uv run python -m trajguard.experiments.ldptrace_eval --dat data/interim/porto/po
 uv run trajguard repeat config/experiments/porto_cells_mia.yaml --seeds 1 2 3
 ```
 
-Merilo uspeha (zapiše se v `HANDOFF.md` §2.3 kot tabela z devetimi metrikami × tremi ε,
+Merilo uspeha (zapiše se v `HANDOFF.md` §2.3.2 kot tabela z devetimi metrikami × tremi ε,
 stolpci: izvirnik (lastne metrike), izvirnik (naše metrike), port (naše metrike),
 vsak s povprečjem in razponom čez pet semen):
 
@@ -383,7 +383,7 @@ z gh (opis z dokazi, brez novih odvisnosti). Testi berejo samo tests/fixtures/ (
 Datoteka data/raw/porto/train.csv je pri meni; data/raw/ je nespremenljiv. V PR C poženi
 ukaze iz načrta §6, tabelo z devetimi metrikami × tremi ε (izvirnik z lastnimi metrikami,
 izvirnik z našimi, port z našimi; povprečje in razpon čez pet semen) zapiši v
-docs/HANDOFF.md §2.3 skupaj s commitom klona, bboxom in številom poti Porta; posodobi
+docs/HANDOFF.md §2.3.2 skupaj s commitom klona, bboxom in številom poti Porta; posodobi
 vrstico stanja v CLAUDE.md, docs/RUNNING.md §9.1, docs/CODEBASE_STRUCTURE.md,
 docs/ARCHITECTURE.md (dve predstavitvi) in označi validacijo kot zaključeno v
 docs/NACRT_LDPTRACE_VALIDACIJA.md in docs/NACRT_MEHANIZMI.md §2. Koda, identifikatorji,
@@ -424,7 +424,7 @@ kratic.
    `argparse` ovoj (odstopanje od D-V.2 glede mesta kode; vhod/izhod nespremenjen).
 4. **Pretvorba Porta se v B1 požene na pravih podatkih** po prehodu testov; število
    obdržanih poti, bbox in `grid_bbox` gredo v opis PR, v ta dokument (§2 in §10.6) in v
-   `HANDOFF.md` §2.3. Izhod (`data/interim/porto/`) ni v gitu.
+   `HANDOFF.md` §2.3.2. Izhod (`data/interim/porto/`) ni v gitu.
 
 ### 10.3 Preverjena dejstva, ki jih nova seja ne odkriva znova
 
@@ -617,7 +617,7 @@ predpomnjena kot `clean.parquet` + `chains.parquet`); `run_experiment` preveri T
 
 `uv run python scripts/porto_to_ldptrace_dat.py data/raw/porto/train.csv data/interim/porto`
 s predlaganim bbox lon −8,69 … −8,55, lat 41,13 … 41,19; če je število obdržanih poti daleč
-od ~360.000, bbox popravi (širši → več poti) in oboje zapiši sem in v `HANDOFF.md` §2.3.
+od ~360.000, bbox popravi (širši → več poti) in oboje zapiši sem in v `HANDOFF.md` §2.3.2.
 
 **Izmerjeno 3. septembra 2026.** Predlagani bbox je bil daleč prevelik: na prvih
 300.000 vrsticah je obdržal 81 % poti (ocena ~1,4 milijona na celotni datoteki), zato je
@@ -649,7 +649,7 @@ berejo as_sequence(); logika pretvorbe Porta v src/trajguard/datasets/ldptrace_d
 skripta scripts/porto_to_ldptrace_dat.py je tanek ovoj; pretvorba se po prehodu testov
 požene na data/raw/porto/train.csv (je na računalniku; data/raw/ je nespremenljiv), izhod
 v data/interim/porto/, številke v opis PR, v §2 in §10.6 tega dokumenta in v
-docs/HANDOFF.md §2.3.
+docs/HANDOFF.md §2.3.2.
 
 Načrt B1 je potrjen (§10.4): začni v plan mode, načrt na kratko povzemi in ga predloži v
 potrditev; odstopanja od §10.4 najprej predlagaj. Veja claude/cells-mode se odcepi od
@@ -700,7 +700,7 @@ slovenščini, brez nepojasnjenih kratic.
    v načinu celic prazen, kar se zapiše v `RUNNING.md`).
 3. Pravi pogon `config/experiments/porto_cells_mia.yaml` (`max_users: 2000`) in
    `trajguard repeat … --seeds 1 2 3` se poženeta po prehodu testov; vrstice gredo v
-   `docs/HANDOFF.md` §2.3, `RUNNING.md` §9.2 in v §11.5 tega dokumenta.
+   `docs/HANDOFF.md` §2.3.2, `RUNNING.md` §9.2 in v §11.5 tega dokumenta.
 4. B2 se izvede v sveži seji: začne v plan mode, načrt povzame in ga predloži v potrditev.
 
 ### 11.3 Preverjena dejstva, ki jih nova seja ne odkriva znova
@@ -888,7 +888,7 @@ izmerjenim izpisom in opombo, da je `n_rematch_dropped` v načinu celic prazen; 
 `docs/ARCHITECTURE.md` (veja celic v diagramu toka podatkov, ključa
 `dataset.representation`/`dataset.grid` v razdelku o konfiguraciji, opomba v tabeli
 skladnosti), ta dokument (§4 PR B2 izveden, §11.4 dejanske odločitve, §11.5 izmerjeno),
-`docs/HANDOFF.md` §2.3 (izmerjene vrstice MIA za Porto), `CLAUDE.md` (vrstica stanja).
+`docs/HANDOFF.md` §2.3.2 (izmerjene vrstice MIA za Porto), `CLAUDE.md` (vrstica stanja).
 `docs/REZULTATI_SHEMA.md` se ne spremeni.
 
 **Dokaz nespremenjenosti današnje poti**: obstoječi `tests/test_orchestrator.py`
@@ -920,14 +920,14 @@ vseh 367.008 poti v predpomnilnik, nato napad nad 2.000 potmi), nato
 `uv run trajguard repeat config/experiments/porto_cells_mia.yaml --seeds 1 2 3`. Zapiši:
 čas prvega branja in napada na seme, `l_k` roke `ldptrace` po ε (iz izpisa ali `run.json`,
 če ga B2 doda), tabelo AUC in `tpr@fpr = 0,1` (povprečje in interval čez tri semena) za
-`markov` in `ldptrace` ε ∈ {0,5, 1, 1,5} v `HANDOFF.md` §2.3 in `RUNNING.md` §9.2.
+`markov` in `ldptrace` ε ∈ {0,5, 1, 1,5} v `HANDOFF.md` §2.3.2 in `RUNNING.md` §9.2.
 *(Izmerjeno 3. septembra 2026, commit `829e69f`: prvi zagon 58 s — ~57 s branje in
 čiščenje 367.008 poti, napad 0,3 s `markov` / 0,7 s `ldptrace` na roko; ponovitve 11 s za
 tri semena, ~3 s na seme. Bazen 1.000 članov / 400 nečlanov. AUC čez semena 1–3: `markov`
 0,582 [0,558; 0,607]; `ldptrace` ε = 0,5 / 1 / 1,5: 0,511 [0,471; 0,551] / 0,498 [0,450;
 0,547] / 0,496 [0,458; 0,535]; `tpr@fpr = 0,1`: 0,166 / 0,096 / 0,100 / 0,110. L_k po
 semenih 42/1/2/3: 1/4/1/1, 1/5/1/1, 1/7/2/7 — nestabilen tudi pri n = 1.000. Celotna
-tabela in branje v `docs/HANDOFF.md` §2.3, ukaz in izpis v `docs/RUNNING.md` §9.2.)*
+tabela in branje v `docs/HANDOFF.md` §2.3.2, ukaz in izpis v `docs/RUNNING.md` §9.2.)*
 
 ### 11.6 Prompt za sejo B2 (kopiraj v celoti)
 
@@ -952,7 +952,7 @@ privacy_mechanisms, vbrizg n_rows/n_cols v generator z zavrnitvijo nasprotujoči
 vrednosti, representation/grid v hashu samo v načinu cells, test konec-do-konca nad
 fixturom geolife_onroad); docs/REZULTATI_SHEMA.md se ne spremeni; pravi pogon
 config/experiments/porto_cells_mia.yaml (max_users 2000) in repeat s semeni 1 2 3 se
-požene po prehodu testov, vrstice gredo v docs/HANDOFF.md §2.3, RUNNING §9.2 in v §11.5.
+požene po prehodu testov, vrstice gredo v docs/HANDOFF.md §2.3.2, RUNNING §9.2 in v §11.5.
 
 Začni v plan mode: načrt na kratko povzemi in ga predloži v potrditev; odstopanja od
 §11.4 najprej predlagaj. Veja claude/cells-mode-orchestrator se odcepi od
@@ -1006,7 +1006,7 @@ slovenščini, brez nepojasnjenih kratic.
   `SyntheticTrajectory` s `payload` = terka celic in `map_id = ""`; `sequence_log_prob`.
   Ciljni generator roke v orkestratorju je isti razred nad verigami razreza `train` v
   vrstnem redu predpomnilnika s `seed = seme pogona + 0` (senčni `1000 + k`); ponovna
-  prilagoditev ga natanko reproducira (tako so dobljeni L_k v `HANDOFF.md` §2.3).
+  prilagoditev ga natanko reproducira (tako so dobljeni L_k v `HANDOFF.md` §2.3.1).
 - **Čas.** Tveganje iz §7 (»1–3 min na seme«) je zastarelo: 17 prilagajanj nad 1.000
   učnimi verigami (16 senčnih + tarča) traja 0,7 s, torej ~0,04 s na prilagoditev tisočih
   verig; celoten pogon `porto_cells_mia` traja 58 s, od tega ~57 s branje in čiščenje
@@ -1020,7 +1020,7 @@ slovenščini, brez nepojasnjenih kratic.
   konec in sinteza da enocelične poti. Članek dela s celotno populacijo (~360.000), kjer se
   histogram umiri; to je glavni razlog za priporočilo v 12.3(a).
 - **Merilo 4 iz §6 je izpolnjeno v B2:** vrstice MIA za `markov` in `ldptrace` nad Portom
-  obstajajo (`HANDOFF.md` §2.3: AUC 0,58 oziroma ~0,50, tri semena, 11 s). PR C jih ne
+  obstajajo (`HANDOFF.md` §2.3.2: AUC 0,58 oziroma ~0,50, tri semena, 11 s). PR C jih ne
   ponavlja, razen če spremeni konfiguracijo.
 - **Mreža izvirnika.** Izvirnik bbox računa sam iz `porto.xz` (`dataset_stats`, ± 1e-6),
   kar je natanko pravilo za `grid_bbox` v `porto_stats.json` (prevzeto v B1); naš `Grid`
@@ -1046,7 +1046,7 @@ slovenščini, brez nepojasnjenih kratic.
 - **(c) `l_k` v `run.json`** (neobvezno): zapis `l_k` in `report_epsilon` ciljnega
   generatorja po rokah, da prihodnji pogoni MIA ne potrebujejo ponovne prilagoditve.
 - **(d) Semena in ε** po D-V.10 (ε ∈ {0,5, 1, 1,5}, semena 1–5 na obeh straneh); neobvezno
-  ε = 2 in mreža 12 × 12 za vez na `HANDOFF.md` §2.3.
+  ε = 2 in mreža 12 × 12 za vez na `HANDOFF.md` §2.3.1.
 
 ### 12.4 Popravki načrta §4/§6/§7 za PR C
 
@@ -1058,7 +1058,7 @@ slovenščini, brez nepojasnjenih kratic.
   spremembi konfiguracije.
 - Izhod ogrodja v `results/ldptrace_validation/` (ni v gitu), popravek izvirnika v
   `scripts/ldptrace_reference.patch` (edini artefakt izvirnika v gitu), commit klona v
-  `HANDOFF.md` §2.3.
+  `HANDOFF.md` §2.3.2.
 
 ### 12.5 Dejanske odločitve in izmerjeno (PR C, 4. september 2026)
 
@@ -1114,7 +1114,7 @@ zadenejo). Pred popravkom se je razlikovalo 108 od prvih 20.000 verig (0,5 %), p
 20.000 (112.951 celic). Orkestratorjev `_cell_pool` še uporablja `Grid.cell_of`
 (`HANDOFF.md` §2.5).
 
-**Izmerjeno (podrobnosti in tabela v `HANDOFF.md` §2.3):** port 15 zagonov v 60 min (~4
+**Izmerjeno (podrobnosti in tabela v `HANDOFF.md` §2.3.2):** port 15 zagonov v 60 min (~4
 min na zagon ob sočasni obremenitvi), izvirnik 15 zagonov v 2 h 16 min z dvema vzporednima
 procesoma (10–23 min na zagon), ocena izvirnikovih sintez 27 min. Merilo 1: osem
 metrik enakih do 1,1 · 10⁻¹⁶, AvRE se razlikuje za 0,09 (največ 0,32) (drug žreb poizvedb). Merilo 2: 19
