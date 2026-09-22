@@ -1,10 +1,12 @@
 """Tests for the per-run plots over unified results-table rows (wave-2 O5)."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from trajguard.datamodel import MetricValue
+from trajguard.reporting import plots
 from trajguard.reporting.plots import (
     headline_metric,
     headline_rows,
@@ -28,10 +30,13 @@ def _row(
     epsilon: float | None = None,
     unit_m: float | None = None,
     known_points: int | None = None,
+    distance: str | None = None,
     ci: bool = True,
     runtime: float | None = 0.5,
 ) -> ResultRow:
     result_id = f"{family}:{target_ref}" + (f":k{known_points}" if known_points else "")
+    if distance is not None and distance != "dtw":
+        result_id += f":{distance}"
     return ResultRow(
         value=MetricValue(
             metric_id=f"{result_id}:{metric}",
@@ -49,6 +54,7 @@ def _row(
         epsilon=epsilon,
         unit_m=unit_m,
         known_points=known_points,
+        distance=distance,
         attack_runtime_s=runtime,
     )
 
@@ -160,3 +166,94 @@ def test_plot_runtime_without_runtimes_writes_nothing(tmp_path: Path) -> None:
     rows = [_row("utility", "protected:none", "cell_js_divergence", 0.01, runtime=None)]
     assert plot_runtime(rows, tmp_path) == []
     assert list(tmp_path.iterdir()) == []
+
+
+# --- attacker distance: dtw vs dtw_norm -------------------------------------------
+
+
+def _raw_reid(value: float, k: int, distance: str) -> ResultRow:
+    return _row(
+        "reidentification",
+        "raw",
+        "top1_acc",
+        value,
+        scope="raw",
+        arm_id="",
+        known_points=k,
+        distance=distance,
+    )
+
+
+def test_headline_rows_represents_an_arm_by_its_default_distance() -> None:
+    """One row per arm: `dtw` represents it even when `dtw_norm` measured a larger k,
+    so the risk matrix and the bar plots keep their pre-dtw_norm meaning."""
+    both = [_raw_reid(0.3, 5, "dtw"), _raw_reid(0.6, 10, "dtw_norm")]
+    _, picked = headline_rows(both, "reidentification")
+    assert [(r.known_points, r.distance) for r in picked] == [(5, "dtw")]
+    # a run that measured only the normalised attacker is still represented
+    _, only_norm = headline_rows([_raw_reid(0.6, 10, "dtw_norm")], "reidentification")
+    assert [(r.known_points, r.distance) for r in only_norm] == [(10, "dtw_norm")]
+
+
+def _capture_line_labels(monkeypatch: pytest.MonkeyPatch, labels: list[str]) -> None:
+    """Record the legend label of every line a plot draws, before the figure is saved."""
+    save = plots._save
+
+    def capture(plt: object, fig: Any, path: Path) -> Path:
+        labels.extend(str(line.get_label()) for line in fig.axes[0].lines)
+        return save(plt, fig, path)
+
+    monkeypatch.setattr(plots, "_save", capture)
+
+
+def test_plot_by_knowledge_draws_one_line_per_arm_and_distance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        _raw_reid(0.3, 3, "dtw"),
+        _raw_reid(0.4, 5, "dtw"),
+        _raw_reid(0.6, 3, "dtw_norm"),
+        _raw_reid(0.7, 5, "dtw_norm"),
+    ]
+    labels: list[str] = []
+    _capture_line_labels(monkeypatch, labels)
+    (written,) = plot_by_knowledge(rows, tmp_path)
+    assert written.name == "by_knowledge_reidentification.png"
+    # the default distance keeps the bare arm label; only the second one is spelled out
+    assert labels == ["raw", "raw [dtw_norm]"]
+
+
+def test_plot_by_epsilon_draws_one_line_per_arm_and_distance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two distances measured on one arm are two lines, not one zig-zag.
+
+    Without the distance in the group key, the four rows below would share a single
+    polyline that jumps between the dtw and the dtw_norm value at each epsilon, under
+    one label.
+    """
+    rows = [
+        _row(
+            "reidentification",
+            f"protected:geo_indistinguishability:epsilon={eps}",
+            "top1_acc",
+            value,
+            epsilon=eps,
+            known_points=5,
+            distance=distance,
+        )
+        for eps, distance, value in (
+            (1.0, "dtw", 0.3),
+            (10.0, "dtw", 0.5),
+            (1.0, "dtw_norm", 0.6),
+            (10.0, "dtw_norm", 0.8),
+        )
+    ]
+    labels: list[str] = []
+    _capture_line_labels(monkeypatch, labels)
+    (written,) = plot_by_epsilon(rows, tmp_path)
+    assert written.name == "by_epsilon_reidentification.png"
+    assert labels == [
+        "geo_indistinguishability, k=5",
+        "geo_indistinguishability, k=5 [dtw_norm]",
+    ]

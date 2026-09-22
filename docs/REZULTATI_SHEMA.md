@@ -74,6 +74,12 @@ z `exp_id` + `git_commit` → konfiguracijska datoteka v `config/experiments/`.
 | `unit_m` | število/prazno | prostorska enota geo-ind (m) | geo-ind veje |
 | `known_points` | celo/prazno | število točk, ki jih napadalec pozna (os »predznanje«) | reidentifikacija |
 | `n_shadow` | celo/prazno | število senčnih modelov LiRA | sklepanje o članstvu |
+| `distance` | niz/prazno | razdalja napadalca v reidentifikaciji (`dtw` = nenormirana, kot v zapisu S4; `dtw_norm` = `dtw / L`, L je dolžina optimalne poravnave) | reidentifikacija |
+
+Stolpec `distance` je zaradi združljivosti fizično zadnji v glavi (dodan 22. septembra
+2026, odločitev v `docs/HANDOFF.md` §2.5.1); stare datoteke brez njega bralniki
+(`results_io`, `report.merge_results_tables`) še sprejmejo in reidentifikacijskim
+vrsticam pripišejo `dtw`, ostalim prazno.
 
 Ti stolpci se ob implementaciji polnijo iz strukturiranih specifikacij (`AttackSpec`,
 `MechanismSpec`), ne z razčlenjevanjem niza `target_ref` — nizov se ne razstavlja nazaj.
@@ -146,6 +152,14 @@ zagonskih tabel z glasno zavrnitvijo tuje glave stolpcev. Obstoječi izhodi (`me
 Z O6 (5. avgust 2026) je dodan stolpec `peak_memory_mb`: orkestrator meri vršno porabo
 pomnilnika vsakega zagona napada s `tracemalloc` (standardna knjižnica, brez novih
 odvisnosti), z izklopom prek `metrics.memory: false`.
+
+22. septembra 2026 je na konec glave dodan stolpec `distance` (razdalja napadalca v
+reidentifikaciji). Prejšnjo glavo — isti stolpci brez `distance` — imenuje konstanta
+`LEGACY_RESULTS_COLUMNS` v `results_schema.py`; bralniki jo še sprejmejo, tako da
+izmerjene tabele kampanje S4 in mehanizmov pri u20 ostanejo berljive. V `result_id`
+nosi pripono le neprivzeta razdalja, in sicer za `:k<N>` (npr.
+`reidentification:protected:none:k5:dtw_norm`); privzeti `dtw` ostane neizpisan, zato
+so današnji `result_id` nespremenjeni.
 
 ## Odjemalci sheme — glava stolpcev je vmesnik, ne podrobnost
 

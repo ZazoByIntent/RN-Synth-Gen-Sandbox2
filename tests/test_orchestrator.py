@@ -82,6 +82,22 @@ def write_config(tmp_path: Path, cfg: dict[str, Any]) -> Path:
     return path
 
 
+def reid_cells(out_dir: Path) -> dict[tuple[str, str], tuple[str, ...]]:
+    """Run-independent cells of every reidentification row, keyed by (result_id, metric)."""
+    rows = list(csv.DictReader((out_dir / "results.csv").open()))
+    return {
+        (r["result_id"], r["metric"]): (
+            r["value"],
+            r["ci_low"],
+            r["ci_high"],
+            r["known_points"],
+            r["distance"],
+        )
+        for r in rows
+        if r["family"] == "reidentification"
+    }
+
+
 def test_run_end_to_end_writes_metrics(tmp_path: Path, beijing_maps_dir: Path) -> None:
     cfg = base_config(tmp_path, beijing_maps_dir)
     values = run(write_config(tmp_path, cfg))
@@ -200,6 +216,21 @@ def test_unknown_attack_type_fails_loudly(tmp_path: Path) -> None:
     cfg = base_config(tmp_path, tmp_path / "maps")
     cfg["attacks"][0]["type"] = "no_such_attack"
     with pytest.raises(KeyError, match="no_such_attack"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_unknown_attacker_distance_fails_loudly(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["attacker"]["distance"] = "hausdorff"
+    with pytest.raises(ValueError, match="attacker.distance 'hausdorff' unsupported"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_repeated_attacker_distance_fails_loudly(tmp_path: Path) -> None:
+    """Two reidentification entries with one distance would write the same result ids."""
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"].append(dict(cfg["attacks"][0]))
+    with pytest.raises(ValueError, match=r"attacks\[1\] repeats reidentification"):
         run(write_config(tmp_path, cfg))
 
 
@@ -789,6 +820,69 @@ def test_results_csv_follows_schema(tmp_path: Path, beijing_maps_dir: Path) -> N
     for r in geo:
         assert int(r["n_pool"]) == arms[f"protected:{GEOIND_REF}"]["n_pool"]
         assert int(r["n_rematch_dropped"]) == arms[f"protected:{GEOIND_REF}"]["n_rematch_dropped"]
+
+
+def test_dtw_norm_entry_adds_rows_and_leaves_the_dtw_ones_untouched(
+    tmp_path: Path, beijing_maps_dir: Path
+) -> None:
+    """A second reidentification entry measures `dtw_norm` next to `dtw`: its rows get
+    their own result ids and `distance` cells, while every `dtw` row keeps its id and
+    its value — the measured S4 record stays valid (docs/HANDOFF.md §2.5.1).
+
+    The config carries the geo-ind arm so the epsilon axis has a point to draw and
+    by_epsilon is exercised end to end alongside the other per-run plots.
+    """
+    cfg = geoind_config(tmp_path, beijing_maps_dir)
+    cfg["reporting"] = {"export": ["csv"]}
+    run(write_config(tmp_path, cfg))
+    dtw_only = reid_cells(tmp_path / "out")
+
+    cfg["attacks"].append(
+        {
+            "type": "reidentification",
+            "attacker": {"known_points": [3, 5], "distance": "dtw_norm"},
+            "target_scope": ["raw", "protected"],
+        }
+    )
+    cfg["reporting"] = {
+        "export": ["csv"],
+        "plots": ["by_epsilon", "by_knowledge", "mechanisms", "runtime"],
+    }
+    run(write_config(tmp_path, cfg))
+    both = reid_cells(tmp_path / "out")
+
+    assert {k: v for k, v in both.items() if not k[0].endswith(":dtw_norm")} == dtw_only
+    assert all(cells[4] == "dtw" for cells in dtw_only.values())
+    ids = {result_id for result_id, _ in both}
+    for ref in ("raw", "protected:none", f"protected:{GEOIND_REF}"):
+        for k in (3, 5):
+            assert f"reidentification:{ref}:k{k}" in ids
+            assert f"reidentification:{ref}:k{k}:dtw_norm" in ids
+    normalised = [v for key, v in both.items() if key[0].endswith(":dtw_norm")]
+    assert normalised and all(cells[4] == "dtw_norm" for cells in normalised)
+    assert {cells[3] for cells in normalised} == {"3", "5"}
+
+    # the two distances rank the gallery differently, so they are a genuinely
+    # different attacker: at least one metric of one arm must disagree. Asserting
+    # "at least one" rather than "every one" keeps the test robust on a fixture with
+    # only two users, where several metrics saturate at the same value for both.
+    twins = {
+        key: (cells[0], both[(f"{key[0]}:dtw_norm", key[1])][0])
+        for key, cells in both.items()
+        if not key[0].endswith(":dtw_norm")
+    }
+    assert any(plain != norm for plain, norm in twins.values()), twins
+
+    # the one-row-per-arm views keep representing an arm by its `dtw` row, so
+    # matrix.csv is unchanged; the plots simply gain the second line/bar label
+    matrix = list(csv.reader((tmp_path / "out" / "matrix.csv").open()))
+    assert matrix[0] == ["target", "reidentification:top1_acc"]
+    written = {p.name for p in (tmp_path / "out").glob("*.png")}
+    assert {
+        "by_epsilon_reidentification.png",
+        "by_knowledge_reidentification.png",
+        "runtime.png",
+    } <= written
 
 
 def test_results_csv_membership_columns(tmp_path: Path, beijing_maps_dir: Path) -> None:

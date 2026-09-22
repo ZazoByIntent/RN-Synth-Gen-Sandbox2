@@ -7,6 +7,7 @@ import pytest
 
 from trajguard.datamodel import MetricValue
 from trajguard.reporting.results_schema import (
+    LEGACY_RESULTS_COLUMNS,
     PROVENANCE_COLUMNS,
     RESULTS_COLUMNS,
     ResultRow,
@@ -79,6 +80,31 @@ def test_write_results_csv_follows_column_order(tmp_path: Path) -> None:
     assert record["metric"] == "top1_acc" and record["value"] == "0.5"
     assert record["attack_runtime_s"] == "0.25" and record["run_runtime_s"] == "1.5"
     assert record["peak_memory_mb"] == "12.5"
+
+
+def test_distance_is_appended_at_the_end_of_the_header(tmp_path: Path) -> None:
+    """`distance` was added as the last column — the one change older readers can
+    absorb — and LEGACY_RESULTS_COLUMNS names the header written before it."""
+    assert RESULTS_COLUMNS[-1] == "distance"
+    assert LEGACY_RESULTS_COLUMNS == RESULTS_COLUMNS[:-1]
+
+    row = ResultRow(
+        value=_metric("top1_acc", 0.5),
+        family="reidentification",
+        scope="raw",
+        arm_id="",
+        target_ref="raw",
+        known_points=5,
+        distance="dtw_norm",
+    )
+    path = tmp_path / "results.csv"
+    write_results_csv(path, PROVENANCE, [row], run_runtime_s=1.5)
+
+    with path.open() as fh:
+        reader = csv.reader(fh)
+        header = tuple(next(reader))
+        cells = next(reader)
+    assert header[-1] == "distance" and cells[-1] == "dtw_norm"
 
 
 def test_write_results_csv_blanks_none_and_non_finite(tmp_path: Path) -> None:

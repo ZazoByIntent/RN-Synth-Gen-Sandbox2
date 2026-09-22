@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from trajguard.geometry import DEFAULT_DISTANCE
 from trajguard.reporting.results_schema import ResultRow
 
 # Headline metric per attack family; a family whose preferred metric is absent
@@ -28,6 +29,24 @@ HEADLINE_PREFERENCE = {
 }
 
 _SCOPE_ORDER = {"raw": 0, "protected": 1, "synthetic": 2}
+
+# Rows carrying ``geometry.DEFAULT_DISTANCE`` — and rows of families without an
+# attacker distance at all — are the plain ones: they keep their old labels and stay
+# the representative row of their arm, so views of runs without ``dtw_norm`` are
+# unchanged. ``report.py`` imports ``with_distance`` from here, so the two reporting
+# layers cannot label the same row differently.
+
+
+def _is_default_distance(row: ResultRow) -> bool:
+    """True when the row carries no attacker distance, or the default one."""
+    return row.distance is None or row.distance == DEFAULT_DISTANCE
+
+
+def with_distance(label: str, distance: str | None) -> str:
+    """Append a non-default attacker distance to a display label (``dtw`` stays implicit)."""
+    if distance is None or distance == DEFAULT_DISTANCE:
+        return label
+    return f"{label} [{distance}]"
 
 
 def headline_metric(family: str, present: Sequence[str]) -> str:
@@ -63,7 +82,10 @@ def headline_rows(rows: Sequence[ResultRow], family: str) -> tuple[str, list[Res
 
     Families with a knowledge knob (reidentification) emit one row per
     known_points level; the arm is represented by its largest level, matching
-    the risk matrix in ``trajguard report``.
+    the risk matrix in ``trajguard report``. When a run measured two attacker
+    distances, the default one (``dtw``) represents the arm, so these one-row-per-arm
+    views keep the meaning they had before ``dtw_norm`` existed; a run that measured
+    only ``dtw_norm`` is still represented by it.
     """
     fam = [r for r in rows if r.family == family]
     headline = headline_metric(family, [r.value.name for r in fam])
@@ -72,7 +94,13 @@ def headline_rows(rows: Sequence[ResultRow], family: str) -> tuple[str, list[Res
         if r.value.name == headline:
             by_target.setdefault(r.target_ref, []).append(r)
     picked = [
-        max(target_rows, key=lambda r: -1 if r.known_points is None else r.known_points)
+        max(
+            target_rows,
+            key=lambda r: (
+                1 if _is_default_distance(r) else 0,
+                -1 if r.known_points is None else r.known_points,
+            ),
+        )
         for target_rows in by_target.values()
     ]
     picked.sort(key=target_sort_key)
@@ -118,9 +146,11 @@ def _save(plt: Any, fig: Any, path: Path) -> Path:
 def plot_by_epsilon(rows: Sequence[ResultRow], out_dir: Path) -> list[Path]:
     """One ``by_epsilon_<family>.png`` per family: headline metric vs the arm's ε.
 
-    A line per arm (split further by unit_m and, for families with the knowledge
-    knob, per known_points level). Arms without an epsilon (raw, identity,
-    non-private generators) have no place on this axis and are left out.
+    A line per arm (split further by unit_m, by known_points for families with the
+    knowledge knob, and by attacker distance). Without the distance in the key, a run
+    that measured both ``dtw`` and ``dtw_norm`` would draw the two as one zig-zag
+    polyline under a single label. Arms without an epsilon (raw, identity, non-private
+    generators) have no place on this axis and are left out.
     """
     written: list[Path] = []
     for family in _families(rows):
@@ -129,13 +159,13 @@ def plot_by_epsilon(rows: Sequence[ResultRow], out_dir: Path) -> list[Path]:
         if not pts:
             continue
         plt = _plt()
-        groups: dict[tuple[str, float | None, int | None], list[ResultRow]] = {}
+        groups: dict[tuple[str, float | None, int | None, str], list[ResultRow]] = {}
         for r in pts:
-            groups.setdefault((r.arm_id, r.unit_m, r.known_points), []).append(r)
-        many_units = len({unit for _, unit, _ in groups}) > 1
+            groups.setdefault((r.arm_id, r.unit_m, r.known_points, r.distance or ""), []).append(r)
+        many_units = len({unit for _, unit, _, _ in groups}) > 1
         fig, ax = plt.subplots(figsize=(7.0, 5.0))
-        for (arm_id, unit_m, k), grp in sorted(
-            groups.items(), key=lambda g: (g[0][0], g[0][1] or 0.0, g[0][2] or -1)
+        for (arm_id, unit_m, k, _distance), grp in sorted(
+            groups.items(), key=lambda g: (g[0][0], g[0][1] or 0.0, g[0][2] or -1, g[0][3])
         ):
             grp.sort(key=lambda r: r.epsilon or 0.0)
             label = arm_id
@@ -143,6 +173,7 @@ def plot_by_epsilon(rows: Sequence[ResultRow], out_dir: Path) -> list[Path]:
                 label += f", unit_m={unit_m:g}"
             if k is not None:
                 label += f", k={k}"
+            label = with_distance(label, grp[0].distance)
             xs = [r.epsilon for r in grp]
             (line,) = ax.plot(xs, [r.value.value for r in grp], marker="o", label=label)
             _ci_segments(ax, xs, grp, line.get_color())
@@ -159,7 +190,7 @@ def plot_by_epsilon(rows: Sequence[ResultRow], out_dir: Path) -> list[Path]:
 
 def plot_by_knowledge(rows: Sequence[ResultRow], out_dir: Path) -> list[Path]:
     """One ``by_knowledge_<family>.png`` per family with a knowledge knob:
-    headline metric vs known_points, a line per target arm."""
+    headline metric vs known_points, a line per target arm and attacker distance."""
     written: list[Path] = []
     for family in _families(rows):
         headline, finite = _headline_points(rows, family)
@@ -167,16 +198,18 @@ def plot_by_knowledge(rows: Sequence[ResultRow], out_dir: Path) -> list[Path]:
         if not pts:
             continue
         plt = _plt()
-        groups: dict[str, list[ResultRow]] = {}
-        order: dict[str, tuple[Any, ...]] = {}
+        groups: dict[tuple[str, str], list[ResultRow]] = {}
+        order: dict[tuple[str, str], tuple[Any, ...]] = {}
         for r in pts:
-            groups.setdefault(r.target_ref, []).append(r)
-            order.setdefault(r.target_ref, target_sort_key(r))
+            key = (r.target_ref, r.distance or "")
+            groups.setdefault(key, []).append(r)
+            order.setdefault(key, (*target_sort_key(r), key[1]))
         fig, ax = plt.subplots(figsize=(7.0, 5.0))
-        for ref in sorted(groups, key=lambda t: order[t]):
-            grp = sorted(groups[ref], key=lambda r: r.known_points or 0)
+        for key in sorted(groups, key=lambda k: order[k]):
+            grp = sorted(groups[key], key=lambda r: r.known_points or 0)
             xs = [r.known_points for r in grp]
-            (line,) = ax.plot(xs, [r.value.value for r in grp], marker="o", label=ref)
+            label = with_distance(key[0], grp[0].distance)
+            (line,) = ax.plot(xs, [r.value.value for r in grp], marker="o", label=label)
             _ci_segments(ax, xs, grp, line.get_color())
         ax.set_xlabel("known points (attacker knowledge)")
         ax.set_ylabel(headline)
@@ -225,7 +258,8 @@ def plot_runtime(rows: Sequence[ResultRow], out_dir: Path) -> list[Path]:
 
     Rows of one invocation share a result_id and carry the same runtime, so each
     invocation is counted once; labels come from the structured identity columns
-    (family, target arm, knowledge level), not from the id string.
+    (family, target arm, knowledge level, non-default attacker distance), not from
+    the id string.
     """
     seen: dict[str, ResultRow] = {}
     for r in rows:
@@ -233,7 +267,7 @@ def plot_runtime(rows: Sequence[ResultRow], out_dir: Path) -> list[Path]:
             seen.setdefault(r.value.result_id, r)
     picked = sorted(
         seen.values(),
-        key=lambda r: (r.family, target_sort_key(r), r.known_points or -1),
+        key=lambda r: (r.family, target_sort_key(r), r.known_points or -1, r.distance or ""),
     )
     if not picked:
         return []
@@ -243,7 +277,7 @@ def plot_runtime(rows: Sequence[ResultRow], out_dir: Path) -> list[Path]:
         label = f"{r.family}: {r.target_ref}"
         if r.known_points is not None:
             label += f" (k={r.known_points})"
-        labels.append(label)
+        labels.append(with_distance(label, r.distance))
     values = [r.attack_runtime_s for r in picked]
     families = _families(picked)
     cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]

@@ -36,7 +36,12 @@
 # error — rule R1, docs/RUNNING.md §7.3). The downsampled gallery has ~15x fewer points per
 # trace, so its calls should land in the hundreds of seconds; rounding 100 m and the
 # destructive arms pay mostly their re-matching (~1770 releases each, a few minutes per
-# arm). Expect ~13–14 h per seed; repetitions (`trajguard repeat --seeds`) multiply this.
+# arm). A `dtw_norm` call costs the same as a `dtw` call (the same dynamic-programming
+# pass; the backtrack over the cost matrix is negligible), so the second reidentification
+# entry below simply doubles the reidentification cost: raw/none go from ~12 h to ~24 h
+# per seed at k = 3/5/10, and the whole run from ~13–14 h to ~26 h per seed. To trim,
+# restrict the `dtw_norm` entry's `known_points` — e.g. `[3]` costs only ~2 h extra.
+# Repetitions (`trajguard repeat --seeds`) multiply all of this.
 #
 # Units (see the u20 header): `point_ldp` ε per point over 20 x 20 cells (the orchestrator
 # injects the map bbox; never set bbox here), geo-ind ε per 100 m per point, the naive
@@ -101,6 +106,11 @@ attacks:
     attacker:
       known_points: [3, 5, 10]   # points the attacker knows about each target
       distance: dtw
+    target_scope: [raw, protected]
+  - type: reidentification      # normalised attacker (dtw / L), decision of 22 Sep 2026
+    attacker:                   # (docs/HANDOFF.md §2.5.1): reported next to `dtw`
+      known_points: [3, 5, 10]
+      distance: dtw_norm        # rows carry distance=dtw_norm, result_id ...:k<N>:dtw_norm
     target_scope: [raw, protected]
   - type: reconstruction         # MAP inversion of the geo-ind noise; skips other arms
     target_scope: [protected]

@@ -27,6 +27,7 @@ from trajguard.attacks.attribute import attribute_report
 from trajguard.attacks.base import Attack, BackgroundKnowledge
 from trajguard.attacks.membership import membership_report
 from trajguard.attacks.reconstruction import reconstruction_report
+from trajguard.attacks.reidentification import distance_suffix
 from trajguard.datamodel import AttackResult, CleanTrajectory, MatchedTrajectory, MetricValue
 from trajguard.datasets.base import DatasetLoader
 from trajguard.datasets.cleaning import CleaningConfig, clean, haversine_m
@@ -36,6 +37,7 @@ from trajguard.evaluation.roc import tpr_at_fpr_measurable
 from trajguard.evaluation.utility import UTILITY_METRICS
 from trajguard.experiments import builtins as _builtins  # registers first-party implementations
 from trajguard.experiments import registry
+from trajguard.geometry import DEFAULT_DISTANCE, DISTANCES
 from trajguard.maps.base import RoadNetwork
 from trajguard.matching.base import MapMatcher, match_many
 from trajguard.privacy.base import PrivacyMechanism
@@ -196,7 +198,7 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                 AttackSpec(
                     attack_type=attack_type,
                     known_points=(),
-                    distance="dtw",
+                    distance=DEFAULT_DISTANCE,  # unused: this family has no distance knob
                     target_scopes=scopes,
                     motion_m=float(motion) if motion is not None else None,
                 )
@@ -238,7 +240,7 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                 AttackSpec(
                     attack_type=attack_type,
                     known_points=(),
-                    distance="dtw",
+                    distance=DEFAULT_DISTANCE,  # unused: this family has no distance knob
                     target_scopes=scopes,
                     poi_params=tuple(sorted(params.items())),
                     threshold_m=threshold,
@@ -277,7 +279,7 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
                 AttackSpec(
                     attack_type=attack_type,
                     known_points=(),
-                    distance="dtw",
+                    distance=DEFAULT_DISTANCE,  # unused: this family has no distance knob
                     target_scopes=scopes,
                     mia_params=tuple(sorted(mia.items())),
                     fprs=fprs,
@@ -288,11 +290,32 @@ def _attack_specs(attacks: list[dict[str, Any]]) -> tuple[AttackSpec, ...]:
         known = tuple(int(k) for k in _req(attacker, "known_points", f"{ctx}.attacker"))
         if not known:
             raise ValueError(f"config: {ctx}.attacker.known_points must not be empty")
+        distance = str(attacker.get("distance", DEFAULT_DISTANCE))
+        if distance not in DISTANCES:
+            raise ValueError(
+                f"config: {ctx}.attacker.distance {distance!r} unsupported; "
+                f"expected one of {sorted(DISTANCES)}"
+            )
+        # One entry per distance: the result ids of two entries sharing a distance
+        # would collide, silently overwriting each other's rows in the report.
+        duplicate = next(
+            (
+                j
+                for j, s in enumerate(specs)
+                if s.attack_type == attack_type and s.distance == distance
+            ),
+            None,
+        )
+        if duplicate is not None:
+            raise ValueError(
+                f"config: {ctx} repeats {attack_type} with distance {distance!r} "
+                f"(already attacks[{duplicate}])"
+            )
         specs.append(
             AttackSpec(
                 attack_type=attack_type,
                 known_points=known,
-                distance=str(attacker.get("distance", "dtw")),
+                distance=distance,
                 target_scopes=scopes,
             )
         )
@@ -1412,7 +1435,9 @@ def _membership_values(
             **dict(spec.mia_params),
             shadow_factory=lambda k, _make=make: _make(1000 + k),
         )
-        attack.configure(BackgroundKnowledge(known_points=0, distance="dtw", seed=cfg.seed))
+        attack.configure(
+            BackgroundKnowledge(known_points=0, distance=DEFAULT_DISTANCE, seed=cfg.seed)
+        )
         ref = f"synthetic:{gspec.ref}"
         result_id = f"membership_inference:{ref}"
         for f in spec.fprs:
@@ -1670,7 +1695,9 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                     result,
                     exp_id=cfg.exp_id,
                     target_data_ref=ref,
-                    result_id=f"{spec.attack_type}:{ref}:k{k}",
+                    # The default distance stays implicit, so the ids of the
+                    # measured S4 record keep their meaning.
+                    result_id=f"{spec.attack_type}:{ref}:k{k}{distance_suffix(spec.distance)}",
                 )
                 probe_counts[ref] = len(result.predictions)
                 values = evaluate(result, metrics, cfg.bootstrap_n, cfg.bootstrap_ci, cfg.seed)
@@ -1685,6 +1712,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                         epsilon=info.epsilon,
                         unit_m=info.unit_m,
                         known_points=k,
+                        distance=spec.distance,
                         n_pool=len(pool.matched),
                         n_gallery_users=len({t.user_id for t in pool.matched}),
                         n_probes=len(result.predictions),

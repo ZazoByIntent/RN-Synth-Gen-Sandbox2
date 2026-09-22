@@ -56,9 +56,16 @@ RESULTS_COLUMNS: tuple[str, ...] = (
     "attack_runtime_s",
     "peak_memory_mb",
     "run_runtime_s",
+    # attacker axis (reidentification): trajectory distance, e.g. dtw / dtw_norm
+    "distance",
 )
 
 PROVENANCE_COLUMNS: tuple[str, ...] = RESULTS_COLUMNS[:7]
+
+# Header written before the `distance` column (S4 and u20 mechanism runs, Aug-Sep
+# 2026); readers accept it and fill `distance` as `dtw` for reidentification rows,
+# blank otherwise.
+LEGACY_RESULTS_COLUMNS: tuple[str, ...] = RESULTS_COLUMNS[:-1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +84,7 @@ class ResultRow:
     epsilon: float | None = None
     unit_m: float | None = None
     known_points: int | None = None
+    distance: str | None = None  # reidentification attacker distance (dtw, dtw_norm)
     n_shadow: int | None = None
     n_pool: int | None = None
     n_gallery_users: int | None = None
@@ -143,5 +151,6 @@ def write_results_csv(
                 "attack_runtime_s": row.attack_runtime_s,
                 "peak_memory_mb": row.peak_memory_mb,
                 "run_runtime_s": run_runtime_s,
+                "distance": row.distance,
             }
             writer.writerow({k: _cell(val) for k, val in record.items()})

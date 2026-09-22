@@ -15,7 +15,11 @@ from trajguard.reporting.results_io import (
     aggregate_over_seeds,
     read_results_csv,
 )
-from trajguard.reporting.results_schema import ResultRow, write_results_csv
+from trajguard.reporting.results_schema import (
+    LEGACY_RESULTS_COLUMNS,
+    ResultRow,
+    write_results_csv,
+)
 
 PROVENANCE = {
     "exp_id": "exp",
@@ -56,7 +60,37 @@ def _row(value: MetricValue) -> ResultRow:
         n_rematch_dropped=1,
         attack_runtime_s=0.25,
         peak_memory_mb=12.5,
+        distance="dtw",
     )
+
+
+def _utility_row() -> ResultRow:
+    value = MetricValue(
+        metric_id="utility:protected:none:cell_js_divergence",
+        result_id="utility:protected:none",
+        name="cell_js_divergence",
+        value=0.4,
+        ci_low=None,
+        ci_high=None,
+        n_bootstrap=None,
+    )
+    return ResultRow(
+        value=value,
+        family="utility",
+        scope="protected",
+        arm_id="none",
+        target_ref="protected:none",
+    )
+
+
+def _write_legacy_csv(tmp_path: Path, rows: list[ResultRow]) -> Path:
+    """A table as runs wrote it before `distance`: the same cells minus the last column."""
+    current = tmp_path / "current.csv"
+    write_results_csv(current, PROVENANCE, rows, run_runtime_s=1.5)
+    legacy = tmp_path / "legacy.csv"
+    with current.open(newline="") as src, legacy.open("w", newline="") as dst:
+        csv.writer(dst).writerows(cells[:-1] for cells in csv.reader(src))
+    return legacy
 
 
 def _loaded(seed: int, value: float, **overrides: object) -> LoadedRow:
@@ -106,10 +140,26 @@ def test_read_results_csv_round_trips(tmp_path: Path) -> None:
     assert first.row == replace(full, value=same_id)
     assert first.row.value.result_id == full.value.result_id
 
+    assert first.row.distance == "dtw"  # the attacker axis survives the round trip
+
     assert second.row.family == "poi_inference" and second.row.epsilon == 0.1
     assert math.isnan(second.row.value.value)  # blank value cell -> non-finite again
     assert second.row.value.ci_low is None and second.row.value.n_bootstrap is None
     assert second.row.unit_m is None and second.row.known_points is None
+    assert second.row.distance is None  # blank distance cell -> None
+
+
+def test_read_results_csv_accepts_the_pre_distance_header(tmp_path: Path) -> None:
+    """Tables measured before the `distance` column stay readable: reidentification
+    rows used the unnormalised DTW, every other family has no distance at all."""
+    path = _write_legacy_csv(tmp_path, [_row(_metric("top1_acc", 0.5)), _utility_row()])
+    with path.open(newline="") as fh:
+        assert tuple(next(csv.reader(fh))) == LEGACY_RESULTS_COLUMNS
+
+    reid, util = read_results_csv(path)
+    assert reid.row.family == "reidentification" and reid.row.distance == "dtw"
+    assert reid.row.known_points == 5 and reid.row.value.value == 0.5
+    assert util.row.family == "utility" and util.row.distance is None
 
 
 def test_read_results_csv_rejects_foreign_header(tmp_path: Path) -> None:
@@ -144,6 +194,25 @@ def test_aggregate_over_seeds_drops_counts_that_differ() -> None:
     (agg,) = aggregate_over_seeds(records)
     assert agg.n_rematch_dropped is None
     assert agg.n_pool == 8  # still identical -> still kept
+
+
+def test_aggregate_over_seeds_keeps_distances_apart() -> None:
+    """Two attacker distances on the same arm are two rows, never one blended mean."""
+
+    def as_norm(rec: LoadedRow) -> LoadedRow:
+        row = replace(
+            rec.row,
+            distance="dtw_norm",
+            value=replace(rec.row.value, result_id=f"{rec.row.value.result_id}:dtw_norm"),
+        )
+        return LoadedRow(provenance=rec.provenance, row=row, run_runtime_s=rec.run_runtime_s)
+
+    agg = aggregate_over_seeds(
+        [_loaded(1, 0.4), _loaded(2, 0.6), as_norm(_loaded(1, 0.2)), as_norm(_loaded(2, 0.4))]
+    )
+    by_distance = {r.distance: r.value.value for r in agg}
+    assert by_distance["dtw"] == pytest.approx(0.5)
+    assert by_distance["dtw_norm"] == pytest.approx(0.3)
 
 
 def test_aggregate_over_seeds_rejects_duplicate_seed() -> None:
