@@ -19,13 +19,12 @@ doctoral project. This file is the constitution for the repo; read it every sess
   a `distance` column in `results.csv`, `exp_id`/`config_hash` in `repetitions.csv`,
   PrivTrace facts in `run.json`, M3 utility metrics
   `duration_dist_error`/`speed_dist_error`, `geolife_mech_mia_u182.yaml`).
-- Three stacked pull requests are open (22 Sep 2026): A1 (#51) gives the reidentification
-  attack a second gallery `release` over the released GPS points with no map-matching
-  (`docs/HANDOFF.md` §2.5.2); A2 (#52) adds the last column `gallery` to `results.csv` so
-  the report and the plots keep the two galleries apart; B (branch
-  `claude/mech-configs-full-grid`, stacked on A2) aligns the u50 and u182 mechanism configs
-  to the full u20 arm grids, adds the `release` entries and creates
-  `geolife_mech_mia_u50.yaml`. Those configs are not measured.
+- The release-gallery chain is merged into `main` (5 Oct 2026): A1 (#51) gives the
+  reidentification attack a second gallery `release` over the released GPS points with no
+  map-matching (`docs/HANDOFF.md` §2.5.2); A2 (#52) adds the last column `gallery` to
+  `results.csv` so the report and the plots keep the two galleries apart; B (#53) aligns
+  the u50 and u182 mechanism configs to the full u20 arm grids, adds the `release` entries
+  and creates `geolife_mech_mia_u50.yaml`. Those configs are not measured.
   Next: the author runs rung 50 (`geolife_mech_mia_u50.yaml`, then
   `geolife_mech_reid_u50.yaml`), then rung 182 (`geolife_mech_mia_u182.yaml`, then
   `geolife_mech_reid_u182.yaml`), then the comparison notebook
