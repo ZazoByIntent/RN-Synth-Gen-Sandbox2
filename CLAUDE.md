@@ -13,20 +13,23 @@ doctoral project. This file is the constitution for the repo; read it every sess
   ZM-4 PrivTrace are implemented, validated against the authors' code where one
   exists (LDPTrace, PrivTrace), measured at the 20-user rung and merged into `main`
   (last: PR #42, merge commit `90573b0`, 22 Sep 2026). Rows in `docs/HANDOFF.md`
-  §2.3, decisions in `docs/NACRT_MEHANIZMI.md`. The u50/u182 mechanism configs exist
-  and are not measured.
+  §2.3, decisions in `docs/NACRT_MEHANIZMI.md`.
 - Open decisions were settled on 22 Sep 2026 (`docs/HANDOFF.md` §2, intro). The five
-  small code PRs before the 182 run are done (PRs #47–#50, 22 Sep 2026:
-  `attacker.distance: dtw_norm` with a `distance` column in `results.csv`,
-  `exp_id`/`config_hash` in `repetitions.csv`, PrivTrace facts in `run.json`, M3 utility
-  metrics `duration_dist_error`/`speed_dist_error`, `geolife_mech_mia_u182.yaml`).
-  Next: the author runs `geolife_mech_reid_u182.yaml` (~26 h per seed with both
-  distances) and `geolife_mech_mia_u182.yaml` (~5 min per seed) at 182 users, then the
-  shared comparison notebook (`docs/NACRT_MEHANIZMI.md` §1.6).
-- The reidentification attack has a second gallery `release` over the released GPS points,
-  with no map-matching (22 Sep 2026, `docs/HANDOFF.md` §2.5.2): branch
-  `claude/reid-release-gallery` on `claude/m3-duration-speed`, u20 config updated, nothing
-  measured yet; a `gallery` results column and the u50/u182 configs follow.
+  small code PRs are done (PRs #47–#50, 22 Sep 2026: `attacker.distance: dtw_norm` with
+  a `distance` column in `results.csv`, `exp_id`/`config_hash` in `repetitions.csv`,
+  PrivTrace facts in `run.json`, M3 utility metrics
+  `duration_dist_error`/`speed_dist_error`, `geolife_mech_mia_u182.yaml`).
+- Three stacked pull requests are open (22 Sep 2026): A1 (#51) gives the reidentification
+  attack a second gallery `release` over the released GPS points with no map-matching
+  (`docs/HANDOFF.md` §2.5.2); A2 (#52) adds the last column `gallery` to `results.csv` so
+  the report and the plots keep the two galleries apart; B (branch
+  `claude/mech-configs-full-grid`, stacked on A2) aligns the u50 and u182 mechanism configs
+  to the full u20 arm grids, adds the `release` entries and creates
+  `geolife_mech_mia_u50.yaml`. Those configs are not measured.
+  Next: the author runs rung 50 (`geolife_mech_mia_u50.yaml`, then
+  `geolife_mech_reid_u50.yaml`), then rung 182 (`geolife_mech_mia_u182.yaml`, then
+  `geolife_mech_reid_u182.yaml`), then the comparison notebook
+  (`docs/NACRT_MEHANIZMI.md` §1.6).
 
 Whoever changes the project state updates these lines in the same PR. The history of
 PRs, merge commits and result interpretation lives only in `docs/HANDOFF.md`, never

@@ -541,6 +541,27 @@ not record them. The measured rows were re-run on 20 September 2026 from the com
 tree (`run.json`: `git_commit b0a7dae`) after the review fixes; see `docs/HANDOFF.md`
 §2.3; the differential validation of the port against the authors' code is §9.4.
 
+**Sibling membership-inference configs for the larger rungs — not measured yet.** The
+same generator arms exist for 50 and 182 users as
+`config/experiments/geolife_mech_mia_u50.yaml` (50-user population, re-matching
+threshold 0.05, 300 s budget) and `config/experiments/geolife_mech_mia_u182.yaml`
+(182 users, threshold 0.3, 1200 s budget, the S4 reporting values). Both carry the same
+generators — `markov` as the memorization ceiling plus `rn_ldp_synth`, `ldptrace` and
+`privtrace` at ε ∈ {0.5, 2.0, 8.0} — and run with the same command as the 20-user file:
+
+```sh
+$env:PYTHONHASHSEED="0"
+uv run trajguard repeat config/experiments/geolife_mech_mia_u50.yaml --seeds 1 2 3
+uv run trajguard repeat config/experiments/geolife_mech_mia_u182.yaml --seeds 1 2 3
+```
+
+Run the 50-user file first, then the 182-user one (the same order as for
+reidentification, §7.5). Both are cheap: a few minutes per seed at 50 users and about
+5–10 minutes per seed at 182, because membership inference only fits generators and
+never generates walks. Results land in `results/geolife_mech_mia_u50/seed{1,2,3}/` and
+`results/geolife_mech_mia_u182/seed{1,2,3}/` next to `repetitions.csv`, exactly as for
+`geolife_mech_mia_u20`.
+
 ## 7.3 Computational budget and scope reduction (report §6.6)
 
 Every attack invocation has a runtime budget, configurable as
@@ -746,14 +767,37 @@ the 300 s budget, recorded as
 the `:release` suffix yet and the two galleries are told apart only by the result id.
 
 **Sibling configs for the 50- and 182-user rungs exist and are NOT measured** (created
-4 Sep 2026): `geolife_mech_reid_u50.yaml` carries all u20 arms at threshold 0.05 /
-budget 300 s (the measurement rung decides which arms go on to 182, as in S4), and
-`geolife_mech_reid_u182.yaml` carries the two anchors plus one arm per mechanism
-(`point_ldp` ε = 8, rounding 100 m, downsampling 120 s, Gaussian 50 m) at threshold 0.3 /
-budget 1200 s, the S4 reporting values. Run them with the same `trajguard run` command;
-the cost estimates and the arm rationale are in each file's header (~45 min per seed at
-u50, ~13–14 h at 182 because reidentification on the full pools grows quadratically with
-the gallery and exceeds the budget at 182 exactly as in S4).
+4 Sep 2026, aligned to the full arm grids on 22 Sep 2026). Both
+`geolife_mech_reid_u50.yaml` (threshold 0.05 / budget 300 s) and
+`geolife_mech_reid_u182.yaml` (threshold 0.3 / budget 1200 s, the S4 reporting values)
+now carry **all** the u20 arms — geo-indistinguishability ε ∈ {0.1, 1.0, 10.0}, point LDP
+ε ∈ {4.0, 6.0, 8.0}, spatial rounding {100, 500, 2000} m, temporal downsampling
+{30, 120, 600} s and Gaussian noise {50, 200, 1000} m, next to the `none` anchor — plus
+the extra reidentification entries: a second entry with the length-normalized distance
+`dtw_norm` over the re-matched gallery, and a third entry over the `release` gallery
+described above, with `dtw_norm` and `target_scope: [protected]`. The release entry uses
+`known_points: [3, 5, 10]` at 50 users and only `known_points: [3]` at 182, because the
+release gallery is the expensive part.
+
+Run them with the same repeat command as the 20-user file, 50 users first and 182
+afterwards, and run the membership-inference sibling of each rung (§7.2) before its
+reidentification file:
+
+```sh
+$env:PYTHONHASHSEED="0"
+uv run trajguard repeat config/experiments/geolife_mech_reid_u50.yaml --seeds 1 2 3
+uv run trajguard repeat config/experiments/geolife_mech_reid_u182.yaml --seeds 1 2 3
+```
+
+The author's cost estimates (estimates only, nothing measured): about 12 h per seed at
+50 users, of which the release entry at k = 3/5/10 is about 10.6 h (trimming it to
+k = 3 would bring the file down to about 3.2 h), so roughly 36 h for three seeds; and
+about 56–73 h per seed at 182 users (about 29 h for the two re-matched distances plus
+about 27–44 h for the release entry at k = 3), so roughly 7–9 days for three seeds. Both
+runs belong in a detached background process. Expect about 44 attack calls over the 300 s budget
+at 50 users and about 28 over the 1200 s budget at 182; those are recorded as
+`over_budget` in `run.json` and are not errors (rule R1, §7.3). Each file's header holds
+the per-arm details and the arm rationale.
 
 ## 8. Aggregate risk report
 

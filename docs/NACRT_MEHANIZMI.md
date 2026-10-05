@@ -117,9 +117,12 @@ Preberi `src/trajguard/experiments/orchestrator.py`, funkciji `_protected_pool` 
   sestrske datoteke: `config/experiments/geolife_mech_reid_u20.yaml` (perturbacije:
   sidri `none` in `geo_indistinguishability` ε = 1 plus nove roke) in
   `config/experiments/geolife_mech_mia_u20.yaml` (generatorji: sidri `markov` in
-  `rn_ldp_synth` ε = 2 plus nove roke). Kopiji za u50 in 182 nastaneta šele, ko u20
-  teče. Predpomnilnik surovega bazena se deli, ker so čiščenje, ujemanje in delitev
-  enaki.
+  `rn_ldp_synth` ε = 2 plus nove roke). Kopiji za u50 in 182 obstajata: u20 je izmerjen,
+  datoteke `geolife_mech_reid_u50.yaml`, `geolife_mech_reid_u182.yaml`,
+  `geolife_mech_mia_u50.yaml` in `geolife_mech_mia_u182.yaml` pa od PR B (22. 9. 2026)
+  nosijo polne mreže rok iz u20 in vnose z galerijo `release` (`HANDOFF.md` §2.5.2);
+  izmerjeno pri 50 in 182 še ni nič. Predpomnilnik surovega bazena se deli, ker so
+  čiščenje, ujemanje in delitev enaki.
 - **Najprej stopnja 20, potem 50, šele nato 182.** Vsaka perturbacijska roka pri 182
   pomeni ponovno ujemanje in tri klice reidentifikacije (k = 3/5/10, ~1–3,3 h na
   klic pri pragu 0,3); vsaka generatorska roka pomeni 17 prilagajanj (16 senčnih +
@@ -162,16 +165,33 @@ mehanizmov** (predlog imena `notebooks/04_mechanisms_comparison.ipynb`, po vzoru
 To je ločen korak po ZM-4 (lastna seja in PR), ne del nobenega od korakov ZM-1 do ZM-4;
 do takrat vsak korak zapiše svoje vrstice v `HANDOFF.md` §2.3.
 
-**Zaporedje pred zvezkom (odločitev avtorja, 22. september 2026).** Zvezek se piše nad
-stopnjo 182, ne nad 20; stopnja 50 za mehanizme se preskoči. Pred njim: (1) majhni PR-ji
-kode — normirana razdalja napadalca `dtw_norm` (`HANDOFF.md` §2.3.4), stolpca
-`exp_id` in `config_hash` v `repetitions.csv`, dejstva PrivTrace v `run.json`, metriki
-M3 `duration_dist_error` in `speed_dist_error` (`HANDOFF.md` §2.1); (2) avtor
-sam požene vse sestrske konfiguracije pri 182 (reidentifikacija z `dtw_norm`, Gaussov šum
-z več semeni). Zvezek poroča reidentifikacijo z obema razdaljama, sidra S4 pa z `dtw` in
-opombo o dolžinski pristranskosti; uporabnost poroča s `cell_js_divergence`,
+**Zaporedje pred zvezkom (odločitev avtorja, 22. september 2026, dopolnjena isti dan).**
+Zvezek primerja stopnji 50 in 182; stopnja 20 ostane le kot zapis. Stopnja 50 se torej ne
+preskoči več. Pred zvezkom gre: (1) pet majhnih PR-jev kode, ki so izvedeni (#47–#50) —
+normirana razdalja napadalca `dtw_norm` (`HANDOFF.md` §2.3.4), stolpca `exp_id` in
+`config_hash` v `repetitions.csv`, dejstva PrivTrace v `run.json`, metriki M3
+`duration_dist_error` in `speed_dist_error` (`HANDOFF.md` §2.1) ter kopija
+`geolife_mech_mia_u182.yaml`; (2) trije PR-ji za drugo galerijo — A1 (#51, koda za galerijo
+`release`), A2 (#52, stolpec `gallery` v `results.csv`) in B (uskladitev konfiguracij u50 in
+u182 na polne mreže rok, nova `geolife_mech_mia_u50.yaml`); (3) avtor sam požene najprej
+stopnjo 50 (`geolife_mech_mia_u50.yaml`, nato `geolife_mech_reid_u50.yaml`) in šele nato
+stopnjo 182 (`geolife_mech_mia_u182.yaml`, nato `geolife_mech_reid_u182.yaml`), z
+reidentifikacijo z obema razdaljama in Gaussovim šumom z več semeni; ocene stroška so v
+`HANDOFF.md` §2, točka 6. Zvezek poroča reidentifikacijo z obema razdaljama, sidra S4 pa z
+`dtw` in opombo o dolžinski pristranskosti; uporabnost poroča s `cell_js_divergence`,
 `length_dist_error` in obema metrikama M3 (ti dve samo za perturbacijske mehanizme, ker
 sintetične poti nimajo časov).
+
+**Kako se poroča reidentifikacija (možnost C, avtor, 22. september 2026;
+`HANDOFF.md` §2.5.2).** Zvezek in poročilo (IZV §7, §8) jo poročata na dveh ravneh: kot
+uspešnost med preživelimi ponovnega ujemanja (vrstice galerije `rematched`) in kot uspešnost
+nad celotno izdajo, torej zadetki deljeni z vsemi izdanimi sledmi, pri čemer sledi, ki jih
+ponovno ujemanje odvrže, štejejo kot nepovezane. Druga raven se izračuna iz stolpcev
+`n_pool`, `n_probes` in `n_rematch_dropped`, brez novih meritev. Poleg tega se poročajo
+vrstice galerije `release` kot močnejši napadalec brez ujemalnika. Poročilo mora izrecno
+zapisati, da je »zaščita z uničenjem izdaje« lastnost para mehanizem in prag ponovnega
+ujemanja, ne mehanizma samega, in da je bil prag 0,3 pri stopnji 182 izbran zaradi
+populacije za napad na članstvo, ne kot model napadalca.
 
 ---
 
