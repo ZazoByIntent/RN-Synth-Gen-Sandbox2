@@ -154,19 +154,50 @@ def test_load_results_parses_families_without_known_points(tmp_path: Path) -> No
     assert mia.scope == "synthetic" and mia.mechanism == "markov" and mia.value == 0.9
 
 
-def test_parse_result_id_reads_the_distance_suffix() -> None:
-    """Only the non-default distance is spelled out, and only after `:k<N>`; the
-    default `dtw` stays implicit so the ids measured in S4 keep their meaning."""
+def test_parse_result_id_reads_the_distance_and_gallery_suffixes() -> None:
+    """Only the non-default distance and gallery are spelled out, in that order and only
+    after `:k<N>`; the defaults `dtw` and `rematched` stay implicit, so the ids measured
+    in S4 keep their meaning."""
     from trajguard.reporting.report import _parse_result_id
 
-    assert _parse_result_id("reidentification:raw:k3") == ("reidentification", "raw", 3, "dtw")
+    assert _parse_result_id("reidentification:raw:k3") == (
+        "reidentification",
+        "raw",
+        3,
+        "dtw",
+        "rematched",
+    )
     assert _parse_result_id("reidentification:protected:none:k3:dtw_norm") == (
         "reidentification",
         "protected:none",
         3,
         "dtw_norm",
+        "rematched",
     )
-    assert _parse_result_id("utility:protected:none") == ("utility", "protected:none", None, None)
+    assert _parse_result_id("reidentification:protected:none:k3:release") == (
+        "reidentification",
+        "protected:none",
+        3,
+        "dtw",
+        "release",
+    )
+    assert _parse_result_id("reidentification:protected:none:k3:dtw_norm:release") == (
+        "reidentification",
+        "protected:none",
+        3,
+        "dtw_norm",
+        "release",
+    )
+    assert _parse_result_id("utility:protected:none") == (
+        "utility",
+        "protected:none",
+        None,
+        None,
+        None,
+    )
+    # an attacker suffix only ever qualifies a knowledge level, never an arm on its own
+    with pytest.raises(ValueError, match="k<N>"):
+        _parse_result_id("reidentification:protected:none:release")
 
 
 def test_missing_results_dir_is_loud(tmp_path: Path) -> None:
@@ -244,6 +275,42 @@ def test_risk_matrix_keeps_both_attacker_distances_apart(tmp_path: Path) -> None
 
     report = generate_report(tmp_path / "results", tmp_path / "reports").read_text()
     assert "reidentification [dtw_norm] — top1_acc" in report
+
+
+def test_risk_matrix_keeps_both_attacker_galleries_apart(tmp_path: Path) -> None:
+    """The released gallery is a second attacker, not a second value of the same one: it
+    gets its own column, and the arm's headline stays the rematched/dtw/largest-k row
+    even when the release was measured at a larger knowledge level."""
+    record = run_record(
+        "reid_gallery",
+        [
+            metric("reidentification:raw:k3", "top1_acc", 0.28, 0.1, 0.45),
+            metric("reidentification:raw:k3:dtw_norm", "top1_acc", 0.52),
+            metric("reidentification:raw:k5:dtw_norm:release", "top1_acc", 0.61),
+        ],
+    )
+    runs = load_results(write_results(tmp_path, [record]))
+    (m,) = risk_matrix(runs)
+    assert m.columns == (
+        ("reidentification", "top1_acc"),
+        ("reidentification [dtw_norm]", "top1_acc"),
+        ("reidentification [dtw_norm, release]", "top1_acc"),
+    )
+    headline = m.cells[("raw", "reidentification")]
+    assert headline.value == 0.28 and headline.known_points == 3
+    assert m.cells[("raw", "reidentification [dtw_norm]")].value == 0.52
+    release = m.cells[("raw", "reidentification [dtw_norm, release]")]
+    assert release.value == 0.61 and release.known_points == 5
+
+    sections = summarize_by_attack(runs)
+    assert [s.attack for s in sections] == [
+        "reidentification",
+        "reidentification [dtw_norm]",
+        "reidentification [dtw_norm, release]",
+    ]
+
+    report = generate_report(tmp_path / "results", tmp_path / "reports").read_text()
+    assert "reidentification [dtw_norm, release] — top1_acc" in report
 
 
 def test_risk_matrix_headline_falls_back_for_unknown_attack(tmp_path: Path) -> None:
@@ -399,14 +466,16 @@ def test_master_table_merges_runs_and_rejects_mixed_schemas(tmp_path: Path) -> N
         merge_results_tables(tmp_path / "results", out_dir)
 
 
-def test_master_table_fills_distance_for_pre_distance_runs(tmp_path: Path) -> None:
-    """A results/ tree mixing tables written before and after the `distance` column
-    merges into one master table with the current header, `dtw` on the old
-    reidentification rows and a blank cell on every other old family."""
+def test_master_table_fills_the_attacker_columns_for_legacy_runs(tmp_path: Path) -> None:
+    """A results/ tree mixing tables written before `distance`, before `gallery`, and
+    after both merges into one master table with the current header: the old
+    reidentification rows get `dtw` / `rematched`, every other old family a blank cell,
+    and a column the old table already had keeps its own value."""
     from trajguard.reporting.report import merge_results_tables
     from trajguard.reporting.results_schema import RESULTS_COLUMNS
 
-    def write_run(exp_id: str, rows: list[ResultRow], legacy: bool) -> None:
+    def write_run(exp_id: str, rows: list[ResultRow], drop: int) -> None:
+        """One per-run table, with `drop` trailing columns cut as the older writers did."""
         out = tmp_path / "results" / exp_id
         out.mkdir(parents=True)
         provenance = {
@@ -420,9 +489,9 @@ def test_master_table_fills_distance_for_pre_distance_runs(tmp_path: Path) -> No
         }
         path = out / "results.csv"
         write_results_csv(path, provenance, rows, run_runtime_s=1.0)
-        if legacy:  # drop the trailing distance column, as the old writer did
+        if drop:
             with path.open(newline="") as fh:
-                cells = [row[:-1] for row in csv.reader(fh)]
+                cells = [row[: len(row) - drop] for row in csv.reader(fh)]
             with path.open("w", newline="") as fh:
                 csv.writer(fh).writerows(cells)
 
@@ -436,8 +505,13 @@ def test_master_table_fills_distance_for_pre_distance_runs(tmp_path: Path) -> No
         arm_id="none",
         target_ref="protected:none",
     )
-    write_run("exp_old", [reid_raw_row(0.5), util], legacy=True)
-    write_run("exp_new", [replace(reid_raw_row(0.4), distance="dtw_norm")], legacy=False)
+    write_run("exp_pre_distance", [reid_raw_row(0.5), util], drop=2)
+    write_run("exp_pre_gallery", [replace(reid_raw_row(0.45), distance="dtw_norm"), util], drop=1)
+    write_run(
+        "exp_new",
+        [replace(reid_raw_row(0.4), distance="dtw_norm", gallery="release")],
+        drop=0,
+    )
 
     out_dir = tmp_path / "reports"
     out_dir.mkdir()
@@ -445,10 +519,13 @@ def test_master_table_fills_distance_for_pre_distance_runs(tmp_path: Path) -> No
     assert master is not None
     rows = list(csv.DictReader(master.open()))
     assert tuple(rows[0]) == RESULTS_COLUMNS
-    distances = {(r["exp_id"], r["family"]): r["distance"] for r in rows}
-    assert distances[("exp_old", "reidentification")] == "dtw"
-    assert distances[("exp_old", "utility")] == ""
-    assert distances[("exp_new", "reidentification")] == "dtw_norm"
+    attacker = {(r["exp_id"], r["family"]): (r["distance"], r["gallery"]) for r in rows}
+    assert attacker[("exp_pre_distance", "reidentification")] == ("dtw", "rematched")
+    assert attacker[("exp_pre_distance", "utility")] == ("", "")
+    # the pre-gallery table already carried its own distance; only `gallery` is filled in
+    assert attacker[("exp_pre_gallery", "reidentification")] == ("dtw_norm", "rematched")
+    assert attacker[("exp_pre_gallery", "utility")] == ("", "")
+    assert attacker[("exp_new", "reidentification")] == ("dtw_norm", "release")
 
 
 # --- seed<N>/ repetition layout (S4-4) --------------------------------------------

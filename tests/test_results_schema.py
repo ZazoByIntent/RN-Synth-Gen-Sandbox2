@@ -9,6 +9,7 @@ from trajguard.datamodel import MetricValue
 from trajguard.experiments.repeat import REPETITIONS_COLUMNS
 from trajguard.reporting.results_schema import (
     LEGACY_RESULTS_COLUMNS,
+    LEGACY_RESULTS_HEADERS,
     PROVENANCE_COLUMNS,
     RESULTS_COLUMNS,
     ResultRow,
@@ -93,11 +94,14 @@ def test_write_results_csv_follows_column_order(tmp_path: Path) -> None:
     assert record["peak_memory_mb"] == "12.5"
 
 
-def test_distance_is_appended_at_the_end_of_the_header(tmp_path: Path) -> None:
-    """`distance` was added as the last column — the one change older readers can
-    absorb — and LEGACY_RESULTS_COLUMNS names the header written before it."""
-    assert RESULTS_COLUMNS[-1] == "distance"
-    assert LEGACY_RESULTS_COLUMNS == RESULTS_COLUMNS[:-1]
+def test_attacker_axes_are_appended_at_the_end_of_the_header(tmp_path: Path) -> None:
+    """The two attacker axes were appended at the end, `distance` first and
+    `gallery` after it — the one change older readers can absorb — and
+    LEGACY_RESULTS_HEADERS names the headers written before each of them."""
+    assert RESULTS_COLUMNS[-2] == "distance"
+    assert RESULTS_COLUMNS[-1] == "gallery"
+    assert LEGACY_RESULTS_HEADERS == (RESULTS_COLUMNS[:-1], RESULTS_COLUMNS[:-2])
+    assert LEGACY_RESULTS_COLUMNS is LEGACY_RESULTS_HEADERS[0]
 
     row = ResultRow(
         value=_metric("top1_acc", 0.5),
@@ -107,15 +111,25 @@ def test_distance_is_appended_at_the_end_of_the_header(tmp_path: Path) -> None:
         target_ref="raw",
         known_points=5,
         distance="dtw_norm",
+        gallery="release",
+    )
+    without_gallery = ResultRow(
+        value=_metric("cell_js_divergence", 0.4),
+        family="utility",
+        scope="raw",
+        arm_id="",
+        target_ref="raw",
     )
     path = tmp_path / "results.csv"
-    write_results_csv(path, PROVENANCE, [row], run_runtime_s=1.5)
+    write_results_csv(path, PROVENANCE, [row, without_gallery], run_runtime_s=1.5)
 
     with path.open() as fh:
         reader = csv.reader(fh)
         header = tuple(next(reader))
-        cells = next(reader)
-    assert header[-1] == "distance" and cells[-1] == "dtw_norm"
+        reid, util = next(reader), next(reader)
+    assert header[-2:] == ("distance", "gallery")
+    assert reid[-2] == "dtw_norm" and reid[-1] == "release"
+    assert util[-2] == "" and util[-1] == ""  # None -> blank, like every other axis
 
 
 def test_write_results_csv_blanks_none_and_non_finite(tmp_path: Path) -> None:
