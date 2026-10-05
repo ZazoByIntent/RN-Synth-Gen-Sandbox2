@@ -1,6 +1,6 @@
 # Predaja dela: stanje kampanje S4 in odprte postavke
 
-**Različica:** 3. september 2026 (skrajšana); odločitve o odprtih postavkah vpisane
+**Različica:** 5. oktober 2026 (skrajšana 3. septembra 2026); odločitve o odprtih postavkah vpisane
 22. septembra 2026 (uvod razdelka 2); prestrukturirano 22. septembra 2026 (kazalo,
 podrazdelki §2.3.0–2.3.6 in §2.5.1; vsebina in številke nespremenjene). Celotna zgodovina predaje — analiza vrzeli
 z dne 4. avgusta 2026, recenzija, dnevnik izvedbe valov 0–2 in prvotni zapisi kampanje —
@@ -1459,7 +1459,8 @@ vnos `reidentification` v `geolife_mech_reid_u20.yaml` (`known_points: [3, 5, 10
 stolpec `gallery` v `results.csv` po vzorcu stolpca `distance` iz PR #47, da poročilo in
 grafi ločita galeriji), na tem pa PR B (veja `claude/mech-configs-full-grid`, uskladitev
 konfiguracij u50 in u182 na polni mreži rok z vnosom `release`: `known_points [3]` pri 182,
-`[3, 5, 10]` pri 50). Vsi trije PR-ji so odprti. **Z novo galerijo še ni nič izmerjeno**;
+`[3, 5, 10]` pri 50). Vsi trije PR-ji so bili združeni v `main` 5. oktobra 2026 (merge
+commiti #51 `f4e03d1`, #52 `ae6aa1f`, #53 `ebf6f30`). **Z novo galerijo še ni nič izmerjeno**;
 pri u20 je k = 10 čez proračun 300 s (pravilo R1).
 
 **Opomba (možnost C, 22. september 2026).** Primerjalni zvezek in poročilo (IZV §7 in §8)

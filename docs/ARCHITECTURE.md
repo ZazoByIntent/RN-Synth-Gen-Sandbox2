@@ -167,7 +167,7 @@ validation (`docs/NACRT_LDPTRACE_VALIDACIJA.md`).
 | --- | --- | --- | --- | --- |
 | Reidentification / linkage (de Montjoye 2013) | raw, protected | attacker knows k target points; nearest neighbour either over the re-matched pool (`rematched`, the default) or over the full released points projected into the map CRS (`release`, `protected` scope only), distance `dtw` or `dtw_norm` | top-1/top-k accuracy, linkage rate | P4 |
 | Membership inference, LiRA-lite (Carlini 2022) | synthetic | shadow generators + likelihood ratio | TPR @ FPR ∈ {0.001, 0.01}, AUC | P6 |
-| Reconstruction / inversion (Buchholz 2022) | protected | MAP inversion of the known mechanism | Hausdorff, DTW, mean spatial error (m) | P6 |
+| Reconstruction / inversion (Buchholz 2022) | protected | Whittaker smoother over the released points, no map (`attacks/reconstruction.py`); a road-network-constrained variant is open item A3 | Hausdorff, DTW, mean spatial error (m) | P6 |
 | POI / home-work inference (Primault 2019) | protected, synthetic | stay-point clustering; night hours → home, day hours → work | est↔true home/work distance (m), fraction of users within threshold | P6.5 |
 
 Note on the `poi_inference` synthetic scope: the Markov generator emits road-segment
@@ -175,8 +175,10 @@ sequences with no coordinates or timestamps, so the synthetic branch is not usab
 practice today — only `protected` releases are meaningful
 (see the class docstring in `src/trajguard/attacks/attribute.py`).
 
-Utility metrics for trade-off curves: cell-visit JS divergence, OD-matrix error,
-length/duration/speed distribution error, range-count query error.
+Utility metrics for trade-off curves (`UTILITY_METRICS` in `evaluation/utility.py`,
+paired raw-versus-released with a paired bootstrap): `cell_js_divergence`,
+`length_dist_error`, `duration_dist_error`, `speed_dist_error`. OD-matrix error and
+range-count query error from the design doc are not implemented.
 
 ## Experiment config (design §8)
 
