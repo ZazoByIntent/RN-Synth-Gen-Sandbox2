@@ -150,8 +150,9 @@ mehanizmov** (predlog imena `notebooks/04_mechanisms_comparison.ipynb`, po vzoru
   `reporting/results_io.py`, po stopnjah lestvice vzorcev in po semenih
   (`repetitions.csv`, kjer obstaja);
 - primerja mehanizme po družinah napadov (reidentifikacija, rekonstrukcija, sklepanje o
-  domu/delu, članstvo) in po uporabnosti (`cell_js_divergence`, `length_dist_error`), z
-  eno vrstico na roko: tveganje proti uporabnosti kot v `reporting/tradeoff.py`, a čez
+  domu/delu, članstvo) in po uporabnosti (`cell_js_divergence`, `length_dist_error` ter
+  M3 `duration_dist_error`, `speed_dist_error`, ki sta le v konfiguracijah za stopnji
+  50 in 182), z eno vrstico na roko: tveganje proti uporabnosti kot v `reporting/tradeoff.py`, a čez
   vse mehanizme hkrati;
 - **ne izenačuje ε med mehanizmi**: enote se razlikujejo (geo-ind na 100 m na točko,
   točkovni LDP na točko nad celico, LDPTrace in RN-LDP-Synth na pot, PrivTrace centralno

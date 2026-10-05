@@ -1,6 +1,6 @@
 # Predaja dela: stanje kampanje S4 in odprte postavke
 
-**Različica:** 3. september 2026 (skrajšana); odločitve o odprtih postavkah vpisane
+**Različica:** 5. oktober 2026 (skrajšana 3. septembra 2026); odločitve o odprtih postavkah vpisane
 22. septembra 2026 (uvod razdelka 2); prestrukturirano 22. septembra 2026 (kazalo,
 podrazdelki §2.3.0–2.3.6 in §2.5.1; vsebina in številke nespremenjene). Celotna zgodovina predaje — analiza vrzeli
 z dne 4. avgusta 2026, recenzija, dnevnik izvedbe valov 0–2 in prvotni zapisi kampanje —
@@ -292,7 +292,7 @@ sledi zaporedje pred primerjalnim zvezkom (`docs/NACRT_MEHANIZMI.md` §1.6):
    (prag 0,3, proračun 1.200 s; ocena ~5 min na seme v glavi datoteke).
 6. Po treh PR-jih z 22. septembra 2026 — A1 (#51, druga galerija `release` pri
    reidentifikaciji, 2.5.2), A2 (#52, nov zadnji stolpec `gallery` v `results.csv`) in B
-   (ta PR, uskladitev konfiguracij za stopnji 50 in 182 na polne mreže rok) — avtor sam
+   (#53, uskladitev konfiguracij za stopnji 50 in 182 na polne mreže rok) — avtor sam
    požene najprej stopnjo 50 (`geolife_mech_mia_u50.yaml`, nato `geolife_mech_reid_u50.yaml`)
    in šele nato stopnjo 182 (`geolife_mech_mia_u182.yaml`, nato `geolife_mech_reid_u182.yaml`).
    Stopnja 50 se torej za mehanizme ne preskoči več. Vsak pogon teče odklopljeno kot
@@ -307,8 +307,11 @@ sledi zaporedje pred primerjalnim zvezkom (`docs/NACRT_MEHANIZMI.md` §1.6):
    **Naslednji korak.**
 7. Primerjalni zvezek nad stopnjama 50 in 182 (u20 ostane kot zapis).
 
-PR-ji #47–#50 so bili odprti 22. septembra 2026 kot naložena veriga (vsak na prejšnjem)
-in jih združuje avtor; merge commiti niso zapisani tukaj, ker so nastali po zapisu.
+PR-ji #47–#53 so bili odprti 22. septembra 2026 kot naložena veriga (vsak na prejšnjem).
+PR #47 je šel v `main` (merge commit `1ef0fed`), PR-ji #48–#50 pa so se združili vsak v
+svojo vmesno vejo in v `main` niso prišli. Popravljeno 5. oktobra 2026: #51–#53 so bili
+preusmerjeni na `main` in združeni z merge commiti (#51 `f4e03d1`, #52 `ae6aa1f`, #53
+`ebf6f30`); s tem so v `main` tudi commiti #48–#50.
 
 Neodvisno od tega zaporedja je odblokiran A4.
 
@@ -1456,7 +1459,8 @@ vnos `reidentification` v `geolife_mech_reid_u20.yaml` (`known_points: [3, 5, 10
 stolpec `gallery` v `results.csv` po vzorcu stolpca `distance` iz PR #47, da poročilo in
 grafi ločita galeriji), na tem pa PR B (veja `claude/mech-configs-full-grid`, uskladitev
 konfiguracij u50 in u182 na polni mreži rok z vnosom `release`: `known_points [3]` pri 182,
-`[3, 5, 10]` pri 50). Vsi trije PR-ji so odprti. **Z novo galerijo še ni nič izmerjeno**;
+`[3, 5, 10]` pri 50). Vsi trije PR-ji so bili združeni v `main` 5. oktobra 2026 (merge
+commiti #51 `f4e03d1`, #52 `ae6aa1f`, #53 `ebf6f30`). **Z novo galerijo še ni nič izmerjeno**;
 pri u20 je k = 10 čez proračun 300 s (pravilo R1).
 
 **Opomba (možnost C, 22. september 2026).** Primerjalni zvezek in poročilo (IZV §7 in §8)
