@@ -11,6 +11,20 @@ one of the names in ``geometry.DISTANCES``:
   lets short gallery traces win on length rather than on geometry; the normalised
   distance is the per-matched-pair mean and removes that bias (decision of
   22 Sep 2026). Its result ids carry a trailing ``:dtw_norm`` segment.
+
+The attacker's *gallery* (``attacker.gallery``, one of ``base.GALLERIES``) says which
+form of the release he holds:
+
+* ``rematched`` — the map-matched (snapped) points of the release that survived
+  re-matching, and the default. This is what every measured S4 number used, so the
+  ids never spell it out.
+* ``release`` — the full released points exactly as published, projected into the map
+  CRS by the orchestrator, with no map-matcher in the loop. This attacker is strictly
+  stronger: he loses nothing to the re-matching filter, so an arm whose release is too
+  noisy to snap back onto the network no longer looks "protected" merely because the
+  benchmark's own matcher discarded it. Its result ids carry a trailing ``:release``
+  segment. The attack itself knows nothing about coordinate systems; it just reads
+  the ``xy`` of a :class:`PointTrace`.
 """
 
 import time
@@ -21,7 +35,7 @@ from typing import Any
 
 import numpy as np
 
-from trajguard.attacks.base import Attack, BackgroundKnowledge
+from trajguard.attacks.base import DEFAULT_GALLERY, GALLERIES, Attack, BackgroundKnowledge
 from trajguard.datamodel import AttackResult, MatchedTrajectory
 from trajguard.experiments.registry import register
 from trajguard.geometry import DEFAULT_DISTANCE, DISTANCES
@@ -30,6 +44,25 @@ from trajguard.geometry import DEFAULT_DISTANCE, DISTANCES
 def distance_suffix(distance: str) -> str:
     """The ``result_id`` segment naming a non-default attacker distance ("" for ``dtw``)."""
     return "" if distance == DEFAULT_DISTANCE else f":{distance}"
+
+
+def gallery_suffix(gallery: str) -> str:
+    """The ``result_id`` segment naming a non-default gallery ("" for ``rematched``)."""
+    return "" if gallery == DEFAULT_GALLERY else f":{gallery}"
+
+
+@dataclass(frozen=True, slots=True)
+class PointTrace:
+    """One released trajectory as bare points, already projected into the map CRS.
+
+    The gallery item of the ``release`` mode: ``xy`` holds the full released points
+    as an (n, 2) array of metres. Projecting is the orchestrator's job, so the attack
+    stays ignorant of coordinate systems.
+    """
+
+    traj_id: str
+    user_id: str
+    xy: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,22 +97,29 @@ class ReidentificationAttack(Attack):
         self._knowledge = BackgroundKnowledge(known_points=5)
 
     def configure(self, knowledge: BackgroundKnowledge) -> None:
-        """Set the attacker's background knowledge (k points, distance)."""
+        """Set the attacker's background knowledge (k points, distance, gallery)."""
         if knowledge.distance not in DISTANCES:
             raise ValueError(
                 f"reidentification supports distances {sorted(DISTANCES)}, "
                 f"got {knowledge.distance!r}"
             )
+        if knowledge.gallery not in GALLERIES:
+            raise ValueError(
+                f"reidentification supports galleries {sorted(GALLERIES)}, "
+                f"got {knowledge.gallery!r}"
+            )
         self._knowledge = knowledge
 
-    def run(self, target: Sequence[MatchedTrajectory], aux: Any = None) -> AttackResult:
+    def run(
+        self, target: Sequence[MatchedTrajectory | PointTrace], aux: Any = None
+    ) -> AttackResult:
         """Reidentify probes (from ``aux``, or ``target`` itself) against ``target``.
 
         The orchestrator stamps ``exp_id`` and ``target_data_ref`` onto the result.
         """
         started = time.perf_counter()
         distance = DISTANCES[self._knowledge.distance]
-        probes: Sequence[MatchedTrajectory] = target if aux is None else aux
+        probes: Sequence[MatchedTrajectory | PointTrace] = target if aux is None else aux
         by_user: dict[str, list[int]] = defaultdict(list)
         for i, traj in enumerate(probes):
             by_user[traj.user_id].append(i)
@@ -112,6 +152,7 @@ class ReidentificationAttack(Attack):
             result_id=(
                 f"reidentification:k{self._knowledge.known_points}"
                 f"{distance_suffix(self._knowledge.distance)}"
+                f"{gallery_suffix(self._knowledge.gallery)}"
             ),
             attack_id="reidentification",
             exp_id="",  # stamped by the orchestrator
@@ -123,8 +164,10 @@ class ReidentificationAttack(Attack):
         )
 
 
-def _xy(traj: MatchedTrajectory) -> np.ndarray:
-    """Extract the snapped (x, y) sequence in projected metres."""
+def _xy(traj: MatchedTrajectory | PointTrace) -> np.ndarray:
+    """Extract the (x, y) sequence in projected metres (snapped points, or a release)."""
+    if isinstance(traj, PointTrace):
+        return np.asarray(traj.xy, dtype=float)
     return np.array([(p[0], p[1]) for p in traj.matched_points], dtype=float)
 
 

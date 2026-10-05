@@ -2,6 +2,7 @@
 
 import csv
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import pytest
 import yaml
 
+from trajguard.attacks.base import GALLERIES
 from trajguard.experiments.orchestrator import ConsistencyError, load_config, run
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -232,6 +234,69 @@ def test_repeated_attacker_distance_fails_loudly(tmp_path: Path) -> None:
     cfg["attacks"].append(dict(cfg["attacks"][0]))
     with pytest.raises(ValueError, match=r"attacks\[1\] repeats reidentification"):
         run(write_config(tmp_path, cfg))
+
+
+def test_default_gallery_is_the_rematched_pool(tmp_path: Path) -> None:
+    """Omitting attacker.gallery keeps today's behaviour (and today's result ids)."""
+    loaded = load_config(write_config(tmp_path, base_config(tmp_path, tmp_path / "maps")))
+    assert [s.gallery for s in loaded.attacks] == ["rematched"]
+
+
+def test_two_galleries_with_one_distance_are_two_entries(tmp_path: Path) -> None:
+    """The gallery is part of the entry's identity, so one distance can serve both."""
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"].append(
+        {
+            "type": "reidentification",
+            "attacker": {"known_points": [3], "distance": "dtw", "gallery": "release"},
+            "target_scope": ["protected"],
+        }
+    )
+    loaded = load_config(write_config(tmp_path, cfg))
+    assert [(s.distance, s.gallery) for s in loaded.attacks] == [
+        ("dtw", "rematched"),
+        ("dtw", "release"),
+    ]
+
+
+def test_repeated_attacker_distance_and_gallery_fails_loudly(tmp_path: Path) -> None:
+    """Two entries sharing a distance *and* a gallery would write the same result ids."""
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    entry = {
+        "type": "reidentification",
+        "attacker": {"known_points": [3], "distance": "dtw", "gallery": "release"},
+        "target_scope": ["protected"],
+    }
+    cfg["attacks"] = [entry, dict(entry)]
+    with pytest.raises(ValueError, match=r"distance 'dtw' and gallery 'release'"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_release_gallery_rejects_the_raw_scope(tmp_path: Path) -> None:
+    """The untouched points are what the identity arm releases; a raw release arm is a dupe."""
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["attacker"]["gallery"] = "release"
+    with pytest.raises(ValueError, match="target_scope must not contain 'raw'"):
+        run(write_config(tmp_path, cfg))
+
+
+def test_unknown_attacker_gallery_fails_loudly(tmp_path: Path) -> None:
+    cfg = base_config(tmp_path, tmp_path / "maps")
+    cfg["attacks"][0]["attacker"]["gallery"] = "snapped"
+    with pytest.raises(ValueError, match="attacker.gallery 'snapped' unsupported"):
+        run(write_config(tmp_path, cfg))
+
+
+@pytest.mark.parametrize(
+    "config_path",
+    sorted((Path(__file__).parent.parent / "config" / "experiments").glob("geolife_mech_*.yaml")),
+    ids=lambda p: p.name,
+)
+def test_experiment_configs_parse(config_path: Path) -> None:
+    """Every shipped mechanism config still validates, with a gallery the attack knows."""
+    loaded = load_config(config_path)
+    galleries = [s.gallery for s in loaded.attacks if s.attack_type == "reidentification"]
+    assert all(g in GALLERIES for g in galleries)
 
 
 def test_reconstruction_rejects_reid_attacker_keys(tmp_path: Path) -> None:
@@ -505,6 +570,33 @@ def test_membership_runs_against_rn_ldp_synth_arm(tmp_path: Path, beijing_maps_d
     assert 0.0 <= rn["auc"] <= 1.0
 
 
+def test_membership_inference_records_privtrace_facts(
+    tmp_path: Path, beijing_maps_dir: Path
+) -> None:
+    """The fitted privtrace target's public facts land in run.json under its arm."""
+    cfg = mia_config(tmp_path, beijing_maps_dir)
+    cfg["synthetic_generators"].append({"id": "privtrace", "params": {"epsilon": 2.0}})
+    # the ldptrace arm guards the other branch of the same fact collector
+    cfg["synthetic_generators"].append({"id": "ldptrace", "params": {"epsilon": 600.0}})
+    cfg["attacks"][0]["attacker"] = {"n_shadow": 4, "subsample": 0.5}
+    run(write_config(tmp_path, cfg))
+
+    record = json.loads((tmp_path / "out" / "run.json").read_text())
+    ldptrace_arm = record["arms"]["synthetic:ldptrace:epsilon=600.0"]
+    assert isinstance(ldptrace_arm["l_k"], int) and ldptrace_arm["l_k"] >= 1
+    assert ldptrace_arm["report_epsilon"] > 0
+    assert "n_states" not in ldptrace_arm  # the two branches stay independent
+    arm = record["arms"]["synthetic:privtrace:epsilon=2.0"]
+    assert isinstance(arm["n_states"], int) and arm["n_states"] >= 1
+    assert isinstance(arm["n_second_order"], int)
+    assert 0 <= arm["n_second_order"] <= arm["n_states"]
+    assert arm["max_redraws"] == 20  # constructor default (D-4.3 redraw guard)
+    # LiRA only fits generators, so the target never sampled a walk in this run
+    assert arm["n_capped_walks"] == 0 and arm["n_redrawn_walks"] == 0
+    # a generator without those attributes gets no facts at all
+    assert "synthetic:markov:order=1" not in record["arms"]
+
+
 def test_data_raw_guard_catches_absolute_path_from_any_cwd(
     tmp_path: Path, beijing_maps_dir: Path
 ) -> None:
@@ -577,7 +669,12 @@ def geoind_config(tmp_path: Path, maps_dir: Path) -> dict[str, Any]:
         {"id": "none"},
         {"id": "geo_indistinguishability", "params": {"epsilon": [10.0], "unit_m": 25.0}},
     ]
-    cfg["metrics"]["utility"] = ["cell_js_divergence", "length_dist_error"]
+    cfg["metrics"]["utility"] = [
+        "cell_js_divergence",
+        "length_dist_error",
+        "duration_dist_error",
+        "speed_dist_error",
+    ]
     cfg["metrics"]["utility_grid"] = {"n_rows": 10, "n_cols": 10}
     cfg["reporting"] = {"export": ["csv"], "plots": ["tradeoff"]}
     return cfg
@@ -619,6 +716,17 @@ def test_perturbing_mechanism_rematches_end_to_end(tmp_path: Path, beijing_maps_
     assert utility[("utility:protected:none", "length_dist_error")] == 0.0
     assert utility[(f"utility:protected:{GEOIND_REF}", "cell_js_divergence")] > 0.0
     assert utility[(f"utility:protected:{GEOIND_REF}", "length_dist_error")] > 0.0
+
+    # M3 movement statistics: every protected arm carries them, no synthetic arm does
+    m3_names = ("duration_dist_error", "speed_dist_error")
+    protected_ids = {rid for rid, _ in utility if rid.startswith("utility:protected:")}
+    assert protected_ids == {"utility:protected:none", f"utility:protected:{GEOIND_REF}"}
+    for result_id in protected_ids:
+        assert all(math.isfinite(utility[(result_id, name)]) for name in m3_names)
+    # geo-ind moves points but never timestamps, so the duration distribution is untouched
+    assert utility[(f"utility:protected:{GEOIND_REF}", "duration_dist_error")] == 0.0
+    assert utility[(f"utility:protected:{GEOIND_REF}", "speed_dist_error")] > 0.0
+    assert not [rid for rid, name in utility if "synthetic:" in rid and name in m3_names]
 
     # only the perturbing mechanism needs a protected cache entry (identity is free)
     entries = list((tmp_path / "protected").iterdir())
@@ -883,6 +991,78 @@ def test_dtw_norm_entry_adds_rows_and_leaves_the_dtw_ones_untouched(
         "by_knowledge_reidentification.png",
         "runtime.png",
     } <= written
+
+
+GAUSSIAN_REF = "gaussian_noise:sigma_m=1000.0"
+
+
+def release_gallery_config(tmp_path: Path, maps_dir: Path) -> dict[str, Any]:
+    """Identity + a release too noisy to snap back, attacked with both galleries."""
+    cfg = base_config(tmp_path, maps_dir)
+    cfg["privacy_mechanisms"] = [
+        {"id": "none"},
+        {"id": "gaussian_noise", "params": {"sigma_m": [1000]}},
+    ]
+    cfg["attacks"] = [
+        {
+            "type": "reidentification",
+            "attacker": {"known_points": [3], "distance": "dtw"},
+            "target_scope": ["raw", "protected"],
+        },
+        {
+            "type": "reidentification",
+            "attacker": {"known_points": [3], "distance": "dtw_norm", "gallery": "release"},
+            "target_scope": ["protected"],
+        },
+    ]
+    return cfg
+
+
+def reid_rows(out_dir: Path) -> dict[tuple[str, str], dict[str, str]]:
+    """Every reidentification row of results.csv, keyed by (result_id, metric)."""
+    rows = list(csv.DictReader((out_dir / "results.csv").open()))
+    return {(r["result_id"], r["metric"]): r for r in rows if r["family"] == "reidentification"}
+
+
+def test_release_gallery_attacks_what_rematching_dropped(
+    tmp_path: Path, beijing_maps_dir: Path
+) -> None:
+    """A 1 km-noise release survives no re-matching, so the rematched gallery reports an
+    empty pool and perfect 'protection'. The release gallery reads the published points
+    directly (no matcher in the loop), so the same arm is still attackable: 8 gallery
+    trajectories of 2 users, with the drop count kept for the record."""
+    cfg = release_gallery_config(tmp_path, beijing_maps_dir)
+    run(write_config(tmp_path, cfg))
+    rows = reid_rows(tmp_path / "out")
+
+    rematched = rows[(f"reidentification:protected:{GAUSSIAN_REF}:k3", "top1_acc")]
+    assert int(rematched["n_pool"]) == 0
+    assert float(rematched["value"]) == 0.0
+    assert int(rematched["n_rematch_dropped"]) == 8
+
+    released_id = f"reidentification:protected:{GAUSSIAN_REF}:k3:dtw_norm:release"
+    released = rows[(released_id, "top1_acc")]
+    assert int(released["n_pool"]) == 8
+    assert int(released["n_gallery_users"]) == 2
+    assert int(released["n_rematch_dropped"]) == 8  # the arm's matcher losses, for the record
+    assert int(released["n_probes"]) == int(rematched["n_probes"])
+    assert math.isfinite(float(released["value"]))
+
+    identity = rows[("reidentification:protected:none:k3:dtw_norm:release", "top1_acc")]
+    assert int(identity["n_pool"]) == 8
+    assert int(identity["n_rematch_dropped"]) == 0
+
+    # run.json keeps the matched-pool facts of every arm and nests the release ones
+    arms = json.loads((tmp_path / "out" / "run.json").read_text())["arms"]
+    gauss_arm = arms[f"protected:{GAUSSIAN_REF}"]
+    assert gauss_arm["n_pool"] == 0 and gauss_arm["n_rematch_dropped"] == 8
+    assert gauss_arm["release"]["n_pool"] == 8
+    assert gauss_arm["release"]["n_gallery_users"] == 2
+
+    # the release gallery is as deterministic as the rematched one across reruns
+    first = reid_cells(tmp_path / "out")
+    run(write_config(tmp_path, cfg))
+    assert reid_cells(tmp_path / "out") == first
 
 
 def test_results_csv_membership_columns(tmp_path: Path, beijing_maps_dir: Path) -> None:

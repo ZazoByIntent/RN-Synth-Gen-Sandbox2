@@ -1,5 +1,7 @@
 """Tests for the paired-bootstrap and unpaired-population utility metrics."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -7,7 +9,9 @@ from trajguard.datamodel import CleanTrajectory
 from trajguard.evaluation.utility import (
     UTILITY_METRICS,
     cell_js_divergence,
+    duration_dist_error,
     length_dist_error,
+    speed_dist_error,
     unpaired_cell_js_divergence,
     unpaired_length_w1,
 )
@@ -40,13 +44,57 @@ def sample_pool(lengths: tuple[float, ...] = (800.0, 1200.0, 2000.0)) -> list[Cl
     ]
 
 
+RAW_DURATION_S = 145.0  # make_traj: 30 points five seconds apart
+
+
+def retimed(traj: CleanTrajectory, factor: float) -> CleanTrajectory:
+    """A release view with every timestamp scaled; duration_s stays the source's, as in a run."""
+    points = tuple((lat, lon, t * factor) for lat, lon, t in traj.points)
+    return replace(traj, points=points)
+
+
 def test_identical_release_has_zero_divergence_and_error() -> None:
     pool = sample_pool()
     rng = np.random.default_rng(0)
     jsd = cell_js_divergence(pool, pool, rng=rng, **BOOT)
     w1 = length_dist_error(pool, pool, rng=rng, **BOOT)
+    duration = duration_dist_error(pool, pool, rng=rng, **BOOT)
+    speed = speed_dist_error(pool, pool, rng=rng, **BOOT)
     assert jsd == (0.0, 0.0, 0.0)
     assert w1 == (0.0, 0.0, 0.0)
+    assert duration == (0.0, 0.0, 0.0)
+    assert speed == (0.0, 0.0, 0.0)
+
+
+def test_duration_and_speed_errors_follow_a_known_time_stretch() -> None:
+    """Doubling every timestamp doubles the span and halves the speed of each release."""
+    lengths = (800.0, 1200.0, 2000.0)
+    raw = sample_pool(lengths=lengths)
+    stretched = [retimed(t, 2.0) for t in raw]
+
+    point, lo, hi = duration_dist_error(raw, stretched, rng=np.random.default_rng(0), **BOOT)
+    assert point == RAW_DURATION_S  # every release spans 290 s instead of 145 s
+    assert lo == RAW_DURATION_S and hi == RAW_DURATION_S
+
+    point, lo, hi = speed_dist_error(raw, stretched, rng=np.random.default_rng(0), **BOOT)
+    expected = float(np.mean([length / (2 * RAW_DURATION_S) for length in lengths]))
+    assert point == pytest.approx(expected)  # each speed drops by half its raw value
+    assert 0.0 < lo <= point <= hi
+
+
+def test_degenerate_release_times_give_zero_speed_and_finite_metrics() -> None:
+    """A one-point or zero-span release must not divide by zero."""
+    raw = sample_pool(lengths=(800.0, 1200.0, 2000.0))
+    single_point = [replace(t, points=t.points[:1]) for t in raw]
+    frozen_time = [retimed(t, 0.0) for t in raw]
+
+    for release in (single_point, frozen_time):
+        duration = duration_dist_error(raw, release, rng=np.random.default_rng(0), **BOOT)
+        speed = speed_dist_error(raw, release, rng=np.random.default_rng(0), **BOOT)
+        assert all(np.isfinite(v) for v in duration + speed)
+        # the release side contributes a zero span and a zero speed
+        assert duration[0] == RAW_DURATION_S
+        assert speed[0] == pytest.approx(float(np.mean([800.0, 1200.0, 2000.0]) / RAW_DURATION_S))
 
 
 def test_shifted_release_has_positive_divergence() -> None:
@@ -66,6 +114,10 @@ def test_length_error_recovers_known_shift() -> None:
     point, lo, hi = length_dist_error(raw, inflated, rng=np.random.default_rng(0), **BOOT)
     assert point == 500.0  # every trajectory is exactly 500 m longer
     assert lo == 500.0 and hi == 500.0
+    # pins the statistic shared with the duration/speed metrics
+    raw_len = np.array([t.length_m for t in raw])
+    noisy_len = np.array([t.length_m for t in inflated])
+    assert point == pytest.approx(float(np.abs(np.sort(raw_len) - np.sort(noisy_len)).mean()))
 
 
 def test_bootstrap_is_deterministic_and_brackets_point() -> None:
@@ -83,7 +135,12 @@ def test_bootstrap_is_deterministic_and_brackets_point() -> None:
 
 def test_dispatch_table_names() -> None:
     """Unpaired variants stay out of the paired dispatch table on purpose."""
-    assert set(UTILITY_METRICS) == {"cell_js_divergence", "length_dist_error"}
+    assert set(UTILITY_METRICS) == {
+        "cell_js_divergence",
+        "length_dist_error",
+        "duration_dist_error",
+        "speed_dist_error",
+    }
 
 
 def test_unpaired_identical_populations_have_zero_point_estimate() -> None:

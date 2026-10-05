@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from trajguard.datamodel import MetricValue
+from trajguard.experiments.repeat import REPETITIONS_COLUMNS
 from trajguard.reporting.results_schema import (
     LEGACY_RESULTS_COLUMNS,
     PROVENANCE_COLUMNS,
@@ -46,6 +47,16 @@ def test_schema_columns_are_unique_and_documented() -> None:
     assert set(PROVENANCE_COLUMNS) <= set(RESULTS_COLUMNS)
     doc = DOC.read_text()
     missing = [c for c in RESULTS_COLUMNS if f"`{c}`" not in doc]
+    assert not missing, f"columns not documented in {DOC.name}: {missing}"
+
+
+def test_repetitions_columns_are_documented_and_lead_with_provenance() -> None:
+    """The across-seeds file follows the same rule: every column is named in the doc,
+    and it opens with the two run-provenance columns, like `results.csv`."""
+    assert len(REPETITIONS_COLUMNS) == len(set(REPETITIONS_COLUMNS))
+    assert REPETITIONS_COLUMNS[:2] == ("exp_id", "config_hash")
+    doc = DOC.read_text()
+    missing = [c for c in REPETITIONS_COLUMNS if f"`{c}`" not in doc]
     assert not missing, f"columns not documented in {DOC.name}: {missing}"
 
 

@@ -122,7 +122,10 @@ attacks:
 metrics:
   privacy: [top1_acc, topk_acc, linkage_rate]
   top_k: 5
-  utility: [cell_js_divergence, length_dist_error]
+  # M3 movement statistics, decision of 22 Sep 2026: duration reads 0 for the current
+  # mechanisms (none alters timestamps; downsampling keeps the endpoints), speed reacts
+  # to the changed release length.
+  utility: [cell_js_divergence, length_dist_error, duration_dist_error, speed_dist_error]
   utility_grid: {n_rows: 20, n_cols: 20}
   bootstrap: {n: 1000, ci: 0.95}
   memory: false              # R0 (docs/RUNNING.md §7.3): budget verdicts need untraced runs

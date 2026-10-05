@@ -9,7 +9,13 @@ import pytest
 
 from test_orchestrator import beijing_maps_dir, geoind_config, write_config
 from trajguard.datamodel import MetricValue
-from trajguard.experiments.repeat import aggregate, run_repetitions, t_ppf_975
+from trajguard.experiments.repeat import (
+    REPETITIONS_COLUMNS,
+    aggregate,
+    read_run_provenance,
+    run_repetitions,
+    t_ppf_975,
+)
 
 _ = beijing_maps_dir  # imported so pytest resolves the fixture by name here
 
@@ -64,6 +70,38 @@ def test_seed_validation() -> None:
         run_repetitions("unused.yaml", [1, 1])
 
 
+def test_read_run_provenance_rejects_disagreeing_seeds(tmp_path: Path) -> None:
+    for seed, config_hash in ((1, "a" * 16), (2, "b" * 16)):
+        run_dir = tmp_path / f"seed{seed}"
+        run_dir.mkdir()
+        (run_dir / "run.json").write_text(json.dumps({"exp_id": "exp", "config_hash": config_hash}))
+    with pytest.raises(ValueError, match="must share exp_id and config_hash") as excinfo:
+        read_run_provenance(tmp_path, [1, 2])
+    message = str(excinfo.value)
+    assert "seed1=" in message and "seed2=" in message  # the message names both culprits
+    assert "a" * 16 in message and "b" * 16 in message
+
+
+def test_read_run_provenance_rejects_missing_or_incomplete_run_json(tmp_path: Path) -> None:
+    (tmp_path / "seed1").mkdir()
+    (tmp_path / "seed1" / "run.json").write_text(
+        json.dumps({"exp_id": "exp", "config_hash": "a" * 16})
+    )
+    with pytest.raises(ValueError, match="seed2 wrote no run.json"):
+        read_run_provenance(tmp_path, [1, 2])
+
+    (tmp_path / "seed2").mkdir()
+    (tmp_path / "seed2" / "run.json").write_text(json.dumps({"exp_id": "exp"}))
+    with pytest.raises(ValueError, match="seed2 run.json lacks config_hash"):
+        read_run_provenance(tmp_path, [1, 2])
+
+    (tmp_path / "seed2" / "run.json").write_text(
+        json.dumps({"exp_id": None, "config_hash": "a" * 16})
+    )
+    with pytest.raises(ValueError, match="seed2 run.json lacks exp_id"):
+        read_run_provenance(tmp_path, [1, 2])
+
+
 def test_run_repetitions_end_to_end(tmp_path: Path, beijing_maps_dir: Path) -> None:
     cfg = geoind_config(tmp_path, beijing_maps_dir)
     cfg["experiment"]["split_seed"] = 7
@@ -73,7 +111,10 @@ def test_run_repetitions_end_to_end(tmp_path: Path, beijing_maps_dir: Path) -> N
     for seed in (1, 2):
         assert (tmp_path / "out" / f"seed{seed}" / "run.json").exists()
     assert len(list((tmp_path / "cache").iterdir())) == 1
-    rows = list(csv.DictReader((tmp_path / "out" / "repetitions.csv").open()))
+    with (tmp_path / "out" / "repetitions.csv").open() as fh:
+        reader = csv.DictReader(fh)
+        assert tuple(reader.fieldnames or ()) == REPETITIONS_COLUMNS
+        rows = list(reader)
     assert {r["metric"] for r in rows} >= {"top1_acc", "linkage_rate"}
     by_key = {(s.result_id, s.metric): s for s in summaries}
     for row in rows:
@@ -85,8 +126,11 @@ def test_run_repetitions_end_to_end(tmp_path: Path, beijing_maps_dir: Path) -> N
             assert s.ci_low <= s.mean <= s.ci_high
 
     # the split is identical across repetitions (pinned by split_seed)
-    counts = [
-        json.loads((tmp_path / "out" / f"seed{s}" / "run.json").read_text())["split_counts"]
-        for s in (1, 2)
-    ]
-    assert counts[0] == counts[1]
+    runs = [json.loads((tmp_path / "out" / f"seed{s}" / "run.json").read_text()) for s in (1, 2)]
+    assert runs[0]["split_counts"] == runs[1]["split_counts"]
+
+    # provenance on every row, taken from what the repetitions actually wrote
+    assert runs[0]["exp_id"] == runs[1]["exp_id"]
+    assert runs[0]["config_hash"] == runs[1]["config_hash"]
+    assert {r["exp_id"] for r in rows} == {runs[0]["exp_id"]}
+    assert {r["config_hash"] for r in rows} == {runs[0]["config_hash"]}

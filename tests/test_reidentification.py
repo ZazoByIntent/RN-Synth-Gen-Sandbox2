@@ -4,7 +4,12 @@ import numpy as np
 import pytest
 
 from trajguard.attacks.base import BackgroundKnowledge
-from trajguard.attacks.reidentification import Ranking, ReidentificationAttack, _evenly_spaced
+from trajguard.attacks.reidentification import (
+    PointTrace,
+    Ranking,
+    ReidentificationAttack,
+    _evenly_spaced,
+)
 from trajguard.datamodel import AttackResult, MatchedTrajectory
 from trajguard.evaluation.metrics import LinkageRate, TopKAccuracy, bootstrap_ci, evaluate
 from trajguard.experiments import registry
@@ -175,3 +180,57 @@ def test_dtw_norm_is_accepted_and_named_in_the_default_result_id() -> None:
     assert attack.run(POOL).result_id == "reidentification:k3:dtw_norm"
     attack.configure(BackgroundKnowledge(known_points=3, distance="dtw"))
     assert attack.run(POOL).result_id == "reidentification:k3"
+
+
+# --- attacker gallery: rematched (snapped points) vs release (full released points) ---
+
+# The same pool expressed as released point traces: the orchestrator projects the
+# released GPS points into the map CRS and hands them over as bare (x, y) arrays.
+POINT_POOL = [
+    PointTrace(
+        traj_id=t.traj_id,
+        user_id=t.user_id,
+        xy=np.array([(p[0], p[1]) for p in t.matched_points], dtype=float),
+    )
+    for t in POOL
+]
+
+
+def test_point_traces_are_attacked_exactly_like_matched_ones() -> None:
+    """The gallery mode only changes where the points come from, not the linkage."""
+    attack = ReidentificationAttack()
+    attack.configure(BackgroundKnowledge(known_points=3))
+    matched = attack.run(POOL)
+    attack.configure(BackgroundKnowledge(known_points=3, gallery="release"))
+    released = attack.run(POINT_POOL)
+
+    assert len(released.predictions) == len(matched.predictions)
+    for from_points, from_matched in zip(released.predictions, matched.predictions, strict=True):
+        assert from_points.true_user == from_matched.true_user
+        assert from_points.users == from_matched.users
+        assert from_points.distances == pytest.approx(from_matched.distances)
+    metrics = [TopKAccuracy(1), LinkageRate()]
+    as_values = {
+        v.name: v.value for v in evaluate(released, metrics, n_bootstrap=100, ci=0.95, seed=1)
+    }
+    expected = {
+        v.name: v.value for v in evaluate(matched, metrics, n_bootstrap=100, ci=0.95, seed=1)
+    }
+    assert as_values == expected
+
+
+def test_release_gallery_is_named_in_the_result_id_after_the_distance() -> None:
+    """Distance first, gallery last; the default gallery stays implicit."""
+    attack = ReidentificationAttack()
+    attack.configure(BackgroundKnowledge(known_points=3, distance="dtw_norm", gallery="release"))
+    assert attack.run(POINT_POOL).result_id == "reidentification:k3:dtw_norm:release"
+    attack.configure(BackgroundKnowledge(known_points=3, gallery="release"))
+    assert attack.run(POINT_POOL).result_id == "reidentification:k3:release"
+    attack.configure(BackgroundKnowledge(known_points=3, gallery="rematched"))
+    assert attack.run(POOL).result_id == "reidentification:k3"
+
+
+def test_unsupported_gallery_rejected() -> None:
+    attack = ReidentificationAttack()
+    with pytest.raises(ValueError, match="supports galleries"):
+        attack.configure(BackgroundKnowledge(known_points=4, gallery="raw_cells"))
