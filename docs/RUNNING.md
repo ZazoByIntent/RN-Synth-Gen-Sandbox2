@@ -766,8 +766,9 @@ the 300 s budget, recorded as
 `gallery` column (it arrives with the next pull request), so `report.py` does not parse
 the `:release` suffix yet and the two galleries are told apart only by the result id.
 
-**Sibling configs for the 50- and 182-user rungs exist and are NOT measured** (created
-4 Sep 2026, aligned to the full arm grids on 22 Sep 2026). Both
+**Sibling configs for the 50- and 182-user rungs** (created 4 Sep 2026, aligned to the
+full arm grids on 22 Sep 2026; the 50-user pair is measured, 5–7 Oct 2026,
+`docs/HANDOFF.md` §2.3.7, the 182-user pair is not). Both
 `geolife_mech_reid_u50.yaml` (threshold 0.05 / budget 300 s) and
 `geolife_mech_reid_u182.yaml` (threshold 0.3 / budget 1200 s, the S4 reporting values)
 now carry **all** the u20 arms — geo-indistinguishability ε ∈ {0.1, 1.0, 10.0}, point LDP
@@ -793,8 +794,16 @@ The author's cost estimates (estimates only, nothing measured): about 12 h per s
 50 users, of which the release entry at k = 3/5/10 is about 10.6 h (trimming it to
 k = 3 would bring the file down to about 3.2 h), so roughly 36 h for three seeds; and
 about 56–73 h per seed at 182 users (about 29 h for the two re-matched distances plus
-about 27–44 h for the release entry at k = 3), so roughly 7–9 days for three seeds. Both
-runs belong in a detached background process. Expect about 44 attack calls over the 300 s budget
+about 27–44 h for the release entry at k = 3), so roughly 7–9 days for three seeds.
+**Measured at 50 users** (5–7 Oct 2026, `PYTHONHASHSEED=0`, warm raw-pool cache, three
+seeds): 14.5 h per seed, of which the release entry took 12.7 h and the two re-matched
+entries 1.3 h. A full-release call costs about 4.2× a matched-pool call at the same k, not
+3.3× (about 600 / 963 / 1868 s at k = 3 / 5 / 10 for a full-stream arm against 142 / 236 /
+464 s on the raw pool), and the membership run took about 2 min per seed. The 182-user
+estimate therefore rises to about 85 h per seed (about 55 h of it the release entry at
+k = 3), roughly 10 days for three seeds; the author's decision of 7 Oct 2026 is to run
+seed 1 alone first and only after the attacker fixes listed in `docs/HANDOFF.md` §2.3.7.
+Both runs belong in a detached background process. Expect about 44 attack calls over the 300 s budget
 at 50 users and about 28 over the 1200 s budget at 182; those are recorded as
 `over_budget` in `run.json` and are not errors (rule R1, §7.3). Each file's header holds
 the per-arm details and the arm rationale.
