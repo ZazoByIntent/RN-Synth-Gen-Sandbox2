@@ -10,8 +10,10 @@ dist/
 .ruff_cache/
 .pytest_cache/
 
-# Experiment outputs
+# Experiment outputs, detached-run logs and locally archived stray runs
 results/
+results_arhiv/
+logs/
 
 # Poročila za izbirne predmete
 porocila/
