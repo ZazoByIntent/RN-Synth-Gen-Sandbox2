@@ -1,6 +1,7 @@
 # Predaja dela: stanje kampanje S4 in odprte postavke
 
-**Različica:** 5. oktober 2026 (skrajšana 3. septembra 2026); odločitve o odprtih postavkah vpisane
+**Različica:** 7. oktober 2026 (skrajšana 3. septembra 2026); meritev stopnje 50 za mehanizme
+in odločitve z dne 7. oktobra 2026 v §2.3.7; odločitve o odprtih postavkah vpisane
 22. septembra 2026 (uvod razdelka 2); prestrukturirano 22. septembra 2026 (kazalo,
 podrazdelki §2.3.0–2.3.6 in §2.5.1; vsebina in številke nespremenjene). Celotna zgodovina predaje — analiza vrzeli
 z dne 4. avgusta 2026, recenzija, dnevnik izvedbe valov 0–2 in prvotni zapisi kampanje —
@@ -35,11 +36,14 @@ da vrstice naslovov, `sed -n 'a,bp'` prebere odsek; nikoli cele datoteke):
     - §2.3.4 ZM-3 naivna trojica (u20): zaokroževanje, redčenje, Gaussov šum; odločitve 22. 9. 2026
     - §2.3.5 ZM-4 PrivTrace (u20): odstopanja od članka, vrstice MIA in uporabnosti
     - §2.3.6 validacija `privtrace` proti izvirni kodi (Porto, port proti izvirniku, varovalka D-4.3)
+    - §2.3.7 meritev mehanizmov na stopnji 50 (5.–7. oktober 2026): potek, vrstice MIA in
+      reidentifikacije po razdalji in galeriji, uporabnost, pregled, odločitve 7. 10. 2026
   - §2.4 val 5 — horizont B (2. letnik)
   - §2.5 manjše, tehnične (zvezki, grafi, predpomnjenje sinteze, shema rezultatov, A2, strop
     `markov`, ujemanje in `PYTHONHASHSEED`, meja celice)
     - §2.5.1 dolžinska pristranskost DTW v reidentifikaciji (preverba, tabela, odločitev `dtw_norm`)
-    - §2.5.2 napadalec nad izdajo (galerija `release`, odločitev 22. 9. 2026, možnost B)
+    - §2.5.2 napadalec nad izdajo (galerija `release`, odločitev 22. 9. 2026, možnost B; opomba
+      o viru sond in redčenju ter odločitev 7. 10. 2026)
 - §3 Kje je zgodovina (arhivirane datoteke)
 
 ---
@@ -304,7 +308,9 @@ sledi zaporedje pred primerjalnim zvezkom (`docs/NACRT_MEHANIZMI.md` §1.6):
    razdaljama in ~27–44 h galerija `release` pri k = 3), torej 7–9 dni za tri semena.
    Pričakovati je ~44 klicev čez proračun 300 s pri 50 in ~28 klicev čez proračun 1.200 s
    pri 182; ti se zapišejo kot `over_budget` in niso napaka (pravilo R1).
-   **Naslednji korak.**
+   **Stopnja 50 je izmerjena 5.–7. oktobra 2026** (§2.3.7; 14,5 h na seme, ne 12 h, in
+   natanko 44 klicev čez proračun). Stopnja 182 čaka na popravek napadalca in na novo oceno
+   stroška (~85 h na seme); odločitve z dne 7. oktobra 2026 so v §2.3.7.
 7. Primerjalni zvezek nad stopnjama 50 in 182 (u20 ostane kot zapis).
 
 PR-ji #47–#53 so bili odprti 22. septembra 2026 kot naložena veriga (vsak na prejšnjem).
@@ -1289,6 +1295,187 @@ kode; PrivTrace ostaja kandidat za baseline
 (odločitev D5 je odprta), v poročilu kot zgornja meja uporabnosti pri zaupanja vrednem
 zbiralcu.
 
+#### 2.3.7 Meritev mehanizmov na stopnji 50 (5.–7. oktober 2026)
+
+**Kaj in kako.** Seja Claude je na avtorjevem računalniku zaporedno pognala obe konfiguraciji
+stopnje 50 iz §2, točka 6, nespremenjeni, kot odklopljena procesa (`cmd.exe` + `uv run
+trajguard repeat … --seeds 1 2 3`, `PYTHONHASHSEED=0`, commit `1886f362`, dnevnika
+`logs/geolife_mech_mia_u50.log` in `logs/geolife_mech_reid_u50.log`). Populacija je enaka
+kampanji S4 pri 50 (465 ujetih sledi, 2.778 odvrženih, 41 od 50 uporabnikov z vsaj eno
+ujeto sledjo, 459 sond, ker šest sledi pripada uporabnikom z eno samo sledjo). Rezultati so
+samo lokalni: `results/geolife_mech_mia_u50/` in `results/geolife_mech_reid_u50/`
+(`repetitions.csv`, `seed1–3/`). Neodvisni pregled (svež podagent, 7. oktober 2026) je
+potrdil, da so vrstice geo-ind za vsako seme bit za bitom enake vrsticam S4 v
+`geolife_geoind_reid_u50`, vrstice MIA za `markov` in `rn_ldp_synth` enake zapisu
+`geolife_synth_mia_u50`, in da se vseh 587 vrstic `repetitions.csv` ujema s ponovnim
+izračunom Studentovega intervala iz datotek semen (na 1e-10). Napake v kodi ni našel.
+
+**Potek.** Napad na članstvo: 176 / 124 / 125 s na seme, nič klicev čez proračun, po 20
+opozoril veljavnosti na seme (`tpr@fpr` 0,001 in 0,01 potrebujeta 1.000 oziroma 100
+nečlanov, pogon ima 33; pričakovano). Reidentifikacija: 14,51 / 14,51 / 14,49 h na seme
+namesto ocenjenih 12 h, natanko 44 klicev čez proračun 300 s na seme, kot napovedano: 40 iz
+galerije `release` (13 rok s polnim tokom točk pri k = 3 in 5, 14 pri k = 10) in štirje iz
+galerije `rematched` (`raw` in `none` pri k = 10 z obema razdaljama); najdražji klic 1.885 s
+(geo-ind ε = 10, k = 10, `release`). Ves presežek časa je v vnosu `release` (12,7 h proti
+ocenjenim 10,6 h; ujeta vnosa 1,3 h): klic nad polno izdajo stane ~4,2-kratnik klica nad
+ujetim bazenom pri istem k, ne 3,3-kratnik (seme 1: ~600 / 963 / 1.868 s pri k = 3 / 5 / 10
+proti 142 / 236 / 464 s za `raw`; redčenje 600 s 12 / 18 / 36 s). Brez opozoril v `run.json`
+reidentifikacije, brez Traceback v dnevnikih.
+
+**Napad na članstvo (AUC in `tpr@fpr = 0,1`, povprečje čez tri semena [95 % interval];
+u20 iz `results/geolife_mech_mia_u20`).** Točki 0,001 in 0,01 sta pri vseh rokah NaN.
+
+| roka | AUC u50 | `tpr@fpr=0.1` u50 | AUC u20 | `tpr@fpr=0.1` u20 |
+|---|---|---|---|---|
+| `markov:order=1` | 0,542 [0,462; 0,623] | 0,262 [0,041; 0,482] | 0,996 [0,985; 1,007] | 0,989 [0,961; 1,016] |
+| `rn_ldp_synth:epsilon=0.5` | 0,498 [0,407; 0,589] | 0,133 [0,066; 0,200] | – | – |
+| `rn_ldp_synth:epsilon=2.0` | 0,474 [0,434; 0,513] | 0,115 [-0,110; 0,341] | 0,572 [0,376; 0,768] | 0,107 [-0,169; 0,384] |
+| `rn_ldp_synth:epsilon=8.0` | 0,501 [0,464; 0,539] | 0,095 [-0,076; 0,266] | – | – |
+| `ldptrace:epsilon=0.5` | 0,480 [0,384; 0,576] | 0,069 [-0,032; 0,170] | 0,432 [0,345; 0,518] | 0,063 [0,006; 0,120] |
+| `ldptrace:epsilon=2.0` | 0,454 [0,301; 0,607] | 0,051 [-0,072; 0,174] | 0,484 [0,409; 0,559] | 0,107 [0,065; 0,150] |
+| `ldptrace:epsilon=8.0` | 0,396 [0,216; 0,577] | 0,036 [0,014; 0,058] | 0,528 [0,439; 0,616] | 0,156 [0,018; 0,294] |
+| `privtrace:epsilon=0.5` | 0,428 [0,260; 0,596] | 0,064 [0,024; 0,104] | 0,529 [0,361; 0,696] | 0,133 [-0,103; 0,369] |
+| `privtrace:epsilon=2.0` | 0,422 [0,251; 0,593] | 0,054 [-0,062; 0,170] | 0,540 [0,514; 0,566] | 0,048 [-0,021; 0,118] |
+| `privtrace:epsilon=8.0` | 0,533 [0,463; 0,603] | 0,108 [0,024; 0,191] | 0,571 [0,325; 0,816] | 0,270 [0,166; 0,375] |
+
+Branje: strop memorizacije `markov` je pri 50 uporabnikih 0,542, do zadnje decimalke enako
+zapisu S4 (§1.3, učinek populacije), zato napad pri tej stopnji skoraj nima moči in vsi
+generatorji z zaščito so pri naključnem ugibanju. Sedem od devetih zasebnih rok ima
+povprečje pod 0,5 (povprečje 27 vrednosti po semenih 0,465; `ldptrace` ε = 8, seme 1:
+0,321); vrednosti niso neodvisne, zato to ni dokaz napake, verjeten vzrok je sistematična
+razlika med kandidati člani (train) in nečlani (test). Negativne spodnje meje intervalov
+`tpr` so artefakt simetričnega Studentovega intervala pri treh semenih (standardna napaka
+AUC pri 130 članih in 33 nečlanih je ~0,056 na seme).
+
+**Reidentifikacija (`top1_acc`, povprečje [95 % interval]; roke brez šuma so deterministične
+in imajo interval širine 0, zato je zapisana le vrednost; `n_pool` in `n_rematch_dropped`
+po semenih, kadar se razlikujejo).** Referenčni napadalec kampanje, `dtw` nad `rematched`:
+
+| roka | k = 3 | k = 5 | k = 10 | `n_pool` | `n_rematch_dropped` |
+|---|---|---|---|---|---|
+| `raw` | 0,270 | 0,336 | 0,416 | 465 | – |
+| `none` | 0,270 | 0,336 | 0,416 | 465 | 0 |
+| geo-ind ε = 0,1 | 0,000 | 0,000 | 0,000 | 0 | 465 |
+| geo-ind ε = 1 | 0,072 [-0,109; 0,253] | 0,073 [-0,112; 0,257] | 0,071 [-0,107; 0,250] | 3/2/0 | 462/463/465 |
+| geo-ind ε = 10 | 0,288 [0,263; 0,312] | 0,337 [0,280; 0,394] | 0,373 [0,322; 0,424] | 236/254/240 | 229/211/225 |
+| point_ldp ε = 4 / 6 / 8 | 0,000 | 0,000 | 0,000 | 0 | 465 |
+| zaokroževanje 100 m | 0,235 | 0,279 | 0,327 | 196 | 269 |
+| zaokroževanje 500 m | 0,166 | 0,135 | 0,174 | 59 | 406 |
+| zaokroževanje 2000 m | 0,081 | 0,074 | 0,074 | 20 | 445 |
+| redčenje 30 s | 0,381 | 0,429 | 0,484 | 442 | 23 |
+| redčenje 120 s | 0,462 | 0,477 | 0,505 | 402 | 63 |
+| redčenje 600 s | 0,405 | 0,388 | 0,390 | 417 | 48 |
+| Gauss 50 m | 0,149 [0,094; 0,203] | 0,159 [0,059; 0,259] | 0,165 [0,094; 0,235] | 19/18/23 | 446/447/442 |
+| Gauss 200 m | 0,026 [-0,017; 0,069] | 0,026 [-0,020; 0,072] | 0,027 [-0,019; 0,073] | 2/1/2 | 463/464/463 |
+| Gauss 1000 m | 0,000 | 0,000 | 0,000 | 0 | 465 |
+
+Normalizirani napadalec, `dtw_norm` nad `rematched` (isti bazeni kot zgoraj):
+
+| roka | k = 3 | k = 5 | k = 10 |
+|---|---|---|---|
+| `raw` / `none` | 0,440 | 0,468 | 0,516 |
+| geo-ind ε = 1 | 0,072 [-0,109; 0,253] | 0,073 [-0,112; 0,257] | 0,071 [-0,107; 0,250] |
+| geo-ind ε = 10 | 0,395 [0,353; 0,437] | 0,424 [0,345; 0,503] | 0,443 [0,410; 0,476] |
+| zaokroževanje 100 m | 0,338 | 0,386 | 0,366 |
+| zaokroževanje 500 m | 0,222 | 0,227 | 0,220 |
+| zaokroževanje 2000 m | 0,122 | 0,126 | 0,115 |
+| redčenje 30 s | 0,471 | 0,499 | 0,512 |
+| redčenje 120 s | 0,505 | 0,499 | 0,516 |
+| redčenje 600 s | 0,401 | 0,388 | 0,390 |
+| Gauss 50 m | 0,164 [0,104; 0,224] | 0,158 [0,090; 0,225] | 0,160 [0,090; 0,231] |
+| Gauss 200 m | 0,028 [-0,021; 0,076] | 0,026 [-0,020; 0,072] | 0,027 [-0,019; 0,073] |
+| geo-ind ε = 0,1, point_ldp, Gauss 1000 m | 0,000 | 0,000 | 0,000 |
+
+Napadalec nad izdajo, `dtw_norm` nad `release` (`n_pool` = 465 pri vseh rokah, 41
+uporabnikov, 459 sond; `n_rematch_dropped` kot v prvi tabeli):
+
+| roka | k = 3 | k = 5 | k = 10 |
+|---|---|---|---|
+| `none` | 0,510 | 0,556 | 0,601 |
+| geo-ind ε = 0,1 | 0,268 [0,181; 0,355] | 0,278 [0,185; 0,371] | 0,275 [0,218; 0,331] |
+| geo-ind ε = 1 | 0,499 | 0,552 [0,530; 0,574] | 0,582 [0,562; 0,603] |
+| geo-ind ε = 10 | 0,504 [0,498; 0,510] | 0,560 [0,555; 0,565] | 0,601 [0,592; 0,611] |
+| point_ldp ε = 4 | 0,049 [-0,005; 0,104] | 0,049 [-0,010; 0,109] | 0,050 [0,016; 0,084] |
+| point_ldp ε = 6 | 0,121 [0,039; 0,204] | 0,121 [0,044; 0,199] | 0,103 [0,036; 0,170] |
+| point_ldp ε = 8 | 0,185 [0,123; 0,248] | 0,185 [0,112; 0,258] | 0,191 [0,126; 0,256] |
+| zaokroževanje 100 m | 0,499 | 0,566 | 0,599 |
+| zaokroževanje 500 m | 0,423 | 0,484 | 0,534 |
+| zaokroževanje 2000 m | 0,344 | 0,338 | 0,322 |
+| redčenje 30 s | 0,525 | 0,573 | 0,619 |
+| redčenje 120 s | 0,547 | 0,593 | 0,625 |
+| redčenje 600 s | 0,566 | 0,593 | 0,623 |
+| Gauss 50 m | 0,504 [0,501; 0,507] | 0,555 [0,552; 0,558] | 0,595 [0,589; 0,602] |
+| Gauss 200 m | 0,471 [0,456; 0,485] | 0,545 [0,530; 0,561] | 0,571 [0,535; 0,606] |
+| Gauss 1000 m | 0,322 [0,252; 0,391] | 0,335 [0,293; 0,377] | 0,359 [0,315; 0,403] |
+
+Branje. (1) Galerija `release` pokaže, zaradi česar je bila uvedena: roke, ki so v galeriji
+`rematched` kazale »popolno zaščito« s praznim bazenom (Gauss 1.000 m, geo-ind ε = 0,1,
+točkovni LDP), nad izdanimi točkami dopuščajo 5–36 % pravilnih povezav; Gauss 50 m in
+zaokroževanje 100 m nad izdajo ne ščitita (enako kot `none`); vrstice padajo monotono s
+šumom (Gauss 50 m ≈ geo-ind ε = 10, Gauss 200 m ≈ ε = 1). (2) Točkovni LDP je raven čez k,
+kar je smiselno: že pri ε = 8 ~12 % točk pristane kjerkoli v območju 30 × 33 km in te točke
+prevladajo v povprečju, več točk sonde ne pomaga; ε = 4 (0,049) je približno dvakratnik
+slepega ugibanja (1/41). (3) Interval širine 0 pri geo-ind ε = 1 nad `release` pri k = 3 je
+naključje: vsa tri semena imajo 229/459 zadetkov, `top5_acc` istega klica pa se med semeni
+razlikuje (0,780 / 0,784 / 0,789), šum je torej ponovno izžreban. (4) Vrednosti rok z bazenom
+nekaj sledi (geo-ind ε = 1, Gauss 200 m) so brez statističnega pomena; zanje velja vrstica
+`release`. (5) `release` je močnejši celo pri `none` in redčenje 600 s nad izdajo preseže
+`none`; oboje sta lastnosti napadalca, razloženi in odločeni v §2.5.2 (opomba 7. 10. 2026).
+(6) Primerjava z u20 (`dtw` nad `rematched`, en pogon s semenom 42): z dvakrat večjo galerijo
+pade `top1_acc` pri vseh rokah s polnim bazenom za 0,01–0,10 (`raw` 0,283 / 0,384 / 0,489 →
+0,270 / 0,336 / 0,416; redčenje 120 s 0,544 → 0,462 pri k = 3), kar je pričakovano, ker ima
+napadalec več kandidatov; uporabnost je med stopnjama skladna (`cell_js_divergence`
+točkovnega LDP 0,421 / 0,180 / 0,032 → 0,412 / 0,171 / 0,029). Rekonstrukcija je smiselna
+(16 / 110 / 762 m napake proti šumu 20 / 200 / 2.000 m).
+
+**Uporabnost (povprečje [95 % interval]; `duration_dist_error` je pri vseh rokah 0, kot
+pričakovano, ker noben mehanizem ne spremeni prvega in zadnjega časa).**
+
+| roka | `cell_js_divergence` | `length_dist_error` | `speed_dist_error` |
+|---|---|---|---|
+| geo-ind ε = 0,1 | 0,109 [0,108; 0,110] | 1067520 [1062121; 1072919] | 285,9 [284,7; 287,1] |
+| geo-ind ε = 1 | 0,004 [0,004; 0,005] | 98928 [98435; 99421] | 26,7 [26,5; 26,8] |
+| geo-ind ε = 10 | 0,000 | 6449 [6415; 6482] | 1,7 |
+| point_ldp ε = 4 | 0,412 [0,411; 0,413] | 5881714 [5871630; 5891799] | 1565,7 [1558,8; 1572,6] |
+| point_ldp ε = 6 | 0,171 [0,170; 0,173] | 4409904 [4400456; 4419352] | 1157,8 [1150,2; 1165,4] |
+| point_ldp ε = 8 | 0,029 [0,028; 0,030] | 1504334 [1484186; 1524481] | 394,9 [391,6; 398,2] |
+| zaokroževanje 100 / 500 / 2000 m | 0,001 / 0,013 / 0,209 | 1119 / 1943 / 3570 | 0,3 / 0,5 / 1,3 |
+| redčenje 30 / 120 / 600 s | 0,003 / 0,010 / 0,032 | 586 / 1486 / 2862 | 0,2 / 0,4 / 0,7 |
+| Gauss 50 m | 0,001 | 25455 [25368; 25542] | 6,9 |
+| Gauss 200 m | 0,006 | 120599 [120167; 121030] | 32,5 [32,4; 32,6] |
+| Gauss 1000 m | 0,073 [0,071; 0,074] | 638582 [636372; 640792] | 171,3 [170,8; 171,9] |
+
+**Dve opombi pregleda o prikazu.** `home_error_m` napada POI je povprečje le čez uporabnike,
+ki jim je napad dodelil dom (`attribute.py`), zato ima geo-ind ε = 0,1 manjšo napako (882 m,
+iz dveh semen) kot ε = 10, čeprav je `home_localised` 0; kot glavna mera v `plots.py` je
+zavajajoča. Negativne spodnje meje intervalov `tpr` (zgoraj) so artefakt intervala t.
+
+**Odločeno 7. 10. 2026 (avtor, po predlogih seje in pregleda):**
+
+1. Štiri ravne datoteke samostojnega pogona s semenom 42 (`run.json`, `results.csv`,
+   `metrics.csv`, `matrix.csv`, 20. september 2026, dve minuti pred semenom 1 ponovitve) so
+   preseljene iz `results/geolife_mech_mia_u20/` v lokalno mapo
+   `results_arhiv/geolife_mech_mia_u20_seme42/`, ker `trajguard report` nad celotno mapo
+   `results/` mešano postavitev zavrne (`report.py`, varovalka postavitve). `repetitions.csv`
+   in `seed1–3/` ostanejo; ta `repetitions.csv` ima še staro shemo s šestimi stolpci.
+   `results_arhiv/` in `logs/` sta dodani v `.gitignore`.
+2. Napadalec se popravi pred stopnjo 182: sonde iz istega vira za obe galeriji in pregled
+   normalizacije `dtw_norm` (§2.5.2, opomba 7. 10. 2026); nato se vnos `release` pri u50
+   ponovi (~12,7 h na seme pri k = 3 / 5 / 10, ~3 h samo pri k = 3). Stopnja 182 tako ne
+   podeduje zamika.
+3. Ocena stroška stopnje 182 se popravi na ~85 h na seme (~55 h za vnos `release` pri
+   k = 3, ~29 h za ujeta vnosa), torej ~10 dni za tri semena; vpiše se v glavo
+   `geolife_mech_reid_u182.yaml` v PR-ju s popravkom napadalca. Pogon se začne s semenom 1
+   samim, drugi dve semeni po preverbi. Pravilo R1 ostane: vseh 13 klicev `release` bo čez
+   1.200 s in se samo zabeleži.
+4. Prikaz v prihodnjem PR-ju poročila in grafov: spodnja meja intervalov `tpr` se pri
+   prikazu obreže na 0 (`repetitions.csv` ostane surov); POI kot glavno mero riše
+   `home_localised` namesto `home_error_m`.
+
+Vrstni red naslednje seje: 2 (popravek napadalca + ponovitev vnosa `release` pri u50) → 3
+(ocena in seme 1 stopnje 182) → 4 (prikaz) → primerjalni zvezek (§1.6 načrta). Glavi
+konfiguracij u50 še nosita opombo »NOT RUN«; posodobi ju PR iz točke 3.
+
 ### 2.4 Val 5 — horizont B (2. letnik)
 
 A1 polni klasifikator lastnosti (Geolife nima demografskih oznak), M4 ujemanje
@@ -1460,7 +1647,7 @@ stolpec `gallery` v `results.csv` po vzorcu stolpca `distance` iz PR #47, da por
 grafi ločita galeriji), na tem pa PR B (veja `claude/mech-configs-full-grid`, uskladitev
 konfiguracij u50 in u182 na polni mreži rok z vnosom `release`: `known_points [3]` pri 182,
 `[3, 5, 10]` pri 50). Vsi trije PR-ji so bili združeni v `main` 5. oktobra 2026 (merge
-commiti #51 `f4e03d1`, #52 `ae6aa1f`, #53 `ebf6f30`). **Z novo galerijo še ni nič izmerjeno**;
+commiti #51 `f4e03d1`, #52 `ae6aa1f`, #53 `ebf6f30`). Z novo galerijo je izmerjena stopnja 50 (7. oktober 2026, §2.3.7);
 pri u20 je k = 10 čez proračun 300 s (pravilo R1).
 
 **Opomba (možnost C, 22. september 2026).** Primerjalni zvezek in poročilo (IZV §7 in §8)
@@ -1481,7 +1668,25 @@ galerijo `release` (`known_points: [3]` pri 182, `[3, 5, 10]` pri 50); nastala j
 `geolife_mech_mia_u50.yaml` (prag 0,05, proračun 300 s, 50 uporabnikov, generatorji kot pri
 u182). Vrstni red pogonov je `geolife_mech_mia_u50.yaml`, `geolife_mech_reid_u50.yaml`,
 `geolife_mech_mia_u182.yaml`, `geolife_mech_reid_u182.yaml`; ocene stroška in število
-klicev čez proračun so v §2, točka 6. **Izmerjeno ni še nič.**
+klicev čez proračun so v §2, točka 6. Stopnja 50 je izmerjena (§2.3.7).
+
+**Opomba o viru sond in redčenju (pregled meritve u50, 7. oktober 2026).** Pregled je
+pokazal dvoje, kar ta razdelek doslej ni povedal. (1) Pri galeriji `release` orkestrator
+tudi sonde, torej znane točke napadalca, vzame iz surovih očiščenih točk (klic
+`_release_traces(clean_by_id, …)` v `orchestrator.py`), pri galeriji `rematched` pa iz
+ujetih točk. Ujeta sled ima le del opazovanj in je pogosto odrezana na koncih, zato se med
+galerijama hkrati spremenita galerija in znanje napadalca. To pojasni, zakaj je `release`
+močnejši celo pri roki `none` (0,510 proti 0,440 pri k = 3 z `dtw_norm`). (2) `dtw_norm`
+deli strošek s številom celic na poravnavi, ki je vsaj max(k, m) (`geometry.py`); pri k = 3
+in gosti galeriji mera postane približno povprečna razdalja točk galerije do treh sidrnih
+točk sonde, redčenje pa vedno ohrani prvo in zadnjo točko (`naive.py`), zato redčena izdaja
+pri k = 3 doseže več kot `none` (0,566 proti 0,510), pri k = 10 pa razlika skoraj izgine
+(0,623 proti 0,601). Ker je redčena izdaja funkcija polne izdaje, ne more nositi več
+informacije: vrstica `none` podcenjuje najboljšega napadalca. To je slabost napadalca, ne
+tveganje, ki bi ga dodal mehanizem. **Odločeno 7. 10. 2026:** oboje se popravi v kodi pred
+stopnjo 182 (sonde iz istega vira za obe galeriji, pregled normalizacije), nato se vnos
+`release` pri u50 ponovi; do takrat zvezek za vsako roko poroča ovojnico najboljšega
+napadalca (maksimum čez galerijo in razdaljo).
 
 ---
 
