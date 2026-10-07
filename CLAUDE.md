@@ -29,6 +29,12 @@ doctoral project. This file is the constitution for the repo; read it every sess
   `geolife_mech_reid_u50.yaml`), then rung 182 (`geolife_mech_mia_u182.yaml`, then
   `geolife_mech_reid_u182.yaml`), then the comparison notebook
   (`docs/NACRT_MEHANIZMI.md` §1.6).
+- Ideation for the next protection mechanisms is closed (7 Oct 2026): one user-level
+  pure-LDP mechanism with three modules (behavioural moments C1, regime vote C3,
+  origin–destination shares C2) that calibrate a public road-network simulator built from
+  OpenStreetMap and cited constants. Design, candidate bank, novelty verdicts, evaluation
+  method and the session plan: `docs/NACRT_ULDP_SINTEZA.md`. Nothing of it is implemented;
+  prerequisites P0–P5 come first, then modules in the order C3, C2, C1.
 
 Whoever changes the project state updates these lines in the same PR. The history of
 PRs, merge commits and result interpretation lives only in `docs/HANDOFF.md`, never
@@ -64,6 +70,11 @@ question (a section, not the file). For a typical coding task this file plus
   grid input mode (`dataset.representation: cells`), the Porto comparison run, and the
   session prompt. **Read in full only when implementing that validation or when the user
   mentions LDPTrace metrics, cells mode, or Porto.**
+- `docs/NACRT_ULDP_SINTEZA.md` (Slovenian) — the chosen design for the user-level LDP
+  synthesis mechanism (three modules), the bank of ten candidates with novelty verdicts,
+  the evaluation method (prior and oracle arms, recovery simulation), prerequisites P0–P5
+  and the session plan. **Read only the section for the step you are implementing, or
+  when the user mentions ULDP, a module C1/C2/C3, or a prerequisite P0–P5.**
 - `docs/REZULTATI_SHEMA.md` (Slovenian) — the `results.csv` column schema and its
   consumers. **Read only when touching `results.csv` columns or
   `reporting/results_schema.py`, `results_io.py`, `report.py`, `plots.py`, or
