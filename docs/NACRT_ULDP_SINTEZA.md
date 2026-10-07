@@ -56,6 +56,11 @@ nezasebni strop te družine modelov; *stopnja* je velikost populacije Geolife (u
 u182); SD je standardni odklon; JSD (Jensen–Shannonova divergenca) in W1 (Wassersteinova
 razdalja dveh enorazsežnih porazdelitev) merita razliko porazdelitev, manj je bolje.
 
+**Opomba (7. oktober 2026).** Drugi krog ideacije je za to zasnovo zapisal ločene ugotovitve
+F1–F9 (seje namesto poti, zakon števila poti na uporabnika za C3, kdo poroča, točnejši šum za
+§4.3, §4.4 in §5.1, izbira gradnika za C2, vrata »obdrži prior, razen če test zavrne«);
+zbrane so v `docs/NACRT_ULDP_RANGI.md` §10 in tu še niso uveljavljene.
+
 ## 1. Raziskovalna vrzel in omejitve
 
 **Vrzel.** Ni objavljenega mehanizma, ki bi sintetiziral cele poti po cestnem grafu s

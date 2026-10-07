@@ -40,6 +40,15 @@ doctoral project. This file is the constitution for the repo; read it every sess
   OpenStreetMap and cited constants. Design, candidate bank, novelty verdicts, evaluation
   method and the session plan: `docs/NACRT_ULDP_SINTEZA.md`. Nothing of it is implemented;
   prerequisites P0–P5 come first, then modules in the order C3, C2, C1.
+- Ideation round 2 closed on 7 Oct 2026: the second user-level pure-LDP mechanism is rank
+  calibration across and within users (K1 + K8), in which each phone ranks one of its trips
+  (or one rush-hour trip against one of its off-peak trips) among twins simulated by the
+  public road-network simulator, sends one coarse rank by randomized response, and the
+  server keeps the simulator unless a pre-registered test rejects it, otherwise recalibrates
+  its travel times. Nothing of it is implemented; two new shared prerequisites come first
+  (split Geolife sessions into trips at stops, P10; every training user sends exactly one
+  report, P11), and it also needs a new metric (travel-time W1 within each departure
+  period, P12). Plan, candidate bank K1–K8 and session plan: `docs/NACRT_ULDP_RANGI.md`.
 
 Whoever changes the project state updates these lines in the same PR. The history of
 PRs, merge commits and result interpretation lives only in `docs/HANDOFF.md`, never
@@ -80,6 +89,14 @@ question (a section, not the file). For a typical coding task this file plus
   the evaluation method (prior and oracle arms, recovery simulation), prerequisites P0–P5
   and the session plan. **Read only the section for the step you are implementing, or
   when the user mentions ULDP, a module C1/C2/C3, or a prerequisite P0–P5.**
+- `docs/NACRT_ULDP_RANGI.md` (Slovenian) — the plan for the second user-level LDP
+  mechanism, rank calibration across and within users (K1 + K8): the bank of eight round-2
+  candidates K1–K8 with novelty verdicts, the chosen design, what Geolife can show, open
+  decisions, prerequisites (two new shared ones, P10 and P11, and a new metric, P12) and the
+  session plan, plus the round-2 evaluator's findings F1–F9 for the `NACRT_ULDP_SINTEZA`
+  design (§10). **Read only the section for the step you are implementing, or when the
+  user mentions rank calibration, twins, a candidate K1–K8, a prerequisite P10–P12, or a
+  finding F1–F9.**
 - `docs/REZULTATI_SHEMA.md` (Slovenian) — the `results.csv` column schema and its
   consumers. **Read only when touching `results.csv` columns or
   `reporting/results_schema.py`, `results_io.py`, `report.py`, `plots.py`, or
