@@ -1,0 +1,85 @@
+# Novelty check G1: T1 and T2 (round 3, 2026-10-09)
+
+Checker G1. Inputs: `01_task.md` §1-3, `03_novelty_task.md`, `00_baseline.md` §4-5, `20_candidates.md` (T1, T2, X1-X12). Tools: WebSearch (standard mode) and WebFetch. **Tool status:** both tools hit the account's session limit at 14:12, after 17 searches for T1 and 3 for T2; the checker waited for the announced reset and ran the remaining 7 T2 searches from 15:11. Only works actually found are cited; where only an abstract was reachable, this is said.
+
+## T1 Opportunity-rank destination law
+
+### Queries run (17 searches, 5 fetches)
+1. "radiation model" "local differential privacy" mobility
+2. "intervening opportunities" "differential privacy"
+3. "probability integral transform" "local differential privacy"
+4. differential privacy radiation model origin-destination flows estimation privacy-preserving
+5. "Impact of federated data with local differential privacy for human mobility modeling"
+6. Gibbs Musolesi Cheshire Eggo local differential privacy mobility network gravity model federated EPJ Data Science
+7. "distance decay" OR "trip length distribution" "local differential privacy" estimation
+8. rank-based destination choice mobility model "differential privacy" synthetic trajectories radiation gravity
+9. "local differential privacy" goodness-of-fit parametric model "probability integral transform" OR "PIT values" calibration test
+10. "spatial interaction model" OR "gravity model" calibration "differential privacy" mobility parameter estimation private
+11. "user-level" "local differential privacy" mobility OR trajectory synthesis road network one report per user
+12. "intervening opportunities" OR "radiation model" privacy-preserving synthetic trips destination generation road network
+13. "randomized quantile residuals" OR "randomized PIT" "differential privacy" model checking
+14. generalized radiation model parameter "intervening opportunities" one-parameter extension calibration "Limits of predictability"
+15. "local differential privacy" visited location rank OR "distance rank" report destination "nearest" places mobility statistic
+16. Noulas Scellato Lambiotte Pontil Mascolo "A tale of many cities" rank-based mobility 0.84 exponent
+17. Fan Bonomi SIGSPATIAL 2023 privacy spatial accessibility travel distance (a tangent: release of individual travel distances; not close)
+
+Fetched: arXiv 2510.18379 and its ITCS 2026 page; arXiv 2111.05791 (abstract); PMC4092333 and ar5iv 1407.6256 (formula of the extended radiation model); the Network Science Institute page of Gibbs et al. (the EPJ page returned 403, so that work is judged from its abstract).
+**Result in one line:** no hit pairs a radiation, intervening-opportunity, rank-law or any other destination-choice parameter with LDP or user-level DP, and no LDP work sends a destination's position in its origin's opportunity order.
+
+### Closest works
+| # | Work | What it does | Precise difference from T1 |
+|---|---|---|---|
+| 1 | Yang, Herrera, Eagle, González, "Limits of Predictability in Commuting Flows in the Absence of Data for Calibration", Sci. Rep. 4:5662, 2014, https://doi.org/10.1038/srep05662 (arXiv 1407.6256) | extended radiation model with one exponent α from survival analysis: P>(a) = 1/(1 + a^α), a = n_i + s; fitted α from 0.003 to 1.5 over three regions; a zone-size rule for α without trip data | non-private, zone flows. Conditioning on leaving the origin's own mass gives (1 + n_i^α)/(1 + (n_i + s)^α) ≈ (n_i/(n_i + s))^α, which is T1's tempered law with κ = α. The law family is published; only the LDP report and its estimator are new |
+| 2 | Sakong & Zentefis, "A Simulation-Based Method to Estimating Economic Models with Privacy-Protected Data", NBER chapter (draft 2024-26), https://www.nber.org/books-and-chapters/data-privacy-protection-and-conduct-applied-research-methods-approaches-and-new-findings/simulation-based-method-estimating-economic-models-privacy-protected-data | simulated-moments estimation of a gravity model of consumer visits from DP-noised, censored device counts | central release of aggregate counts, gravity deterrence instead of opportunities, no device-side statistic and no exact null |
+| 3 | Mir, Isaacman, Cáceres, Martonosi, Wright, DP-WHERE, IEEE BigData 2013, https://doi.org/10.1109/BigData.2013.6691626 | central DP on the few distributions (home, work, commute distance) that drive the WHERE simulator | central, and an absolute distance histogram; T1 is local, user-level and sends reach relative to the origin's opportunities |
+| 4 | Gibbs, Musolesi, Cheshire, Eggo, "Impact of federated data with local differential privacy for human mobility modeling", EPJ Data Sci. 15:17, 2026, https://doi.org/10.1140/epjds/s13688-025-00611-4 | accuracy model of LDP-generated mobility networks (origin-destination flows) against central DP and k-anonymity on simulated US phone data | devices report locations or flows (abstract level); no destination-law parameter, no PIT |
+| 5 | Canonne, Gentle, Singhal, "Uniformity Testing under User-Level Local Privacy", ITCS 2026, https://arxiv.org/abs/2510.18379 | near-sample-optimal user-level LDP uniformity and identity tests, n users with m samples each, private-coin symmetric protocols | generic discrete testing; T1's gate tests PIT uniformity only through its mean (one HM number) and adds a moment estimator. This is the primitive the gate should cite and be compared against |
+| 6 | Kent, Berrett, Yu, "Rate Optimality and Phase Transition for User-Level Local Differential Privacy", 2024, https://arxiv.org/abs/2405.11923; with HM of Wang et al., ICDE 2019 | averaging a user's samples into one bounded number and privatizing it is the standard user-level LDP mean estimator | T1's device is this primitive applied to a PIT; no mobility law |
+
+Also found, not among the closest: the radiation model, Simini, González, Maritan, Barabási, "A universal model for mobility and migration patterns" (Nature 2012), https://arxiv.org/abs/1111.0586 (κ₀ = 1); the randomized quantile residual of Dunn & Smyth (1996), which is the discrete randomized PIT that T1 uses, seen via https://topmodels.r-forge.r-project.org/reference/qresiduals.html and never combined with DP in any hit; Noulas et al., "A Tale of Many Cities: Universal Patterns in Human Urban Mobility", PLoS ONE 7(5):e37027, 2012, https://doi.org/10.1371/journal.pone.0037027 (R3-D1's rank law); Lenormand et al., "Systematic comparison of trip distribution laws and models", https://arxiv.org/abs/1506.04889 (T1's risk 2).
+
+### Verdict: NOVEL COMBINATION (narrow), confidence medium
+- The parts exist separately: the law family (Simini 2012; Yang et al. 2014; Noulas 2012), the randomized PIT (Dunn & Smyth), user-level LDP averaging with HM (Kent et al.; Wang et al.), user-level LDP identity testing (Canonne et al.) and private calibration of a mobility simulator (DP-WHERE; Sakong & Zentefis). No work found estimates a destination-choice or opportunity exponent from LDP reports, so it is not a CLOSE VARIANT of a published privacy work: the nearest ones differ in trust model, reported object and law at once. Not EXISTS.
+- Why "narrow": because the law is published, the only new element is the reported statistic (one user-averaged PIT of the destination in its origin's opportunity order) and its closed-form moment map. A reader who treats "PIT under a public law, averaged, sent by HM, inverted by the method of moments" as the generic user-level LDP mean estimator would call it a CLOSE VARIANT of that primitive in a new domain. The evaluator should know this.
+- What no found work has, and what should carry the claim: the exact null under destination-dependent eligibility (the truncated PIT of X6), the ⊥-coin shrinkage toward κ₀ and, at large n, κ per origin-density class with a user-level LDP identity test (Canonne et al.) as the gate.
+- Fact checks for the writer: (1) cite Yang et al. 2014 for the tempered law. Its α spread (0.003-1.5) supports risk 2, and its zone-size rule for α could serve as a published prior for κ₀ only if it transfers from wards to node-level masses (unverified). (2) α₀ = 0.84 for the rank law was found only as 0.84 ± 0.07 in Cambridge lecture slides (one lecture plot shows -0.88), not in the PLoS ONE text I could reach; verify it in the paper before the freeze (S1).
+
+### Check against rounds 1 and 2
+Does not coincide with any earlier candidate or raw idea. Nearest: C2/B.2 (one trip's zone or absolute cost band, gravity inversion; T1 sends no zone and no band), K1/R2-C.1 (the exact-null PIT principle; K1 never ranks d given o), C1/D.2 (user-averaged moments by HM: the same report pattern with a different statistic), R2-E.2 (radius-of-gyration bins, absolute) and R2-A.1 (iso-time ring). No §3.2 condition is needed.
+
+## T2 Hierarchy-ceiling route law
+
+### Queries run (10 searches, 2 fetches)
+1. "contraction hierarchy" OR "contraction hierarchies" "differential privacy" route
+2. "road hierarchy" OR "highway hierarchy" route choice "local differential privacy" OR "differential privacy" trajectory synthesis
+3. "local differential privacy" "Kaplan-Meier" OR "survival analysis" OR "right-censored" randomized response estimation
+4. (after the reset) route choice "road hierarchy" GPS drivers hierarchy level model highest road class
+5. Ramaekers Reumers Wets Cools route choice GPS diary main road category trip purpose Networks and Spatial Economics 2013
+6. "local differential privacy" "route choice" OR "route preference" OR "driving preference" estimation navigation users
+7. "contraction hierarchies" OR "highway hierarchies" GPS trajectories human routes route choice set generation hierarchy rank
+8. "functional road class" OR "road type" OR "road category" "local differential privacy" OR "differential privacy" trajectory route synthetic release
+9. hierarchical route planning "fine-to-coarse" OR "hierarchical wayfinding" road hierarchy drivers highest level road model Car Frank Wiener Mallot
+10. "Experiments on route choice set generation using a large GPS trajectory set" Yao Bekhor link penalty higher road class
+
+Fetched: the IDEAS page of Ramaekers et al. (abstract only; the Hasselt preprint returned 503, so how "main road category" is defined could not be checked).
+**Result in one line:** no privacy work, central or local, reports or releases where a route sits in a road or node hierarchy. In DP work the hierarchy appears only as a noise-tuning input (DPMM) or as a hierarchy of places or of the domain (Cunningham et al.; the C8 lineage). Non-private route-choice work does model the road category a trip uses, and class-biased routers.
+
+### Closest works
+| # | Work | What it does | Precise difference from T2 |
+|---|---|---|---|
+| 1 | Ramaekers, Reumers, Wets, Cools, "Modelling Route Choice Decisions of Car Travellers Using Combined GPS and Diary Data", Netw. Spat. Econ. 13(3):351-372, 2013, https://doi.org/10.1007/s11067-013-9184-8 | multinomial logit of the road category a trip uses by trip purpose (work trips most likely on primary through roads) and a Tobit model of the deviation from the shortest path; GPS plus diaries, Flanders | non-private and judged from the abstract; the category is not measured against the trip's own fastest path and there is no censoring. It shows that "which hierarchy level a trip uses" is an established route-choice outcome |
+| 2 | Yao & Bekhor, "Experiments on route choice set generation using a large GPS trajectory set", hEART 2020, https://arxiv.org/abs/2006.04536 | on 6,000 Tel Aviv GPS trips one shortest path covers about 60 % at 80 % overlap; a link penalty modified to favour higher road classes reaches 97 % | non-private choice-set generation with one class-biased router, not a mixture of nested ceiling routers fitted from reports. It also hints that observed routes mostly climb the hierarchy, which bears on T2's risk 1 |
+| 3 | Haydari et al., DPMM, ACSAC 2022, https://doi.org/10.1145/3564625.3567974 | per-trajectory DP; per its abstract, the noise is tuned by link density and the functional class of nearby links; exponential mechanism over candidate paths between waypoints | perturbs each trip's own path; the road class is a noise input, not the reported value; no aggregate route law |
+| 4 | C8 lineage: Yang et al., hot-path crowdsourcing (IEEE TSC 2020), https://arxiv.org/abs/2012.13807; AHEAD (CCS 2021), https://arxiv.org/abs/2110.07505 | LDP frequency oracles over the nodes or prefixes of a hierarchy (a road-path trie; an adaptive domain hierarchy) | they report a node of a hierarchy; T2 reports no node, only a 3-class deficit of one trip against its own fastest path |
+| 5 | Egéa & Escobar-Bach, "Local differential privacy in survival analysis using private failure indicators", arXiv 2023, https://arxiv.org/abs/2311.01303 | LDP on right-censored data: the failure indicators are privatized, a kernel estimator of the cumulative hazard, minimax rates | continuous times (how the observed times are protected was not visible in the abstract); T2's ε 8 variant privatizes the pair (censoring level a*, censored or not) jointly by GRR over 9 cells and needs only a discrete Kaplan-Meier over 4 bands. LDP estimation under right censoring exists, so the censored identification alone carries no novelty claim |
+| 6 | Geisberger et al., "Exact Routing in Large Road Networks Using Contraction Hierarchies", Transp. Sci. 46(3):388-404, 2012, https://doi.org/10.1287/trsc.1110.0401; with Funke, Laue, Storandt, personalized CH (SEA 2017), https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.SEA.2017.18 | the public node hierarchy whose shortest paths go up, then down (the apex T2 uses); preference-based routing on a CH | routing engineering: no statistics of human routes, no privacy |
+
+Also found, not among the closest: hierarchical route planning in cognition, which motivates a "level reached" route variable but works with regions, not road bands: Wiener & Mallot, "'Fine-to-coarse' route planning and navigation in regionalized environments" (Spatial Cognition and Computation 3(4), 2003), https://staffprofiles.bournemouth.ac.uk/display/journal-article/13753; Car & Frank's hierarchical spatial reasoning for road wayfinding (IGIS 1994), https://dblp.dagstuhl.de/rec/conf/igis/CarF94.html; Griesbauer et al., "London taxi drivers exploit neighbourhood boundaries for hierarchical route planning" (Cognition 2025), https://www.biorxiv.org/content/10.1101/2024.02.20.581139. No LDP work on route or driving preferences was found (query 6; the nearest was LDP recommendation of location-privacy preferences, https://arxiv.org/abs/1904.10578). R3-A2's regret ledger rests on the standard identity that a path's detour is the sum of its edges' reduced costs under exact cost-to-go potentials (as in recursive logit, baseline); it carries no novelty.
+
+### Verdict: NOVEL COMBINATION, confidence medium
+- No privacy work found reports, estimates or releases where a route sits in a road or node hierarchy. The statistic itself (one trip's apex deficit against the apex of its own fastest path in public CH bands) was not found even in non-private work, which models the category a trip uses (Ramaekers et al.) or biases one router toward higher classes (Yao & Bekhor). The estimator's parts are published: GRR counts deconvolved by a simulated confusion matrix (as in round-1 C3), LDP under right censoring (Egéa & Escobar-Bach), the Kaplan-Meier product under independent censoring, and the CH. Their combination into a user-level LDP route law over nested public ceiling routers was not found. Not EXISTS and not CLOSE VARIANT, because no published privacy work is one detail away; not NOVEL, because the report mechanism and the estimators are published primitives.
+- Why only medium: the transport literature on hierarchy-constrained route choice is large and partly paywalled, and a non-private "maximum level reached" latent-class route model may exist under another name. Finding one would move the route model to "published", as happened for K4, and leave the label unchanged.
+
+### Check against rounds 1 and 2
+Does not coincide with any earlier candidate, but it overlaps one round-1 statistic more than the candidate text admits: A.1 (statistics "centred on the same-endpoint fastest path", including class metres) and E.3 ("class differences vs the shortest path"), both merged into C1, already measure hierarchy use relative to the trip's own fastest path. T2 is a one-trip, ordinal, CH-band version of that statistic with a different estimator (censored nested ceilings, public cost-to-go, no private cost tilt). Other near ones: C8/A.4 (reports a hierarchy node), C9/E.2 (road-class tokens), C3/B.4 (a latent label; T2's is deterministic), R2-A.4 (arterial-share contrast, K8 item b). No §3.2 condition is needed.
+**Ambiguity for the evaluator:** if the planned ablation (risk 3) finds plain OSM road classes as good as the CH bands, the statistic becomes a coarsened one-trip version of A.1/E.3 (C1), and T2's distinctness from C1 then rests on the estimator alone.

@@ -464,6 +464,7 @@ Točke 1–3 imenuje ocenjevalčev povzetek, ostale odpira vrednotenje; »izpelj
 | 8 | Utež: ocena, utežena po uporabnikih (ena pot na uporabnika, privzeto), ali po poteh z zgornjo mejo (X4) | skupno z `NACRT_ULDP_SINTEZA.md` §7.1, točka 2 | pred koncem P2 |
 | 9 | Seznam vprašanj in tabela n·ε², povezava pri K8c, število dvojčkov (29–50), raven vrat | vse zamrznjeno pred prvim pogonom pri 182; kako se ⊥ pošlje pri številskem odgovoru HM, gradivo ne pove (opažanje pisca) | pred sejo ranga trajanja |
 | 10 | Časovno občutljiv napad MIA (`NACRT_ULDP_SINTEZA.md` §7.1, točka 4; P8) | ta mehanizem spreminja le čase, ki jih napad ne vidi (§5.4), zato je odločitev tu še pomembnejša | pred prvimi meritvami |
+| 11 | Vprašanje o cilju iz tretjega kroga: T1, tercil ranga priložnosti, kot postavka *dest* na seznamu vprašanj K1 ob *dur*, *dep* in *len* (`NACRT_ULDP_ODSEKI.md` §3.2) | predlog tretjega kroga: telefon za eno upravičeno pot pošlje, v kateri tretjini javnega zakona priložnosti (dolžine cest ali krajev OSM, bližjih izvoru) leži njen cilj, ali ⊥, z GRR nad 4; strežnik oceni en faktor dosega v zakonu cilja, ki ga napad MIA vidi (okoli 2 seji); pred tem je treba preveriti in zamrzniti citirani podatek o razdaljah poti v Pekingu, postavka pa potrebuje P10. Če javna preverba T3 pade, postane T1 kot K-α mehanizem tretjega kroga (`NACRT_ULDP_ODSEKI.md` §8, točki 2 in 3). Odločijo seje K1 | v sejah K1, pred zamrznitvijo seznama vprašanj (točka 9) |
 
 ## 9. Predpogoji in načrt sej
 
