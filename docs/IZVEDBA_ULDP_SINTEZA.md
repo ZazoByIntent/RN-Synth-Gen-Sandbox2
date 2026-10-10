@@ -121,4 +121,14 @@ in mi poročaj po SKUPNO §9, v slovenščini, brez nepojasnjenih kratic.
 
 ## Dnevnik izvedbe
 
-(prazno; prvi vnos naredi orkestrator seje 1)
+- 2026-10-10 · blok A · enota P0 · zeleno · 2 datoteki · pytest 552 passed · kode ni bilo treba spreminjati; `fit` dobi `user_id` za vsako ujeto pot; senčne prilagoditve LiRA kandidatov `user_id` ne dobijo (prenos na P5, brez oznake `test`); n danes šteje poti, ne uporabnikov
+- 2026-10-10 · ODLOČITEV SEJE · P0: senčni kandidati dobijo `user_id` šele v P5, ker bi sprememba zdaj spremenila vhod napada
+- 2026-10-10 · blok A · enota P1 · zeleno · 4 datoteke · pytest 560 passed · `LinkVisit` (vstop, izstop, `dwell_s`) in `TimedRoute` kot payload, `datamodel/timed_io.py` za Parquet
+- 2026-10-10 · ODLOČITEV SEJE · P1: časi so sekunde Unix v UTC (float64, kot točke Geolife); zamik UTC+8 je obvezno polje `utc_offset_s` in zapis v metapodatkih Parquet, ne časovni pas Arrow
+- 2026-10-10 · ODLOČITEV SEJE · P1: postanek je del obiska povezave (`dwell_s`); vrzeli med obiski so dovoljene, prekrivanja ne
+- 2026-10-10 · blok A · enota P10 · zeleno · 4 datoteke · pytest 567 passed · `cleaning.split_sessions` (privzeto izklopljeno), `clean_trips()`, hash predpomnilnika ob izklopu nespremenjen (`abe8b341d8bfb1ca`)
+- 2026-10-10 · ODLOČITEV SEJE · P10: razrez teče na že očiščenih točkah; »znotraj 150 m« je ≤ 150 m, »pod 300 m« je < 300 m; pragovi citirajo RANGI §8 točka 4, oblika pravila Li et al. 2008 (zaznava postankov)
+- 2026-10-10 · ODLOČITEV SEJE · P10: hoja počasneje od ~0,8 m/s se šteje kot postanek; pogostost na Geolife ni izmerjena (zapis za HANDOFF)
+- 2026-10-10 · blok A · enota P11 · zeleno · 3 datoteke · pytest 571 passed · zastavica `needs_user_roster`, `set_user_roster()`, `views_by_user()`; seznam `train_users` iz delitve pred ujemanjem v `meta.json` sklada; ključ predpomnilnika nespremenjen
+- 2026-10-10 · ODLOČITEV SEJE · P11: uporabniki, ki jim čiščenje odstrani vse poti, nimajo oznake delitve in niso na seznamu (nespremenjeno vedenje); seznam za senčne prilagoditve in ε v `run.json` prideta v P5
+- 2026-10-10 · blok A · PR #60 · recenzija: merge (ruff, mypy čisto, pytest 571 passed, `config/` nespremenjen) · manjše opombe prenesene v blok C: pri vklopljenem razrezu uporabnik izpade, če noben kos ne prestane čiščenja (odvisno od zasebnih postankov); generator z zastavico `needs_user_roster` naj javi napako, če seznama ni

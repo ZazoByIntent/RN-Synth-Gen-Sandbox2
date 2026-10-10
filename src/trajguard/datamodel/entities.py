@@ -1,6 +1,8 @@
 """Frozen dataclass schemas for the benchmark entities (design §4)."""
 
+import math
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 Split = Literal["train", "test", "shadow", "attack"]
@@ -85,9 +87,88 @@ class SyntheticTrajectory:
     syn_id: str
     generator_id: str
     params_hash: str
-    payload: Any  # view-dependent, as for ProtectedTrajectory
+    payload: Any  # view-dependent, as for ProtectedTrajectory; TimedRoute when timed
     trained_on_split: str
     map_id: str
+
+
+BEIJING_UTC_OFFSET_S = 8 * 3600
+"""Local-time offset of Beijing (UTC+8, no daylight saving), for Geolife and T-Drive."""
+
+
+@dataclass(frozen=True, slots=True)
+class LinkVisit:
+    """One timed traversal of a road link inside a timed synthetic route.
+
+    Times are Unix seconds (UTC instants, like ``CleanTrajectory`` points); the
+    owning ``TimedRoute`` carries the local offset. ``dwell_s`` is the part of
+    ``t_exit - t_enter`` spent stopped on the link, so a stop is recorded as such
+    and does not read as an absurdly slow link (finding F1).
+    """
+
+    edge_id: int
+    t_enter: float
+    t_exit: float
+    dwell_s: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Reject non-finite times, exit before entry and dwells outside the visit."""
+        if not (math.isfinite(self.t_enter) and math.isfinite(self.t_exit)):
+            raise ValueError(f"LinkVisit: non-finite time on edge {self.edge_id}")
+        if self.t_exit < self.t_enter:
+            raise ValueError(f"LinkVisit: t_exit < t_enter on edge {self.edge_id}")
+        if not (0.0 <= self.dwell_s <= self.t_exit - self.t_enter):
+            raise ValueError(
+                f"LinkVisit: dwell_s must lie in [0, t_exit - t_enter] on edge {self.edge_id}"
+            )
+
+    @property
+    def moving_s(self) -> float:
+        """Seconds spent moving on the link (visit duration minus dwell)."""
+        return self.t_exit - self.t_enter - self.dwell_s
+
+
+@dataclass(frozen=True, slots=True)
+class TimedRoute:
+    """A timed synthetic payload: time-ordered link visits plus the local UTC offset.
+
+    The departure time is the first visit's ``t_enter``. Consecutive visits may not
+    overlap (``t_enter`` of a visit is at least the previous ``t_exit``).
+    """
+
+    visits: tuple[LinkVisit, ...]
+    utc_offset_s: int  # local time = UTC + utc_offset_s; BEIJING_UTC_OFFSET_S for Beijing
+
+    def __post_init__(self) -> None:
+        """Reject empty routes, overlapping visits and impossible UTC offsets."""
+        if not self.visits:
+            raise ValueError("TimedRoute: at least one link visit is required")
+        if abs(self.utc_offset_s) > 14 * 3600:
+            raise ValueError(f"TimedRoute: utc_offset_s {self.utc_offset_s} out of range")
+        for prev, nxt in zip(self.visits, self.visits[1:], strict=False):
+            if nxt.t_enter < prev.t_exit:
+                raise ValueError(
+                    f"TimedRoute: visit on edge {nxt.edge_id} starts before the previous ends"
+                )
+
+    @property
+    def edge_seq(self) -> tuple[int, ...]:
+        """Link ids in traversal order."""
+        return tuple(v.edge_id for v in self.visits)
+
+    @property
+    def departure_t(self) -> float:
+        """Departure as a Unix-seconds UTC instant."""
+        return self.visits[0].t_enter
+
+    @property
+    def arrival_t(self) -> float:
+        """Arrival as a Unix-seconds UTC instant."""
+        return self.visits[-1].t_exit
+
+    def to_local(self, t: float) -> datetime:
+        """Convert a Unix-seconds instant to an aware datetime in the route's local time."""
+        return datetime.fromtimestamp(t, tz=timezone(timedelta(seconds=self.utc_offset_s)))
 
 
 @dataclass(frozen=True, slots=True)

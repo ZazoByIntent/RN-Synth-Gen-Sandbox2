@@ -136,6 +136,7 @@ entity, DuckDB as the query layer; IDs stay stable across pipeline steps.
 | `MatchedTrajectory` | `traj_id`, `user_id`, `map_id`, `edge_seq` [edge_id], `matched_points` [(x, y, t, offset_m)], `match_score`, `frac_matched` |
 | `ProtectedTrajectory` | `traj_id`, `source_traj_id` (→ `MatchedTrajectory.traj_id`), `mechanism_id`, `params_hash`, `guarantee`, `epsilon`, `payload`, `map_id` |
 | `SyntheticTrajectory` | `syn_id`, `generator_id`, `params_hash`, `payload`, `trained_on_split`, `map_id` |
+| `TimedRoute` / `LinkVisit` | timed synthetic payload: `visits` [(`edge_id`, `t_enter`, `t_exit`, `dwell_s`)] in Unix UTC seconds, stops as `dwell_s`, explicit `utc_offset_s`; Parquet I/O in `datamodel/timed_io.py` |
 | `AttackResult` | `result_id`, `attack_id`, `exp_id`, `target_data_ref`, `predictions`, `scores`, `ground_truth_ref`, `runtime_s` |
 | `MetricValue` | `metric_id`, `result_id`, `name`, `value`, `ci_low`, `ci_high`, `n_bootstrap` |
 | `ExperimentConfig` | `config_hash`, `raw_yaml`, `resolved_yaml`, `schema_version`; run record adds `exp_id`, `map_id`, `dataset_id`, `git_commit`, `seed`, `created_at` |
@@ -187,7 +188,10 @@ Top-level YAML keys: `experiment`, `map`, `dataset`, `cleaning`, `map_matching`,
 `reporting`. List-valued params (e.g. `epsilon: [0.1, 1, 10]`,
 `known_points: [3, 5, 10]`) expand into a grid of runs, each with its own version
 key and seed. Parsed with plain PyYAML + manual validation — no Hydra/OmegaConf.
-Full annotated example: design §8. Entry point: `trajguard run <config>` (argparse,
+`cleaning.split_sessions` (default `false`) cuts each recorded session into trips at
+stops (at least 3 min within 150 m, or a gap of at least 3 min with under 300 m of
+displacement), ids `<traj_id>_trip<k>`, before the split; only when on does it enter
+the pool-cache key. Full annotated example: design §8. Entry point: `trajguard run <config>` (argparse,
 registered under `[project.scripts]`).
 
 A `reidentification` entry configures its attacker with `attacker.known_points` (a list,
