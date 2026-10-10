@@ -30,7 +30,12 @@ from trajguard.attacks.reconstruction import reconstruction_report
 from trajguard.attacks.reidentification import PointTrace, distance_suffix, gallery_suffix
 from trajguard.datamodel import AttackResult, CleanTrajectory, MatchedTrajectory, MetricValue
 from trajguard.datasets.base import DatasetLoader
-from trajguard.datasets.cleaning import CleaningConfig, clean, haversine_m
+from trajguard.datasets.cleaning import (
+    CleaningConfig,
+    clean_trips,
+    haversine_m,
+    session_split_rule,
+)
 from trajguard.datasets.split import split_by_user
 from trajguard.evaluation.metrics import LinkageRate, SampledMetric, TopKAccuracy, evaluate
 from trajguard.evaluation.roc import tpr_at_fpr_measurable
@@ -450,6 +455,11 @@ def load_config(path: str | Path) -> RunConfig:
     exp = _req(raw, "experiment", "")
     ds = _req(raw, "dataset", "")
     cl = _req(raw, "cleaning", "")
+    # Optional session split at stops (P10, docs/NACRT_ULDP_RANGI.md §8 point 4); off
+    # unless a config sets it, so every existing config keeps its pool and results.
+    split_sessions = cl.get("split_sessions", False)
+    if not isinstance(split_sessions, bool):
+        raise ValueError("cleaning.split_sessions: must be true or false")
     sp = _req(raw, "split", "")
     metrics = _req(raw, "metrics", "")
     # The cells representation (docs/NACRT_LDPTRACE_VALIDACIJA.md, D-V.4) walks a public
@@ -564,6 +574,7 @@ def load_config(path: str | Path) -> RunConfig:
             min_points=int(_req(cl, "min_points", "cleaning")),
             min_length_m=float(_req(cl, "min_length_m", "cleaning")),
             resample_s=float(_req(cl, "resample_s", "cleaning")),
+            split_sessions=split_sessions,
         ),
         **matching_fields,
         fractions={str(k): float(v) for k, v in _req(sp, "fractions", "split").items()},
@@ -670,6 +681,16 @@ def _built_map_timestamp(cfg: RunConfig) -> str:
         return ""
 
 
+def _cleaning_key(cfg: RunConfig) -> dict[str, Any]:
+    """Cleaning part of the pool-cache key; the session split enters only when on."""
+    key = asdict(cfg.cleaning)
+    # Off, the key is exactly the pre-P10 dict, so existing pools and config_hash values
+    # stay byte-identical; on, the fixed split rule itself is part of the key.
+    if key.pop("split_sessions"):
+        key["split_sessions"] = session_split_rule()
+    return key
+
+
 def _version_hash(cfg: RunConfig) -> str:
     """Stable hash of the pre-attack pipeline configuration (design §3)."""
     key = {
@@ -682,7 +703,7 @@ def _version_hash(cfg: RunConfig) -> str:
             _built_map_timestamp(cfg),
         ],
         "dataset": [cfg.dataset_id, str(cfg.dataset_path)],
-        "cleaning": asdict(cfg.cleaning),
+        "cleaning": _cleaning_key(cfg),
         "matching": [
             cfg.matcher_id,
             cfg.radius_m,
@@ -894,6 +915,37 @@ def _net_provider(cfg: RunConfig) -> _NetProvider:
     return provide
 
 
+def _labelled_population(cfg: RunConfig) -> list[CleanTrajectory]:
+    """The run's population: load, clean, subsample users, split by user (design §5)."""
+    loader = registry.get("dataset", cfg.dataset_id)(cfg.dataset_path)
+    cleaned: list[CleanTrajectory] = []
+    for raw in loader.iter_trajectories():
+        cleaned.extend(clean_trips(raw, cfg.cleaning))
+    if cfg.max_users is not None:
+        cleaned = _subsample_users(cleaned, cfg.max_users, cfg.split_seed)
+    return split_by_user(cleaned, cfg.fractions, cfg.split_seed)
+
+
+def _split_roster(labelled: Sequence[CleanTrajectory]) -> list[str]:
+    """Sorted user ids the split put in ``train``, read before any map matching (P11)."""
+    return sorted({t.user_id for t in labelled if t.split == "train"})
+
+
+def _train_roster(cfg: RunConfig) -> tuple[str, ...]:
+    """Every training user of the run's split, including users with no matched trip (P11).
+
+    Read from the pool's ``meta.json``, which records the roster since P11; a pool
+    cached before that is not rebuilt (its key and contents stay valid) and the roster
+    is recomputed from the split instead, without map matching.
+    """
+    meta_path = cfg.cache_dir / _version_hash(cfg) / "meta.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        if "train_users" in meta:
+            return tuple(str(u) for u in meta["train_users"])
+    return tuple(_split_roster(_labelled_population(cfg)))
+
+
 def _matched_pool(
     cfg: RunConfig, provide: _NetProvider
 ) -> tuple[list[MatchedTrajectory], dict[str, CleanTrajectory], int, dict[str, int]]:
@@ -904,15 +956,7 @@ def _matched_pool(
         return matched, clean_by_id, meta["dropped"], meta["split_counts"]
 
     net, matcher = provide()
-    loader = registry.get("dataset", cfg.dataset_id)(cfg.dataset_path)
-    cleaned: list[CleanTrajectory] = []
-    for raw in loader.iter_trajectories():
-        c = clean(raw, cfg.cleaning)
-        if c is not None:
-            cleaned.append(c)
-    if cfg.max_users is not None:
-        cleaned = _subsample_users(cleaned, cfg.max_users, cfg.split_seed)
-    labelled = split_by_user(cleaned, cfg.fractions, cfg.split_seed)
+    labelled = _labelled_population(cfg)
     split_counts: dict[str, int] = {}
     for t in labelled:
         split_counts[t.split or "none"] = split_counts.get(t.split or "none", 0) + 1
@@ -921,7 +965,9 @@ def _matched_pool(
     matched_ids = {m.traj_id for m in matched}
     clean_by_id = {t.traj_id: t for t in labelled if t.traj_id in matched_ids}
 
-    _write_pool_cache(cache, matched, clean_by_id, dropped, split_counts)
+    _write_pool_cache(
+        cache, matched, clean_by_id, dropped, split_counts, {"train_users": _split_roster(labelled)}
+    )
     return matched, clean_by_id, dropped, split_counts
 
 
@@ -946,15 +992,7 @@ def _cell_pool(cfg: RunConfig) -> _CellPool:
         meta = json.loads((cache / "meta.json").read_text())
         return chains, clean_by_id, meta["split_counts"]
 
-    loader = registry.get("dataset", cfg.dataset_id)(cfg.dataset_path)
-    cleaned: list[CleanTrajectory] = []
-    for raw in loader.iter_trajectories():
-        c = clean(raw, cfg.cleaning)
-        if c is not None:
-            cleaned.append(c)
-    if cfg.max_users is not None:
-        cleaned = _subsample_users(cleaned, cfg.max_users, cfg.split_seed)
-    labelled = split_by_user(cleaned, cfg.fractions, cfg.split_seed)
+    labelled = _labelled_population(cfg)
     split_counts: dict[str, int] = {}
     for t in labelled:
         split_counts[t.split or "none"] = split_counts.get(t.split or "none", 0) + 1
@@ -972,6 +1010,7 @@ def _cell_pool(cfg: RunConfig) -> _CellPool:
         {
             "dropped": 0,
             "split_counts": split_counts,
+            "train_users": _split_roster(labelled),
             "representation": "cells",
             "grid": {"n_rows": grid.n_rows, "n_cols": grid.n_cols, "bbox": list(grid.bbox)},
         },
@@ -1500,6 +1539,10 @@ def _membership_values(
     arm_facts: dict[str, dict[str, Any]] = {}
     for gspec, make in gen_plans:
         target = make(0)
+        if target.needs_user_roster:
+            # P11: the generator opted in to every training user of the split, so a
+            # user whose trips all failed matching is enrolled too (finding F3).
+            target.set_user_roster(_train_roster(cfg))
         target.fit([_item_view(m, clean_by_id[m.traj_id]) for m in train_m])
         facts = _generator_facts(target)
         if facts:

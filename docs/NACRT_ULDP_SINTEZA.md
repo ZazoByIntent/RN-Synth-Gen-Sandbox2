@@ -507,6 +507,32 @@ red, termine je iz vrstnega reda sej (§8.2) izpeljal pisec tega načrta.
    vstopajo v senčne prilagoditve kot uporabniki z eno potjo ali pod svojim `user_id` in
    ali je število vprašanj fiksirano s konfiguracijo, da imajo tarča in sence enako
    strukturo modela. Po P0, ki prinese dejstva, in pred P5.
+
+   **Dejstva (preverjeno s P0, 10. 10. 2026; test `tests/test_uldp_user_wiring.py`).**
+   Odločitve so že sprejete (F3 in P11: `fit` dobi vse učne uporabnike, uporabnik brez
+   ujete poti pošlje javno privzeto vrednost, n se šteje iz učnega dela, kandidati MIA
+   vstopijo v senčne prilagoditve pod svojim `user_id`, število vprašanj fiksira
+   konfiguracija); spodaj je, kako ogrodje deluje danes, preden to izvedeta P5 in P11.
+   - Tarčni `fit` dobi en pogled na vsako ujeto učno pot, vsak z izpolnjenim `user_id` in
+     `split == "train"`, v obeh predstavitvah (segmenti in celice): pogled ovije čisto
+     pot (`experiments/orchestrator.py:647–651`, klic `:1503`), `user_id` pa se bere iz
+     nje (`representation/views.py:123`). Združevanje pogledov po `user_id` da natanko
+     učne uporabnike fiksture.
+   - Poti brez uspešnega ujemanja (pod `min_match_score`) v `fit` ne pridejo:
+     `clean_by_id` obdrži le ujete poti (`orchestrator.py:921–922`), bazen MIA pa bere le
+     njih (`:1437–1440`). Uporabnik, ki mu ne uspe nobena pot, danes ne pošlje ničesar
+     (F3 drži). Pri celicah se nič ne izpusti. Poti, ki jih zavrže čiščenje
+     (`:911`), ne dobijo niti oznake delitve.
+   - Senčne prilagoditve LiRA dobijo gola zaporedja (`attacks/membership.py:141`,
+     `:189–191`): vsak kandidat, član ali nečlan, vstopi kot anonimno zaporedje z eno
+     potjo, brez `user_id`, `traj_id` in oznake delitve. Če bi pogledi kandidatov nosili
+     čisto pot, bi varovalo v `fit` (na primer `synthesis/markov.py:55`) zavrnilo nečlane
+     z oznako `test`; P5 mora `user_id` zato prenesti brez te oznake.
+   - n danes šteje poti, ne uporabnikov: noben generator ne bere `user_id` (v
+     `synthesis/` ga ni nikjer), `ldptrace` šteje `n = len(seqs)` (`ldptrace.py:257`), in
+     `split_counts` v `run.json` šteje poti po delih (`orchestrator.py:918`). Število
+     učnih uporabnikov po P11 je treba šteti iz delitve (`datasets/split.py:14`), ne iz
+     ujetih poti.
 4. **Časovno občutljiv napad MIA:** časovni model je največja nova zasebna izdaja in ga
    noben napad ne preizkusi; če da, se doda P8 (napor M). Pred prvimi meritvami modulov,
    da je nabor napadov fiksen vnaprej.
