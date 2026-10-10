@@ -138,3 +138,4 @@ in mi poročaj po SKUPNO §9, v slovenščini, brez nepojasnjenih kratic.
 - 2026-10-10 · ODLOČITEV SEJE · P2: referenca so ujete poti testnih uporabnikov; interval dobička vzorči le uporabnike, raztros med semeni ostane `repeat`; dobiček še ni v `results.csv`, ker roki priorja in orakla prideta v P3
 - 2026-10-10 · blok B · PR #61 · recenzija 1: fix first (manjkata JSD celic in W1 dolžine; dolžina referenc iz GPS namesto iz omrežja) · popravek zelen · 7 datotek · pytest 584 passed
 - 2026-10-10 · ODLOČITEV SEJE · P2: obe strani se opišeta iz zaporedja povezav (dolžina, cone, celice iz omrežja), trajanje in odhod iz točk GPS; mreža celic je obstoječa `metrics.utility_grid` čez `map.bbox`
+- 2026-10-10 · blok B · PR #61 · recenzija 2: merge (pytest 584 passed, `config/` nespremenjen) · opombi za blok C: generator se za metrike prilagodi dvakrat (ponovna uporaba prilagojenega cilja); `rnldp_eval` še računa svoje metrike (»premik« je le dodatek)
