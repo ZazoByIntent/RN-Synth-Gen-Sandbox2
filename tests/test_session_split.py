@@ -24,6 +24,8 @@ M_PER_DEG_LON = 111_320.0 * 0.76668  # cos(39.9 deg)
 # Version hash of the fixed-path config below as computed before P10 existed: the option
 # off must leave it, and so every cached pool and config_hash, byte-identical.
 PRE_P10_HASH = "abe8b341d8bfb1ca"
+# Same config with the option on under split-rule version 1 (pieces could all be dropped).
+SPLIT_RULE_V1_HASH = "ef599963ec02f22e"
 
 
 def _move(x0_m: float, t0: float, n: int, step_m: float = 50.0) -> list[tuple[float, float, float]]:
@@ -79,6 +81,18 @@ def test_short_stop_and_no_stop_keep_session_whole() -> None:
     assert clean_trips(moving, ON) == [clean(moving, OFF)]
 
 
+def test_session_whose_pieces_all_fail_is_kept_whole() -> None:
+    first = _move(0.0, 0.0, 8)  # 350 m, 8 points: below min_points on its own
+    stop_x = first[-1][1] - 116.30
+    dwell = _dwell(stop_x * M_PER_DEG_LON, first[-1][2] + 5.0, 48)  # 4-minute stop
+    second = _move(stop_x * M_PER_DEG_LON + 50.0, dwell[-1][2] + 5.0, 8)
+    raw = _raw(first + dwell + second)
+    whole = clean(raw, OFF)
+    assert whole is not None
+    assert len(find_cuts(whole.points)) >= 1
+    assert clean_trips(raw, ON) == [whole]
+
+
 def test_gap_rule_cuts_only_short_displacement() -> None:
     first = _move(0.0, 0.0, 30)
     x_end = (first[-1][1] - 116.30) * M_PER_DEG_LON
@@ -111,6 +125,7 @@ def test_version_hash_unchanged_off_and_changed_on(tmp_path: Path) -> None:
     on = load_config(write_config(tmp_path, cfg))
     assert on.cleaning.split_sessions is True
     assert _version_hash(on) != PRE_P10_HASH
+    assert _version_hash(on) != SPLIT_RULE_V1_HASH
 
 
 def test_split_sessions_must_be_boolean(tmp_path: Path) -> None:

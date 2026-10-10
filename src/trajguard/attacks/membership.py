@@ -4,7 +4,7 @@ import math
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import numpy as np
 
@@ -13,6 +13,7 @@ from trajguard.datamodel import AttackResult
 from trajguard.evaluation.roc import roc_auc, tpr_at_fpr, tpr_at_fpr_measurable
 from trajguard.experiments.registry import register
 from trajguard.representation import TrajectoryView
+from trajguard.synthesis.base import SyntheticGenerator
 from trajguard.synthesis.markov import MarkovGenerator
 
 EdgeSeq = tuple[int, ...]
@@ -91,15 +92,20 @@ class MembershipInferenceAttack(Attack):
         """Score membership of candidate indices against the real generator ``target``.
 
         ``target`` is the real fitted generator (exposes ``sequence_log_prob``).
-        ``aux`` is ``(shadow_pool, candidates)`` where ``shadow_pool`` is a sequence of
-        edge sequences and ``candidates`` a sequence of ``(pool_index, is_member)``.
+        ``aux`` is ``(shadow_pool, candidates)`` or ``(shadow_pool, candidates,
+        pool_users)``, where ``shadow_pool`` is a sequence of edge sequences,
+        ``candidates`` a sequence of ``(pool_index, is_member)`` and ``pool_users`` the
+        owning user_id of every pool entry (needed only by user-level shadows, P5).
         The orchestrator stamps ``exp_id``/``target_data_ref`` onto the result.
         """
         started = time.perf_counter()
-        shadow_pool, candidates = aux
+        shadow_pool, candidates, *rest = aux
+        pool_users: list[str] | None = [str(u) for u in rest[0]] if rest else None
         pool: list[EdgeSeq] = [tuple(s) for s in shadow_pool]
+        if pool_users is not None and len(pool_users) != len(pool):
+            raise ValueError("pool_users must give one user_id per shadow-pool entry")
         rng = np.random.default_rng(self._seed)
-        shadows, shadow_members = self._train_shadows(pool, rng)
+        shadows, shadow_members = self._train_shadows(pool, rng, pool_users)
 
         preds: list[MembershipScore] = []
         for idx, is_member in candidates:
@@ -129,16 +135,32 @@ class MembershipInferenceAttack(Attack):
         )
 
     def _train_shadows(
-        self, pool: list[EdgeSeq], rng: np.random.Generator
+        self, pool: list[EdgeSeq], rng: np.random.Generator, pool_users: list[str] | None = None
     ) -> tuple[list[ShadowGenerator], list[set[int]]]:
-        """Fit ``n_shadow`` generators, each on a random subset; record the indices each saw."""
+        """Fit ``n_shadow`` generators, each on a random subset; record the indices each saw.
+
+        A shadow that opts in to the user roster (``needs_user_roster``, ULDP P5) gets
+        every sequence under its owner's user_id (no split label) and, as its roster,
+        the users of its subset; every other shadow gets bare sequences, as always.
+        """
         k = max(1, round(self.subsample * len(pool)))
         shadows: list[ShadowGenerator] = []
         members: list[set[int]] = []
         for shadow_idx in range(self.n_shadow):
             idx = {int(i) for i in rng.choice(len(pool), size=k, replace=False)}
             gen = self._shadow_factory(shadow_idx)
-            gen.fit([_seq_view(pool[i]) for i in sorted(idx)])
+            chosen = sorted(idx)
+            if getattr(gen, "needs_user_roster", False):
+                if pool_users is None:
+                    raise ValueError(
+                        f"shadow generator {type(gen).__name__} needs the user roster; pass "
+                        "the owning user_id of every shadow-pool entry in aux"
+                    )
+                roster = sorted({pool_users[i] for i in chosen})
+                cast(SyntheticGenerator, gen).set_user_roster(roster)
+                gen.fit([_seq_view(pool[i], pool_users[i]) for i in chosen])
+            else:
+                gen.fit([_seq_view(pool[i]) for i in chosen])
             shadows.append(gen)
             members.append(idx)
         return shadows, members
@@ -186,6 +208,6 @@ def _log_normal_pdf(x: float, mu: float, sd: float) -> float:
     return -0.5 * math.log(2.0 * math.pi * sd * sd) - (x - mu) ** 2 / (2.0 * sd * sd)
 
 
-def _seq_view(seq: EdgeSeq) -> TrajectoryView:
-    """Wrap a bare integer sequence in a sequence-only view so a generator can fit on it."""
-    return TrajectoryView(sequence=tuple(seq))
+def _seq_view(seq: EdgeSeq, user_id: str | None = None) -> TrajectoryView:
+    """Wrap a bare integer sequence (optionally with its owner) in a sequence-only view."""
+    return TrajectoryView(sequence=tuple(seq), user_id=user_id)

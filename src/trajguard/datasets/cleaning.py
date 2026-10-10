@@ -24,6 +24,10 @@ STOP_RADIUS_M = 150.0
 STOP_MIN_DURATION_S = 180.0
 GAP_MIN_DURATION_S = 180.0
 GAP_MAX_DISPLACEMENT_M = 300.0
+# Version of the split rule as a whole, folded into the pool-cache key with the option
+# on. Version 2: a session that passes cleaning but whose every piece fails the minimum
+# checks is kept whole, so a user's participation never hinges on their stop structure.
+SESSION_SPLIT_RULE_VERSION = 2
 
 _Point = tuple[float, float, float]
 
@@ -51,6 +55,7 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def session_split_rule() -> dict[str, float]:
     """The fixed session-split thresholds, as folded into the pool-cache key."""
     return {
+        "rule_version": float(SESSION_SPLIT_RULE_VERSION),
         "stop_radius_m": STOP_RADIUS_M,
         "stop_min_duration_s": STOP_MIN_DURATION_S,
         "gap_min_duration_s": GAP_MIN_DURATION_S,
@@ -177,8 +182,10 @@ def clean_trips(raw: RawTrajectory, cfg: CleaningConfig) -> list[CleanTrajectory
     output is exactly today's. With it on, a session without a cut is returned whole
     under its own id; otherwise each piece is re-checked against ``min_points`` and
     ``min_length_m`` and kept as ``<traj_id>_trip<k>`` (``k`` the piece's position in
-    the session) with the same ``user_id``. A rejected session yields no trip, since
-    every piece has at most its points and its length.
+    the session) with the same ``user_id``. If no piece survives those checks, the
+    cleaned session is returned whole under its own id, so a session that passes
+    cleaning always yields at least one trip and the user's presence in the population
+    does not depend on their private stop structure. A rejected session yields no trip.
     """
     whole = clean(raw, cfg)
     if whole is None:
@@ -194,4 +201,4 @@ def clean_trips(raw: RawTrajectory, cfg: CleaningConfig) -> list[CleanTrajectory
         trip = _trajectory(f"{raw.traj_id}_trip{k}", raw.user_id, piece, flags, cfg)
         if trip is not None:
             trips.append(trip)
-    return trips
+    return trips or [whole]

@@ -99,7 +99,12 @@ def test_user_without_matched_trip_stays_in_roster(
 
     run(cfg_path)
 
-    assert len(rosters) == 1  # the target only; shadow fits are a later unit (P5)
+    n_shadow = dict(load_config(cfg_path).attacks[0].mia_params).get("n_shadow", 16)
+    assert len(rosters) == 1 + n_shadow  # the target, then every LiRA shadow (P5)
+    for shadow_roster, shadow_fit in zip(rosters[1:], fits[1:], strict=True):
+        # Candidates enter under their own user_id, with no split label to trip guards.
+        assert {v.user_id for v in shadow_fit} == set(shadow_roster)
+        assert all(v.split is None and v.clean is None for v in shadow_fit)
     roster = rosters[0]
     assert list(roster) == train_users  # from the split, not from matching
     assert roster.count(lost) == 1
