@@ -313,10 +313,26 @@ def grr_channel(k: int, epsilon: float) -> np.ndarray:
 
 
 def pearson_statistic(counts: np.ndarray, probs: np.ndarray) -> np.ndarray:
-    """Pearson chi-square of count rows against expected shares ``probs`` (last axis)."""
+    """Pearson chi-square of count rows against expected shares ``probs`` (last axis).
+
+    Bins with zero null share are left out of the sum: a row with no count there gets
+    the statistic of the remaining bins, a row with any count there is impossible under
+    the null and gets +inf (a certain rejection). Below HM's epsilon* the two middle C1
+    gate bins are such bins, since Duchi's mechanism only outputs +-bound.
+    """
     counts = np.asarray(counts, dtype=np.float64)
+    probs = np.asarray(probs, dtype=np.float64)
+    if np.isnan(counts).any() or np.isnan(probs).any() or (probs < 0).any():
+        raise ValueError("gate counts and null shares must be non-negative numbers")
+    support = probs > 0
     expected = counts.sum(axis=-1, keepdims=True) * probs
-    stat: np.ndarray = ((counts - expected) ** 2 / expected).sum(axis=-1)
+    safe = np.where(support, expected, 1.0)
+    terms = np.where(support, (counts - expected) ** 2 / safe, 0.0)
+    stat: np.ndarray = terms.sum(axis=-1)
+    impossible = (np.where(support, 0.0, counts) > 0).any(axis=-1)
+    stat = np.where(impossible, np.inf, stat)
+    if np.isnan(stat).any():
+        raise ValueError("Pearson gate statistic is NaN")
     return stat
 
 
@@ -350,6 +366,9 @@ def grouped_gate_test(
             continue
         stat += float(pearson_statistic(c, probs))
         null_stats += pearson_statistic(rng.multinomial(n, probs, size=draws), probs)
+    # A NaN must never compare False and turn into a silent p-value; +inf is a rejection.
+    if math.isnan(stat) or np.isnan(null_stats).any():
+        raise ValueError("gate statistic is NaN")
     exceed = int((null_stats >= stat - 1e-12).sum())
     return stat, (1.0 + exceed) / (1.0 + draws)
 

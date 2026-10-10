@@ -54,6 +54,8 @@ from trajguard.synthesis.uldp_synth import (
     composite_layout,
     cost_band,
     em_mixture_weights,
+    gate_test,
+    grouped_gate_test,
     grr_channel,
     grr_frequencies,
     grr_noise_cov,
@@ -61,6 +63,7 @@ from trajguard.synthesis.uldp_synth import (
     hm_bound,
     hm_perturb,
     kl_furness,
+    pearson_statistic,
     pm_density,
     question_count,
     solve_decay,
@@ -863,3 +866,42 @@ def test_length_dest_weights_survive_an_origin_without_destinations() -> None:
     assert not sample.dest_weights(1, 0.01).any()  # with decay the massive node is unreachable
     assert list(sample.hosting()) == [1]
     assert sample.mean(0.0) == pytest.approx(0.5) and sample.mean(0.01) == 0.0
+
+
+# === Gate below HM's epsilon*: zero-expected C1 bins ===========================================
+
+
+def test_pearson_statistic_skips_zero_expected_bins_and_rejects_counts_in_them() -> None:
+    probs = np.array([0.5, 0.0, 0.0, 0.5])
+    counts = np.array([[6, 0, 0, 4], [5, 0, 0, 5], [5, 1, 0, 4]])
+    stat = pearson_statistic(counts, probs)
+    assert stat[0] == pytest.approx(0.4) and stat[1] == 0.0  # (1 + 1) / 5 over the support
+    assert stat[2] == np.inf  # a count where the null puts no mass is impossible under it
+    assert float(pearson_statistic(counts[0, [0, 3]], probs[[0, 3]])) == stat[0]  # same as dropping
+    assert gate_test(counts[2], probs, draws=200)[1] == pytest.approx(1 / 201)
+    assert gate_test(counts[1], probs, draws=200)[1] == 1.0
+    with pytest.raises(ValueError, match="non-negative"):
+        pearson_statistic(counts, np.array([0.5, np.nan, 0.0, 0.5]))
+    with pytest.raises(ValueError, match="non-negative"):
+        grouped_gate_test([counts[0]], [np.array([0.5, np.nan, 0.0, 0.5])], draws=10)
+
+
+@pytest.mark.parametrize("eps", [0.5, 0.3])
+def test_c1_gate_below_epsilon_star_keeps_prior_on_prior_reports(
+    fixture_network: RoadNetwork, eps: float
+) -> None:
+    """Below 0.61 HM is Duchi alone; the middle gate bins are empty, not a forced rejection."""
+    gen = UldpSynthGenerator(fixture_network, epsilon=eps, **C1_FAST)  # type: ignore[arg-type]
+    pub = gen.public_params()
+    assert pub.speed_null[1:3].sum() == 0.0 and pub.length_null[1:3].sum() == 0.0
+    rng = np.random.default_rng(23)
+    rejections = 0
+    for _ in range(20):
+        reports = [
+            *_hm_reports([pub.default_moment(0, rng) for _ in range(150)], 0, eps, rng),
+            *_hm_reports([pub.default_moment(1, rng) for _ in range(150)], 1, eps, rng),
+        ]
+        fit = c1_server_fit(reports, pub)
+        assert math.isfinite(fit.gate_statistic) and fit.gate_p_value > 1 / (1 + 2000)
+        rejections += fit.gate_rejected
+    assert rejections <= 4  # alpha = 0.05 expects 1 in 20; P(Binomial(20, 0.05) >= 5) < 0.003
