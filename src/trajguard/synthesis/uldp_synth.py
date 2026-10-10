@@ -5,6 +5,11 @@ module. Implemented so far: **C3, the regime vote** (§4.3, ``module: c3``), **C
 origin-destination shares** (§4.4, ``module: c2``) and **C1, the behavioural moments**
 (§4.5, ``module: c1``), plus **the composite arm** (§4.2, ``module: all``).
 
+Every module's phone answers from ONE usable trip drawn uniformly among the user's
+trips (finding F2, a closed decision), not from all of the user's trips as plan §4.3-§4.5
+describe: the report then has the law of a single trip, so the server's channels (C3's
+confusion matrix, C2's and C1's prior predictions) need no public law of trips per user.
+
 The composite, in one pass:
 
 - **Public side.** A public draw (the generator's seed over the sorted roster, never the
@@ -29,7 +34,7 @@ C1, in one pass (Boltzmann-walk variant of §4.5; it runs on its own, finding F6
   predictive distributions come from a public Monte Carlo (prior trips per regime; the
   band origins with their exact destination shares).
 - **Phone.** For the publicly drawn question the phone draws ONE usable trip uniformly
-  (timed and on the map for speed, on the map for length), computes the moment and sends
+  (finding F2; timed and on the map for speed, on the map for length), computes the moment and sends
   it by the hybrid mechanism HM (Wang et al., ICDE 2019) with the whole user-level
   epsilon. A user without a usable trip draws the moment from the prior predictive.
 - **Server.** The report mean is unbiased per question. The gate (finding F7) bins the
@@ -51,18 +56,26 @@ C2, in one pass:
   utility metric; the prior's uniform-day shares).
 - **Phone.** The public question slot (:data:`C2_QUESTION_GROUPS`, drawn by
   ``collect_reports``) names the question. The phone draws ONE usable trip uniformly
-  (on the map and timed), computes its answer and sends it by k-ary GRR (k = 81, 6 or
+  (finding F2; on the map and timed), computes its answer and sends it by k-ary GRR (k = 81, 6 or
   5; finding F5: GRR, not OLH) with the whole user-level epsilon. A user without a
   usable trip draws the answer from the prior's shares (the public default).
 - **Server.** Exact GRR debiasing per question. The gate (finding F7) sums the Pearson
   statistics of the three report histograms against the prior's predicted ones (exact
   for OD and period, up to the public Monte Carlo of the band shares) with the C3
-  Monte Carlo p-value and level. Only on rejection are the debiased OD and period
-  frequencies projected onto the simplex (Euclidean, :func:`project_to_simplex`; the OD
-  table on the cells the map can host) and set as ``SimParams.od_shares`` and
-  ``departure_shares``. The band shares are recorded only: with the full OD cell
-  reported, the plan's three-way scaling over rows, columns and bands collapses onto
-  the OD table, and the simulator has no band parameter.
+  Monte Carlo p-value and level. Only on rejection does the server solve plan §4.4's
+  estimator, T = argmin KL(T || Q) + 1/2 ||A T - t||^2 weighted by V^-1
+  (:func:`kl_furness`): T and the gravity prior Q are tables over (OD cell, cost band)
+  (:func:`gravity_band_given_od`), A maps T to its OD-cell and band marginals, t are the
+  debiased frequencies and V their exact GRR noise covariance (:func:`grr_noise_cov`,
+  at the prior's report shares). It is solved by Furness sweeps (iterative proportional
+  scaling), one exact block per reported marginal. The OD-cell block scales rows and
+  columns at once, because the full OD cell is reported (finding F5), so the plan's
+  three-way scaling over rows, columns and bands runs as a two-way scaling over OD cells
+  and bands. The band reports thus tilt the OD table; T's OD marginal becomes
+  ``SimParams.od_shares``, and T's band marginal is recorded (the simulator has no band
+  parameter, so the within-cell band tilt cannot reach it). The departure periods, an
+  independent factor of the prior, get the same estimator with one block and become
+  ``SimParams.departure_shares``.
 
 C3, in one pass:
 
@@ -71,8 +84,9 @@ C3, in one pass:
   its public prior weights (uniform, plan §4.3), the same one ``uldp_prior`` and
   ``uldp_oracle`` use, so a C3 arm whose gate keeps the prior IS the prior arm; a public
   time model (log-normal around each regime's jitter-free route time, spread
-  :func:`time_log_sigma`) and the **confusion matrix** M, M[i, j] = expected posterior of
-  regime j for a trip the public simulator draws under regime i. M is simulated once on
+  :func:`time_log_sigma`, the phone's observation model) and the **confusion matrix** M,
+  M[i, j] = expected posterior of regime j for a trip the public prior
+  (``prior_params()``, jitter-free times) draws under regime i. M is simulated once on
   the public graph with a public seed (never from training trips, §6.3) and cached per map.
 - **Phone.** Among the user's usable trips (edges known on the map, positive duration)
   the phone draws ONE uniformly (finding F2, so M needs no law of trips per user),
@@ -85,10 +99,12 @@ C3, in one pass:
   nothing. Only the GRR output is in the report.
 - **Server.** Exact GRR debiasing gives the label frequencies. The gate (finding F7)
   compares the raw report histogram with the histogram the prior predicts through M and
-  GRR (exact under the null: under the prior every user's label, trip or not, follows
-  M^T pi0) with a pre-registered Pearson chi-square test whose p-value is a seeded Monte
-  Carlo over the exact null multinomial (:data:`GATE_DRAWS`, :data:`GATE_ALPHA`). Only
-  when it rejects are the regime weights refitted, by maximum likelihood (EM) of the
+  GRR. The null is the prior arm's own output: if every trip is drawn by exactly
+  ``prior_params()`` (the ``uldp_prior`` arm), every user's label, trip or not, follows
+  M^T pi0 (up to the public Monte Carlo of M). The test is a pre-registered Pearson
+  chi-square whose p-value is a seeded Monte Carlo over the exact null multinomial
+  (:data:`GATE_DRAWS`, :data:`GATE_ALPHA`). Only when it rejects are the regime weights
+  refitted, by maximum likelihood (EM) of the
   report counts under the composed channel M times GRR; otherwise the prior weights stay.
   The fitted weights become ``SimParams.regime_weights`` for synthesis and scoring.
 """
@@ -238,9 +254,11 @@ def confusion_matrix(
 ) -> np.ndarray:
     """M[i, j]: mean posterior of regime j over public trips simulated under regime i.
 
-    Each regime simulates trips under the public prior with log-normal trip jitter
-    ``sigma`` (the phone's time model), so M describes exactly the labelling rule the
-    phones apply. Cached process-wide per map key, catalogue, prior, spread and seed.
+    Each regime's trips are drawn by exactly the public prior (``prior_params()`` with
+    that one regime: jitter-free times), so the gate's null M^T pi0 is the label law of
+    the prior arm's own output. ``sigma`` enters only the phone's posterior (its
+    observation model), so M describes exactly the labelling rule the phones apply to
+    such trips. Cached process-wide per map key, catalogue, prior, spread and seed.
     """
     key = (
         sim.graph.key,
@@ -257,7 +275,7 @@ def confusion_matrix(
     children = np.random.SeedSequence(seed).spawn(len(regimes))
     rows = []
     for regime, child in zip(regimes, children, strict=True):
-        params = SimParams(regimes=(regime,), trip_jitter_sigma=sigma)
+        params = replace(prior_params(), regimes=(regime,), regime_weights=(1.0,))
         routes = sim.simulate(params, n_per_regime, np.random.default_rng(child))
         post = [
             regime_posterior(
@@ -295,10 +313,26 @@ def grr_channel(k: int, epsilon: float) -> np.ndarray:
 
 
 def pearson_statistic(counts: np.ndarray, probs: np.ndarray) -> np.ndarray:
-    """Pearson chi-square of count rows against expected shares ``probs`` (last axis)."""
+    """Pearson chi-square of count rows against expected shares ``probs`` (last axis).
+
+    Bins with zero null share are left out of the sum: a row with no count there gets
+    the statistic of the remaining bins, a row with any count there is impossible under
+    the null and gets +inf (a certain rejection). Below HM's epsilon* the two middle C1
+    gate bins are such bins, since Duchi's mechanism only outputs +-bound.
+    """
     counts = np.asarray(counts, dtype=np.float64)
+    probs = np.asarray(probs, dtype=np.float64)
+    if np.isnan(counts).any() or np.isnan(probs).any() or (probs < 0).any():
+        raise ValueError("gate counts and null shares must be non-negative numbers")
+    support = probs > 0
     expected = counts.sum(axis=-1, keepdims=True) * probs
-    stat: np.ndarray = ((counts - expected) ** 2 / expected).sum(axis=-1)
+    safe = np.where(support, expected, 1.0)
+    terms = np.where(support, (counts - expected) ** 2 / safe, 0.0)
+    stat: np.ndarray = terms.sum(axis=-1)
+    impossible = (np.where(support, 0.0, counts) > 0).any(axis=-1)
+    stat = np.where(impossible, np.inf, stat)
+    if np.isnan(stat).any():
+        raise ValueError("Pearson gate statistic is NaN")
     return stat
 
 
@@ -332,6 +366,9 @@ def grouped_gate_test(
             continue
         stat += float(pearson_statistic(c, probs))
         null_stats += pearson_statistic(rng.multinomial(n, probs, size=draws), probs)
+    # A NaN must never compare False and turn into a silent p-value; +inf is a rejection.
+    if math.isnan(stat) or np.isnan(null_stats).any():
+        raise ValueError("gate statistic is NaN")
     exceed = int((null_stats >= stat - 1e-12).sum())
     return stat, (1.0 + exceed) / (1.0 + draws)
 
@@ -508,22 +545,146 @@ def gravity_band_shares(
     return out
 
 
-def project_to_simplex(v: np.ndarray, support: np.ndarray | None = None) -> np.ndarray:
-    """Euclidean projection of ``v`` onto the probability simplex on ``support`` (zero elsewhere).
+_BAND_GIVEN_OD: dict[tuple[Any, ...], np.ndarray] = {}
 
-    The sort-and-threshold algorithm (Held, Wolfe and Crowder 1974; Duchi et al., ICML
-    2008): w_i = max(v_i - theta, 0) with theta chosen so that the w_i sum to one.
+
+def gravity_band_given_od(
+    sim: PublicSimulator, n_origins: int = BAND_ORIGINS, seed: int = BAND_SEED
+) -> np.ndarray:
+    """Prior band shares within every OD cell: row c is P(cost band | OD cell c), (Z^2, bands).
+
+    The public Monte Carlo of :func:`gravity_band_shares` (same origins, same seed), with
+    every origin's destinations split by zone as well as by band. SESSION DECISION: an OD
+    cell no drawn origin reaches gets the overall band shares of the same Monte Carlo
+    (the conservative fill: it adds no structure the sample did not see). Times the exact
+    OD shares this is the gravity prior Q of plan §4.4. Cached per map key, size and seed.
     """
-    v = np.asarray(v, dtype=np.float64)
-    mask = np.ones(len(v), dtype=bool) if support is None else np.asarray(support, dtype=bool)
-    x = v[mask]
-    u = np.sort(x)[::-1]
-    css = np.cumsum(u) - 1.0
-    ind = np.arange(1, len(u) + 1)
-    rho = int(ind[u - css / ind > 0][-1])
-    theta = css[rho - 1] / rho
-    out = np.zeros(len(v))
-    out[mask] = np.maximum(x - theta, 0.0)
+    key = (sim.graph.key, PUBLIC_SIM_VERSION, COST_BAND_EDGES_S, n_origins, seed)
+    hit = _BAND_GIVEN_OD.get(key)
+    if hit is not None:
+        return hit
+    g = sim.graph
+    n_z = g.n_zones
+    router = sim.router(FREE_FLOW)
+    origins = np.random.default_rng(seed).choice(
+        len(g.mass), size=n_origins, p=g.mass / g.mass.sum()
+    )
+    acc = np.zeros(n_z * n_z * N_COST_BANDS)
+    for o in origins:
+        w = g.mass.copy()
+        w[o] = 0.0
+        bands = np.searchsorted(COST_BAND_EDGES_S, router.frm(int(o)), side="right")
+        cell = int(g.zone[o]) * n_z + g.zone
+        acc += np.bincount(cell * N_COST_BANDS + bands, w / w.sum(), minlength=acc.size)
+    table = acc.reshape(n_z * n_z, N_COST_BANDS)
+    rows = table.sum(axis=1, keepdims=True)
+    overall = table.sum(axis=0) / table.sum()
+    out: np.ndarray = np.where(rows > 0, table / np.where(rows > 0, rows, 1.0), overall)
+    _BAND_GIVEN_OD[key] = out
+    return out
+
+
+def grr_noise_cov(report_shares: np.ndarray, n: int, epsilon: float) -> np.ndarray:
+    """Exact covariance of the GRR-debiased frequencies of n reports with these report shares.
+
+    The counts are multinomial, so Cov = (diag(rho) - rho rho^T) / (n (p - q)^2); it is
+    singular along the all-ones direction, along which the frequencies always sum to one.
+    """
+    rho = np.asarray(report_shares, dtype=np.float64)
+    p, q = grr_probabilities(len(rho), epsilon)
+    cov: np.ndarray = (np.diag(rho) - np.outer(rho, rho)) / (n * (p - q) ** 2)
+    return cov
+
+
+#: Stopping rules of :func:`kl_furness` (structural, not tuned): the largest change of a
+#: scaling exponent over one sweep, and the largest gradient entry of a block solve.
+FURNESS_TOL = 1e-9
+FURNESS_MAX_SWEEPS = 1_000
+NEWTON_TOL = 1e-12
+NEWTON_MAX_ITER = 200
+
+
+def _logsumexp(x: np.ndarray) -> float:
+    top = float(np.max(x))
+    return top + math.log(float(np.exp(x - top).sum()))
+
+
+def _block_solve(
+    log_base: np.ndarray, target: np.ndarray, cov: np.ndarray, lam: np.ndarray
+) -> np.ndarray:
+    """One block's exact scaling exponents (Newton with backtracking, warm start ``lam``).
+
+    Maximises the block's dual -logsumexp(log_base - lam) - lam . target - lam.cov.lam / 2,
+    whose stationarity condition is m(lam) = target + cov lam: the block marginal m of the
+    scaled table equals the reported frequencies up to the noise allowance cov lam.
+    """
+
+    def value(x: np.ndarray) -> float:
+        return -_logsumexp(log_base - x) - float(x @ target) - 0.5 * float(x @ cov @ x)
+
+    k = len(target)
+    pin = np.full((k, k), 1.0 / k)  # fixes the flat all-ones direction of the dual
+    f = value(lam)
+    for _ in range(NEWTON_MAX_ITER):
+        m = np.exp(log_base - lam - _logsumexp(log_base - lam))
+        grad = m - target - cov @ lam
+        if np.abs(grad).max() < NEWTON_TOL:
+            break
+        step = np.linalg.solve(np.diag(m) - np.outer(m, m) + cov + pin, grad)
+        t, improved = 1.0, False
+        while t > 1e-12:
+            new = lam + t * step
+            f_new = value(new)
+            if f_new >= f:
+                lam, f, improved = new, f_new, True
+                break
+            t *= 0.5
+        if not improved:
+            break  # no ascent left at machine precision
+    return lam
+
+
+def kl_furness(
+    prior: np.ndarray, blocks: Sequence[tuple[np.ndarray, np.ndarray, np.ndarray]]
+) -> np.ndarray:
+    """T = argmin KL(T || Q) + 1/2 sum_b ||A_b T - t_b||^2 weighted by V_b^-1 (plan §4.4).
+
+    ``prior`` is Q over cells (>= 0, summing to one). Each block is (category of every
+    cell, reported frequencies t_b, their noise covariance V_b); A_b T sums T per
+    category. The minimiser has the Furness form T ~ Q x prod_b exp(-lam_b[category]),
+    so it is found by Furness sweeps (iterative proportional scaling): each block in
+    turn rescales its categories, exactly solving its own condition
+    A_b T = t_b + V_b lam_b with the other blocks' factors held. With V_b -> 0 this is
+    classical Furness / IPF onto the reported marginals; a finite V_b stops short of
+    them by the reports' noise. Cells where Q is zero stay zero.
+    """
+    q = np.asarray(prior, dtype=np.float64)
+    with np.errstate(divide="ignore"):
+        log_q = np.log(q)
+    cats = [np.asarray(c, dtype=np.int64) for c, _, _ in blocks]
+    lams = [np.zeros(len(t)) for _, t, _ in blocks]
+    for _ in range(FURNESS_MAX_SWEEPS):
+        moved = 0.0
+        for b, (_, target, cov) in enumerate(blocks):
+            rest = log_q.copy()
+            for o in range(len(blocks)):
+                if o != b:
+                    rest -= lams[o][cats[o]]
+            top = float(rest[np.isfinite(rest)].max())
+            base = np.bincount(cats[b], np.exp(rest - top), minlength=len(target))
+            with np.errstate(divide="ignore"):
+                log_base = np.log(base) + top
+            new = _block_solve(
+                log_base, np.asarray(target, np.float64), np.asarray(cov, np.float64), lams[b]
+            )
+            moved = max(moved, float(np.abs(new - lams[b]).max()))
+            lams[b] = new
+        if moved < FURNESS_TOL:
+            break
+    log_t = log_q.copy()
+    for lam, c in zip(lams, cats, strict=True):
+        log_t -= lam[c]
+    out: np.ndarray = np.exp(log_t - _logsumexp(log_t))
     return out
 
 
@@ -536,6 +697,9 @@ class C2Public:
     od_prior: np.ndarray
     band_prior: np.ndarray
     period_prior: np.ndarray
+    #: The gravity prior Q over (OD cell, cost band), shape (Z^2, bands); its OD marginal
+    #: is exactly ``od_prior`` (:func:`gravity_band_given_od`).
+    od_band_prior: np.ndarray
     gate_draws: int = GATE_DRAWS
 
     @property
@@ -564,7 +728,8 @@ class C2Fit:
     """Server output of C2: per-group counts and debiased shares, gate, fitted shares.
 
     Groups are (od, band, period); a group without reports has empty frequencies.
-    ``band_shares`` are recorded only: no simulator parameter takes them.
+    ``band_shares`` is the band marginal of the fitted (OD cell, band) table, recorded
+    only: the band reports reach the simulator through the OD shares they tilt.
     """
 
     counts: tuple[tuple[int, ...], ...]
@@ -602,6 +767,11 @@ def c2_category(sim: PublicSimulator, group: int, edge_seq: Sequence[int], t0: f
     return sim.departure_period(t0)
 
 
+def _c2_range(public: C2Public, question: int) -> tuple[float, float]:
+    """Answer range of a C2 question slot: category indices 0 to k - 1 of its group."""
+    return 0.0, float(public.k(C2_QUESTION_GROUPS[question]) - 1)
+
+
 def c2_encode(
     user_views: Sequence[TrajectoryView], public: C2Public, question: int, rng: np.random.Generator
 ) -> int:
@@ -618,7 +788,7 @@ def c2_encode(
 
 
 def c2_server_fit(reports: Sequence[UserReport], public: C2Public) -> C2Fit:
-    """Server side of C2: debias, gate against the prior, project the shares only on rejection."""
+    """Server side of C2: debias, gate against the prior, KL-Furness fit only on rejection."""
     answers: list[list[int]] = [[] for _ in C2_GROUP_NAMES]
     for r in reports:
         group = C2_QUESTION_GROUPS[r.question]
@@ -635,12 +805,23 @@ def c2_server_fit(reports: Sequence[UserReport], public: C2Public) -> C2Fit:
     period = tuple(float(x) for x in public.period_prior)
     band = tuple(float(x) for x in public.band_prior)
     if rejected:
-        if len(freqs[0]):
-            od = tuple(float(x) for x in project_to_simplex(freqs[0], public.od_support))
-        if len(freqs[1]):
-            band = tuple(float(x) for x in project_to_simplex(freqs[1]))
+        q = public.od_band_prior
+        cells = np.arange(q.size)
+        cats = (cells // N_COST_BANDS, cells % N_COST_BANDS)  # OD cell, cost band
+        blocks = [
+            (cats[g], freqs[g], grr_noise_cov(nulls[g], int(counts[g].sum()), public.epsilon))
+            for g in (0, 1)
+            if len(freqs[g])
+        ]
+        if blocks:
+            table = kl_furness(q.ravel(), blocks).reshape(q.shape)
+            od = tuple(float(x) for x in table.sum(axis=1))
+            band = tuple(float(x) for x in table.sum(axis=0))
         if len(freqs[2]):
-            period = tuple(float(x) for x in project_to_simplex(freqs[2]))
+            cov = grr_noise_cov(nulls[2], int(counts[2].sum()), public.epsilon)
+            idx = np.arange(len(public.period_prior))
+            fitted = kl_furness(public.period_prior, [(idx, freqs[2], cov)])
+            period = tuple(float(x) for x in fitted)
     return C2Fit(
         counts=tuple(tuple(int(x) for x in c) for c in counts),
         frequencies=tuple(tuple(float(x) for x in f) for f in freqs),
@@ -741,28 +922,43 @@ def c1_bin(y: float, epsilon: float) -> int:
     return min(max(idx, 0), C1_BINS - 1)
 
 
-def hm_bin_probs(x: np.ndarray, epsilon: float) -> np.ndarray:
-    """Exact P(report in gate bin | input x) under HM, one row per input value."""
+def pm_density(epsilon: float) -> tuple[float, float]:
+    """PM's output density inside and outside the input's high-probability window [l, r].
+
+    Wang et al., ICDE 2019, Alg. 2: the window [l, r] has width C - 1 and the output
+    lands in it with probability exp(eps/2) / (exp(eps/2) + 1); their ratio is exp(eps).
+    """
+    a = math.exp(epsilon / 2.0)
+    dens_in = (math.exp(epsilon) - a) / (2.0 * a + 2.0)
+    return dens_in, dens_in / math.exp(epsilon)
+
+
+def hm_bin_probs(x: np.ndarray, epsilon: float, edges: np.ndarray | None = None) -> np.ndarray:
+    """Exact P(report in bin | input x) under HM, one row per input value.
+
+    The bins are the public gate bins (:func:`c1_edges`) unless ``edges`` (increasing,
+    spanning [-hm_bound, hm_bound]) are given; the last bin is closed.
+    """
     xc = np.asarray(x, dtype=np.float64)[:, None]
-    edges = c1_edges(epsilon)
+    edges = c1_edges(epsilon) if edges is None else np.asarray(edges, dtype=np.float64)
+    n_bins = len(edges) - 1
     left, right = edges[:-1][None, :], edges[1:][None, :]
-    out = np.zeros((xc.shape[0], C1_BINS))
+    out = np.zeros((xc.shape[0], n_bins))
     beta = hm_pm_share(epsilon)
     if beta > 0:
         c = pm_bound(epsilon)
         lo = (c + 1.0) / 2.0 * xc - (c - 1.0) / 2.0
         hi = lo + c - 1.0
-        a = math.exp(epsilon / 2.0)
-        dens_in = (math.exp(epsilon) - a) / (2.0 * a + 2.0)
-        dens_out = dens_in / math.exp(epsilon)
+        dens_in, dens_out = pm_density(epsilon)
         inside = np.maximum(np.minimum(right, hi) - np.maximum(left, lo), 0.0)
         total = np.maximum(np.minimum(right, c) - np.maximum(left, -c), 0.0)
         out += beta * (dens_in * inside + dens_out * (total - inside))
     d = duchi_bound(epsilon)
     e = math.exp(epsilon)
     p_plus = 0.5 + xc[:, 0] * (e - 1.0) / (2.0 * (e + 1.0))
-    out[:, c1_bin(d, epsilon)] += (1.0 - beta) * p_plus
-    out[:, c1_bin(-d, epsilon)] += (1.0 - beta) * (1.0 - p_plus)
+    for y, share in ((d, p_plus), (-d, 1.0 - p_plus)):
+        idx = min(max(int(np.searchsorted(edges, y, side="right")) - 1, 0), n_bins - 1)
+        out[:, idx] += (1.0 - beta) * share
     return out
 
 
@@ -809,26 +1005,42 @@ class LengthSample:
     mass: np.ndarray
 
     def dest_weights(self, i: int, decay: float) -> np.ndarray:
-        """Destination shares from origin i under the gravity model with this decay."""
+        """Destination shares from origin i under the gravity model with this decay.
+
+        All zeros when origin i has no destination of positive weight (no other node
+        with mass, or with decay none reachable): such an origin hosts no trip.
+        """
         w = self.mass.copy()
         w[int(self.origins[i])] = 0.0
         if decay > 0:
             c = self.costs[i].astype(np.float64)
-            shift = float(c[np.isfinite(c) & (w > 0)].min())
+            reachable = np.isfinite(c) & (w > 0)
+            if not reachable.any():
+                return np.zeros(len(w))
+            shift = float(c[reachable].min())
             w = w * np.exp(-decay * (c - shift))  # unreachable (inf) -> 0
-        out: np.ndarray = w / w.sum()
+        total = float(w.sum())
+        if not total > 0:
+            return np.zeros(len(w))
+        out: np.ndarray = w / total
+        return out
+
+    def hosting(self) -> np.ndarray:
+        """Indices of the origins with another node of positive mass (they host a trip)."""
+        out: np.ndarray = np.flatnonzero(self.mass.sum() - self.mass[self.origins] > 0)
         return out
 
     def mean(self, decay: float) -> float:
-        """Expected length moment under the gravity model with this decay."""
-        return float(
-            np.mean(
-                [
-                    self.dest_weights(i, decay) @ self.moments[i].astype(np.float64)
-                    for i in range(len(self.origins))
-                ]
-            )
-        )
+        """Expected length moment under the gravity model with this decay.
+
+        The average runs over the origins that host a trip; 0 (the frame's centre) if none.
+        """
+        values = []
+        for i in range(len(self.origins)):
+            w = self.dest_weights(i, decay)
+            if w.any():
+                values.append(float(w @ self.moments[i].astype(np.float64)))
+        return float(np.mean(values)) if values else 0.0
 
 
 _C1_SAMPLES: dict[tuple[Any, ...], tuple[tuple[SpeedSample, ...], LengthSample]] = {}
@@ -897,7 +1109,8 @@ class C1Public:
             r = int(rng.choice(len(self.speed), p=np.asarray(self.regime_weights)))
             prior = self.speed[r].moments(1.0)
             return float(prior[int(rng.integers(len(prior)))])
-        i = int(rng.integers(len(self.length.origins)))
+        hosts = self.length.hosting()
+        i = int(hosts[int(rng.integers(len(hosts)))])
         w = self.length.dest_weights(i, 0.0)
         return float(self.length.moments[i, int(rng.choice(len(w), p=w))])
 
@@ -919,8 +1132,8 @@ def c1_public(
         speed_null += w * hm_bin_probs(s.moments(1.0), epsilon).mean(axis=0)
     length_null = np.mean(
         [
-            length.dest_weights(i, 0.0) @ hm_bin_probs(length.moments[i], epsilon)
-            for i in range(len(length.origins))
+            length.dest_weights(int(i), 0.0) @ hm_bin_probs(length.moments[i], epsilon)
+            for i in length.hosting()
         ],
         axis=0,
     )
@@ -1047,7 +1260,7 @@ COMPOSITE_MODULES = ("c1", "c2", "c3")
 REPORT_INFO_PER_QUESTION = 16.0
 #: Order in which a module's questions are kept as n·ε² grows. C1: speed, then length.
 #: C2: OD cell, then departure period, then cost band (SESSION DECISION: the band shares
-#: are recorded only, no simulator parameter takes them, so they go last).
+#: reach the simulator only indirectly, by tilting the OD shares, so they go last).
 C1_PRIORITY = (0, 1)
 C2_PRIORITY = (0, 2, 1)
 
@@ -1294,12 +1507,14 @@ class UldpSynthGenerator(UldpGenerator):
 
     def _c2_public(self) -> C2Public:
         prior = self.prior_sim_params()
+        od = gravity_od_shares(self.sim, prior)
         return C2Public(
             self.sim,
             self.epsilon,
-            gravity_od_shares(self.sim, prior),
+            od,
             gravity_band_shares(self.sim, self.band_origins),
             np.asarray(prior.departure_shares, dtype=np.float64),
+            od[:, None] * gravity_band_given_od(self.sim, self.band_origins),
             self.gate_draws,
         )
 
@@ -1322,20 +1537,33 @@ class UldpSynthGenerator(UldpGenerator):
     def report_space(self, public: Any) -> ReportSpace:
         """C3: one label; C2: four slots (OD cell, OD cell, band, period); C1: two moments.
 
-        The composite's questions are its public slots, each owned by one module.
+        The composite's questions are its public slots, each owned by one module. Every
+        question has its own range: a C1 answer lies within the HM output bound, a C2 or
+        C3 answer is a category index in [0, k - 1] for that question's k.
         """
         if isinstance(public, CompositePublic):
             b = hm_bound(public.epsilon)
-            high = max(public.c2.k(g) for g in range(len(C2_GROUP_NAMES))) - 1
+            ranges = tuple(
+                (-b, b)
+                if m == "c1"
+                else _c2_range(public.c2, local)
+                if m == "c2"
+                else (0.0, float(public.c3.k - 1))
+                for m, local in public.slots
+            )
             owner = tuple(COMPOSITE_MODULES.index(m) for m, _ in public.slots)
-            return ReportSpace(COMPOSITE_MODULES, len(public.slots), 1, -b, float(high), owner)
+            high = max(hi for _, hi in ranges)
+            return ReportSpace(COMPOSITE_MODULES, len(public.slots), 1, -b, high, owner, ranges)
         if isinstance(public, C1Public):
             b = hm_bound(public.epsilon)
-            return ReportSpace(("c1",), len(C1_QUESTIONS), 1, -b, b)
+            ranges = tuple((-b, b) for _ in C1_QUESTIONS)
+            return ReportSpace(("c1",), len(C1_QUESTIONS), 1, -b, b, None, ranges)
         if isinstance(public, C2Public):
-            high = max(public.k(g) for g in range(len(C2_GROUP_NAMES))) - 1
-            return ReportSpace(("c2",), len(C2_QUESTION_GROUPS), 1, 0.0, float(high))
-        return ReportSpace((self.module,), 1, 1, 0.0, float(public.k - 1))
+            ranges = tuple(_c2_range(public, q) for q in range(len(C2_QUESTION_GROUPS)))
+            high = max(hi for _, hi in ranges)
+            return ReportSpace(("c2",), len(C2_QUESTION_GROUPS), 1, 0.0, high, None, ranges)
+        k1 = float(public.k - 1)
+        return ReportSpace((self.module,), 1, 1, 0.0, k1, None, ((0.0, k1),))
 
     @staticmethod
     def encode_user(

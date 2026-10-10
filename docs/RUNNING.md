@@ -16,7 +16,8 @@ baselines) · §8
 `trajguard report` · §9 RN-LDP-Synth evidence sweep ·
 §9.1 LDPTrace validation inputs (Porto conversion) · §9.2 membership inference in the
 cells representation (Porto) · §9.3 LDPTrace validation run (reference vs port) · §9.4
-PrivTrace validation run (reference vs port) · §10 caching · §11 troubleshooting.
+PrivTrace validation run (reference vs port) · §9.5 ULDP parameter-recovery simulation ·
+§10 caching · §11 troubleshooting.
 
 ## 0. One-time setup
 
@@ -1221,6 +1222,49 @@ of, the paper-faithful port on every metric; at ε ≥ 1 nothing changed there, 
 reaches the cap at those budgets. Timings: the port's 15 runs take 8.3 minutes, the masked ones
 8.4, scoring the reference's 15 syntheses 5.2 minutes, and the reference's own 15 runs
 33 minutes. Output stays out of git (`results/privtrace_validation/`).
+
+## 9.5 ULDP parameter-recovery simulation (P6; Beijing map, hours)
+
+```sh
+# PowerShell: $env:PYTHONHASHSEED = "0"; then run detached
+uv run python -m trajguard.experiments.uldp_recovery --out results/uldp_recovery --workers 2
+```
+
+Checks whether the `uldp_synth` mechanism finds parameters it is known to face
+(docs/NACRT_ULDP_SINTEZA.md §5.5). Synthetic users are drawn by the public road-network
+simulator on the prebuilt Beijing map (`maps/beijing`, §2.1) under **planted** true
+parameters that differ from the public prior (fixed constants at the top of
+`experiments/uldp_recovery.py`, never read from Geolife): regime weights for C3, an
+origin-destination table with doubled same-zone trips and peak-heavy departure periods
+for C2, speed level 0.7 and a distance decay of one per 30 minutes for C1, and all of
+these at once for the composite `all`. Every user's single report goes through the
+production phone and server code (`collect_reports`, `fit_from_reports`).
+
+**Default grid:** modules c3, c2, c1, all; ε ∈ {0.5, 2, 8}; n = 10, 25, 91, 300, 1000,
+3000, 10 000 users; 20 seeded repetitions. Smaller rosters are the first n users of
+the same simulated population.
+
+**Expected outcome:** progress lines `[  1234 s] task k/80`, then a table for the
+largest n, and three files under `--out`: `recovery_runs.csv` (one row per module, ε,
+n, repetition and parameter), `recovery_summary.csv` (gate rejection rate with a 95 %
+Wilson interval; error against the truth, shift away from the prior and the share of
+the prior-truth gap closed, each as a mean and a 2.5-97.5 % range over repetitions; the
+prior's own error as the reference) and `run.json` (grid, truth, prior, wall time).
+Errors are the L1 distance for shares and the absolute difference for scalars (log
+speed level; decay per hour). The composite's decay is not scored: its truth carries
+an origin-destination table, under which the simulator ignores the decay.
+
+**Runtime:** about 0.3 s per simulated user and module on one core, so the full grid
+is roughly 60–70 core-hours (about a day with three workers); each worker needs about
+1 GB of memory. The reduced grid `--ns 10 25 91 300 --reps 12 --workers 3` took 21
+minutes (10 Oct 2026). Flags: `--modules`,
+`--epsilons`, `--ns`, `--reps`, `--seed`, `--workers`, and the map flags `--region`,
+`--map-dir`, `--bbox`, `--crs` (as in §9). `--gate-draws`, `--confusion-trips`,
+`--band-origins` and `--moment-trips` lower the public Monte Carlo sizes for tests only.
+
+**Troubleshooting:** `refusing to overwrite` means the `--out` directory already holds
+results; choose a new one. `no built map at maps/beijing` means §2.1 was not run.
+Output stays out of git (`results/`).
 
 ## 10. How caching works (read before re-running with changed data)
 

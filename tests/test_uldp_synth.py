@@ -32,11 +32,13 @@ from trajguard.synthesis.uldp_arms import (
     simulator_params_hash,
 )
 from trajguard.synthesis.uldp_base import (
+    ReportSpace,
     UserReport,
     canary_log_ratio,
     log_prob_unchanged_under_view_swap,
     params_unchanged_under_view_swap,
     randomiser_log_ratio,
+    validate_report,
 )
 from trajguard.synthesis.uldp_synth import (
     C1_BINS,
@@ -45,18 +47,24 @@ from trajguard.synthesis.uldp_synth import (
     GATE_ALPHA,
     N_COST_BANDS,
     C3Public,
+    LengthSample,
     UldpSynthGenerator,
     c1_bin,
     c1_server_fit,
     composite_layout,
     cost_band,
     em_mixture_weights,
+    gate_test,
+    grouped_gate_test,
     grr_channel,
     grr_frequencies,
+    grr_noise_cov,
     hm_bin_probs,
     hm_bound,
     hm_perturb,
-    project_to_simplex,
+    kl_furness,
+    pearson_statistic,
+    pm_density,
     question_count,
     solve_decay,
     solve_speed_level,
@@ -311,12 +319,45 @@ def _cell_trips(sim: PublicSimulator, n: int, seed: int) -> tuple[int, list[tupl
     return top, [in_top[i % len(in_top)] for i in range(n)]
 
 
-def test_project_to_simplex_is_the_euclidean_projection() -> None:
-    assert project_to_simplex(np.array([0.5, 0.8, -0.2])) == pytest.approx([0.35, 0.65, 0.0])
-    on = project_to_simplex(np.array([0.9, 0.9, 0.3]), np.array([True, False, True]))
-    assert on == pytest.approx([0.8, 0.0, 0.2])
-    p = np.array([0.2, 0.3, 0.5])
-    assert project_to_simplex(p) == pytest.approx(p)  # points on the simplex stay
+def test_kl_furness_is_ipf_in_the_noise_free_limit_and_shrinks_to_the_prior() -> None:
+    q = np.array([0.1, 0.2, 0.3, 0.4])  # 2 x 2 table, row-major
+    rows, cols = np.arange(4) // 2, np.arange(4) % 2
+    flat = np.array([[0.25, -0.25], [-0.25, 0.25]])  # diag(rho) - rho rho^T at rho = 1/2
+    t_rows, t_cols = np.array([0.5, 0.5]), np.array([0.6, 0.4])
+
+    def fit(scale: float) -> np.ndarray:
+        return kl_furness(q, [(rows, t_rows, scale * flat), (cols, t_cols, scale * flat)])
+
+    hard = fit(1e-12).reshape(2, 2)  # V -> 0: classical Furness / IPF onto the marginals
+    assert hard.sum(axis=1) == pytest.approx(t_rows) and hard.sum(axis=0) == pytest.approx(t_cols)
+    odds = hard[0, 0] * hard[1, 1] / (hard[0, 1] * hard[1, 0])
+    assert odds == pytest.approx(0.1 * 0.4 / (0.2 * 0.3))  # Furness form: Q times factors
+    noisy = fit(1e3).reshape(2, 2)  # very noisy reports barely move the prior
+    assert np.abs(noisy.ravel() - q).max() < 1e-3
+    middle = fit(0.05).reshape(2, 2).sum(axis=0)  # in between: part of the way
+    assert 0.4 < middle[0] < 0.6
+    own = [(rows, np.array([0.3, 0.7]), flat), (cols, np.array([0.4, 0.6]), flat)]
+    assert kl_furness(q, own) == pytest.approx(q)  # reports equal to Q's marginals keep Q
+    # A cell Q rules out stays empty, even against a debiased (negative) report.
+    q0 = np.array([0.5, 0.0, 0.25, 0.25])
+    out = kl_furness(q0, [(cols, np.array([-0.2, 1.2]), 1e-3 * flat)])
+    assert out[1] == 0.0 and out.sum() == pytest.approx(1.0) and out.min() >= 0
+
+
+def test_c2_band_reports_tilt_the_od_table_through_the_scaling(gen2: UldpSynthGenerator) -> None:
+    pub = gen2.public_params()
+    od_cells, bands = pub.od_band_prior.shape
+    assert pub.od_band_prior.sum(axis=1) == pytest.approx(pub.od_prior)  # Q's OD marginal
+    # A toy prior where cell 0 holds the short trips: band reports alone move the OD table.
+    q = np.zeros((od_cells, bands))
+    q[0, 0], q[1, 1] = 0.5, 0.5
+    cells = np.arange(q.size)
+    target = np.zeros(bands)
+    target[0] = 0.9
+    target[1] = 0.1
+    cov = grr_noise_cov(np.full(bands, 1.0 / bands), 300, pub.epsilon)
+    table = kl_furness(q.ravel(), [(cells % bands, target, cov)]).reshape(q.shape)
+    assert table.sum(axis=1)[0] > 0.6 > 0.4 > table.sum(axis=1)[1]
 
 
 def test_gravity_od_shares_match_simulated_prior_trips(gen2: UldpSynthGenerator) -> None:
@@ -365,7 +406,7 @@ def test_c2_gate_rejects_a_clearly_different_od_table(gen2: UldpSynthGenerator) 
     assert fit.gate_rejected and fit.gate_p_value < 1e-3
     od = np.asarray(fit.od_shares)
     assert od.sum() == pytest.approx(1.0) and od.min() >= 0 and int(od.argmax()) == cell
-    assert not od[~pub.od_support].any()  # projected on the cells the map can host
+    assert not od[~pub.od_support].any()  # zero on the cells the map cannot host
     assert fit.departure_shares == prior_params().departure_shares  # no period reports
     with pytest.raises(ValueError, match="category index"):
         UldpSynthGenerator.server_fit(_c2_reports({3: [5]}, pub.epsilon), pub)
@@ -747,3 +788,120 @@ def test_composite_rule_n_fixes_the_questions_across_roster_sizes(
     assert asked[None, 20][0] != asked[None, 50][0]  # without rule_n the roster decides
     with pytest.raises(ValueError, match="rule_n"):
         UldpSynthGenerator(fixture_network, epsilon=2.0, rule_n=0)
+
+
+# === Review notes E0: gate null, report ranges, HM ratio bound, empty destinations ============
+
+
+def test_c3_gate_rarely_rejects_trips_of_the_prior_arm_itself(
+    fixture_network: RoadNetwork,
+) -> None:
+    """Type-I rate: M is simulated under exactly prior_params(), the uldp_prior arm's law."""
+    prior = UldpPriorGenerator(fixture_network)
+    prior.fit([])
+    n_users, reps = 60, 20
+    roster = [f"u{u}" for u in range(n_users)]
+    rejections = 0
+    for rep in range(reps):
+        trips = [t.payload for t in prior.generate(n_users, seed=100 + rep)]
+        train = [
+            _view(f"u{u}", 0, r.edge_seq, r.visits[-1].t_exit - r.visits[0].t_enter)
+            for u, r in enumerate(trips)
+        ]
+        gen = UldpSynthGenerator(fixture_network, epsilon=2.0, seed=rep, **FAST)  # type: ignore[arg-type]
+        gen.set_user_roster(roster)
+        gen.fit(train)
+        rejections += gen.fitted.gate_rejected
+    assert rejections <= 4  # alpha = 0.05 expects 1 in 20; P(Binomial(20, 0.05) >= 5) < 0.003
+
+
+def test_report_space_bounds_every_question_by_its_own_range(
+    fixture_network: RoadNetwork,
+) -> None:
+    gen = _make_all(fixture_network, epsilon=1.0, seed=0)
+    gen.set_user_roster([f"u{u}" for u in range(30)])
+    pub = gen.public_params()
+    space = gen.report_space(pub)
+    b = hm_bound(1.0)
+    assert space.high == 80.0 and b < 50.0  # the old shared range let 50 through on C1
+    for q, (module, local) in enumerate(pub.slots):
+        k = {"c1": None, "c2": pub.c2.k(C2_QUESTION_GROUPS[local]), "c3": 3}[module]
+        lo, hi = (-b, b) if k is None else (0.0, float(k - 1))
+        assert space.answer_range(q) == (lo, hi)
+        validate_report(UserReport(module, q, (hi,), 1.0), space)
+        for bad in (hi + 1.0, lo - 1.0):
+            with pytest.raises(ValueError, match="outside"):
+                validate_report(UserReport(module, q, (bad,), 1.0), space)
+    c2 = UldpSynthGenerator(fixture_network, epsilon=1.0, **C2_FAST)  # type: ignore[arg-type]
+    c2_space = c2.report_space(c2.public_params())
+    assert [c2_space.answer_range(q)[1] for q in range(4)] == [80.0, 80.0, 5.0, 4.0]
+    with pytest.raises(ValueError, match="entries"):
+        ReportSpace(("x",), 2, 1, 0.0, 1.0, None, ((0.0, 1.0),))
+
+
+@pytest.mark.parametrize("eps", [0.3, 1.0, 2.0, 8.0])
+def test_hm_output_probabilities_obey_the_epsilon_ratio_bound(eps: float) -> None:
+    dens_in, dens_out = pm_density(eps)
+    c = (math.exp(eps / 2) + 1) / (math.exp(eps / 2) - 1)
+    assert dens_in / dens_out == pytest.approx(math.exp(eps))  # PM density ratio
+    assert dens_in * (c - 1) + dens_out * (c + 1) == pytest.approx(1.0)  # PM integrates to one
+    edges = np.linspace(-hm_bound(eps), hm_bound(eps), 401)  # a fine partition of the output
+    probs = hm_bin_probs(np.linspace(-1.0, 1.0, 41), eps, edges)
+    assert np.allclose(probs.sum(axis=1), 1.0)
+    positive = probs > 0
+    assert (positive == positive[0]).all()  # every input reaches the same bins
+    cols = probs[:, positive[0]]
+    ratio = cols.max(axis=0) / cols.min(axis=0)  # worst pair of inputs, per bin
+    assert ratio.max() <= math.exp(eps) * (1 + 1e-9)
+
+
+def test_length_dest_weights_survive_an_origin_without_destinations() -> None:
+    mass = np.array([1.0, 0.0, 0.0])
+    costs = np.array([[0.0, np.inf, np.inf], [np.inf, 0.0, 30.0]], dtype=np.float32)
+    moments = np.array([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]], dtype=np.float32)
+    sample = LengthSample(np.array([0, 1]), costs, moments, mass)
+    for decay in (0.0, 0.01):
+        assert not sample.dest_weights(0, decay).any()  # the only massive node is the origin
+    assert sample.dest_weights(1, 0.0) == pytest.approx([1.0, 0.0, 0.0])
+    assert not sample.dest_weights(1, 0.01).any()  # with decay the massive node is unreachable
+    assert list(sample.hosting()) == [1]
+    assert sample.mean(0.0) == pytest.approx(0.5) and sample.mean(0.01) == 0.0
+
+
+# === Gate below HM's epsilon*: zero-expected C1 bins ===========================================
+
+
+def test_pearson_statistic_skips_zero_expected_bins_and_rejects_counts_in_them() -> None:
+    probs = np.array([0.5, 0.0, 0.0, 0.5])
+    counts = np.array([[6, 0, 0, 4], [5, 0, 0, 5], [5, 1, 0, 4]])
+    stat = pearson_statistic(counts, probs)
+    assert stat[0] == pytest.approx(0.4) and stat[1] == 0.0  # (1 + 1) / 5 over the support
+    assert stat[2] == np.inf  # a count where the null puts no mass is impossible under it
+    assert float(pearson_statistic(counts[0, [0, 3]], probs[[0, 3]])) == stat[0]  # same as dropping
+    assert gate_test(counts[2], probs, draws=200)[1] == pytest.approx(1 / 201)
+    assert gate_test(counts[1], probs, draws=200)[1] == 1.0
+    with pytest.raises(ValueError, match="non-negative"):
+        pearson_statistic(counts, np.array([0.5, np.nan, 0.0, 0.5]))
+    with pytest.raises(ValueError, match="non-negative"):
+        grouped_gate_test([counts[0]], [np.array([0.5, np.nan, 0.0, 0.5])], draws=10)
+
+
+@pytest.mark.parametrize("eps", [0.5, 0.3])
+def test_c1_gate_below_epsilon_star_keeps_prior_on_prior_reports(
+    fixture_network: RoadNetwork, eps: float
+) -> None:
+    """Below 0.61 HM is Duchi alone; the middle gate bins are empty, not a forced rejection."""
+    gen = UldpSynthGenerator(fixture_network, epsilon=eps, **C1_FAST)  # type: ignore[arg-type]
+    pub = gen.public_params()
+    assert pub.speed_null[1:3].sum() == 0.0 and pub.length_null[1:3].sum() == 0.0
+    rng = np.random.default_rng(23)
+    rejections = 0
+    for _ in range(20):
+        reports = [
+            *_hm_reports([pub.default_moment(0, rng) for _ in range(150)], 0, eps, rng),
+            *_hm_reports([pub.default_moment(1, rng) for _ in range(150)], 1, eps, rng),
+        ]
+        fit = c1_server_fit(reports, pub)
+        assert math.isfinite(fit.gate_statistic) and fit.gate_p_value > 1 / (1 + 2000)
+        rejections += fit.gate_rejected
+    assert rejections <= 4  # alpha = 0.05 expects 1 in 20; P(Binomial(20, 0.05) >= 5) < 0.003

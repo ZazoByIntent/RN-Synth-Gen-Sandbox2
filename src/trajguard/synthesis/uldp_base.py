@@ -76,7 +76,11 @@ class UserReport:
 
 @dataclass(frozen=True, slots=True)
 class ReportSpace:
-    """The public shape every report must have: modules, questions, answer length and range."""
+    """The public shape every report must have: modules, questions, answer length and range.
+
+    ``low`` and ``high`` bound every answer value; ``question_ranges``, when set, gives
+    each question its own (low, high), which must lie within them.
+    """
 
     modules: tuple[str, ...]
     n_questions: int
@@ -86,6 +90,27 @@ class ReportSpace:
     #: Module index (into ``modules``) of every question, for a mechanism that splits the
     #: roster between modules; None when every user may get any question.
     question_module: tuple[int, ...] | None = None
+    #: Answer range (low, high) of every question; None when all share [low, high].
+    question_ranges: tuple[tuple[float, float], ...] | None = None
+
+    def __post_init__(self) -> None:
+        """Reject per-question ranges of the wrong count or outside [low, high]."""
+        if self.question_ranges is None:
+            return
+        if len(self.question_ranges) != self.n_questions:
+            raise ValueError(
+                f"question_ranges has {len(self.question_ranges)} entries, "
+                f"there are {self.n_questions} questions"
+            )
+        for lo, hi in self.question_ranges:
+            if not self.low <= lo <= hi <= self.high:
+                raise ValueError(f"question range [{lo}, {hi}] outside [{self.low}, {self.high}]")
+
+    def answer_range(self, question: int) -> tuple[float, float]:
+        """The (low, high) every answer value to ``question`` must lie in."""
+        if self.question_ranges is None:
+            return self.low, self.high
+        return self.question_ranges[question]
 
 
 def split_sizes(n_users: int, n_parts: int) -> tuple[int, ...]:
@@ -111,9 +136,12 @@ def validate_report(report: UserReport, space: ReportSpace) -> None:
         raise ValueError(
             f"report answer has {len(report.answer)} values, the public size is {space.answer_len}"
         )
+    low, high = space.answer_range(report.question)
     for x in report.answer:
-        if not (math.isfinite(x) and space.low <= x <= space.high):
-            raise ValueError(f"report answer value {x} outside [{space.low}, {space.high}]")
+        if not (math.isfinite(x) and low <= x <= high):
+            raise ValueError(
+                f"report answer value {x} to question {report.question} outside [{low}, {high}]"
+            )
 
 
 class UldpGenerator(SyntheticGenerator):
