@@ -49,6 +49,17 @@ doctoral project. This file is the constitution for the repo; read it every sess
   (split Geolife sessions into trips at stops, P10; every training user sends exactly one
   report, P11), and it also needs a new metric (travel-time W1 within each departure
   period, P12). Plan, candidate bank K1–K8 and session plan: `docs/NACRT_ULDP_RANGI.md`.
+- Ideation round 3 closed on 9 Oct 2026: the third user-level pure-LDP mechanism is
+  within-trip segment-time contrasts (T3), in which each phone compares, inside one trip, its
+  speed relative to the public road-network simulator on 100 m mid-block windows lined with
+  shops against plain windows of the same trip, sends one coarse class (slower, same,
+  faster, no usable pair) by randomized response, and the server estimates one frontage
+  slowdown factor for the per-segment times and router costs of synthetic routes. Nothing of
+  it is implemented; it shares P0–P6 and P10–P12 (P8 optional) and needs four new
+  prerequisites (an OSM semantic layer, P13; a window and pair rule, P14; a pre-registered
+  one-hour public check on the simulator, P15, which decides whether T3 is built or the
+  round-3 pick falls back to T1 with T4's relation question, K-α; a segment-speed metric,
+  P16). Plan, candidate bank T1–T6 and session plan: `docs/NACRT_ULDP_ODSEKI.md`.
 
 Whoever changes the project state updates these lines in the same PR. The history of
 PRs, merge commits and result interpretation lives only in `docs/HANDOFF.md`, never
@@ -97,6 +108,14 @@ question (a section, not the file). For a typical coding task this file plus
   design (§10). **Read only the section for the step you are implementing, or when the
   user mentions rank calibration, twins, a candidate K1–K8, a prerequisite P10–P12, or a
   finding F1–F9.**
+- `docs/NACRT_ULDP_ODSEKI.md` (Slovenian) — the plan for the third user-level LDP
+  mechanism, within-trip segment-time contrasts on a public street-frontage layer (T3): the
+  bank of six round-3 candidates T1–T6 with novelty verdicts and return conditions, the
+  chosen design, the pre-registered public check with its fallback rule, what Geolife can
+  show, open decisions, prerequisites (four new ones, P13–P16) and the session plan.
+  **Read only the section for the step you are implementing, or when the user mentions
+  segment-time contrasts, street frontage, mid-block windows, a candidate T1–T6, a
+  combination K-α or K-β, a prerequisite P13–P16, or a round-3 raw idea R3-A.1 to R3-E.4.**
 - `docs/REZULTATI_SHEMA.md` (Slovenian) — the `results.csv` column schema and its
   consumers. **Read only when touching `results.csv` columns or
   `reporting/results_schema.py`, `results_io.py`, `report.py`, `plots.py`, or
