@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from trajguard.datamodel import MetricValue
+from trajguard.evaluation.timed_utility import TIMED_UTILITY_METRICS
 from trajguard.experiments.repeat import REPETITIONS_COLUMNS
 from trajguard.reporting.results_schema import (
     LEGACY_RESULTS_COLUMNS,
@@ -59,6 +60,14 @@ def test_repetitions_columns_are_documented_and_lead_with_provenance() -> None:
     doc = DOC.read_text()
     missing = [c for c in REPETITIONS_COLUMNS if f"`{c}`" not in doc]
     assert not missing, f"columns not documented in {DOC.name}: {missing}"
+
+
+def test_timed_utility_metric_names_are_documented() -> None:
+    """Each timed synthetic utility metric (ULDP P2 + P12) has its own row in the doc table."""
+    doc = DOC.read_text(encoding="utf-8")
+    rows = {line.split("|")[1].strip() for line in doc.splitlines() if line.startswith("| `")}
+    missing = [m for m in TIMED_UTILITY_METRICS if f"`{m}`" not in rows]
+    assert not missing, f"timed utility metrics not documented in {DOC.name}: {missing}"
 
 
 def test_write_results_csv_follows_column_order(tmp_path: Path) -> None:

@@ -99,6 +99,59 @@ Ti stolpci se ob implementaciji polnijo iz strukturiranih specifikacij (`AttackS
 | `ci_low`, `ci_high` | število/prazno | bootstrap interval **znotraj zagona**; prazno pri metrikah na zveznih ocenah (`auc`, `tpr@…`) — tam interval čez semena daje `repetitions.csv` |
 | `n_bootstrap` | celo/prazno | število bootstrap vzorcev; prazno, kjer bootstrapa ni |
 
+### Časovne metrike uporabnosti sintetičnih rok (ULDP P2 + P12)
+
+Od 10. oktobra 2026 orkestrator za roke `synthetic_generators` izračuna še časovne
+metrike uporabnosti (`src/trajguard/evaluation/timed_utility.py`,
+`TIMED_UTILITY_METRICS`). **Novih stolpcev ni**: vsaka metrika je ena vrstica z
+`family = utility`, `scope = synthetic`, `target_ref = synthetic:<roka>`,
+`result_id = utility:synthetic:<roka>`, `n_pool` = število sintetičnih poti in intervalom
+v `ci_low`/`ci_high`/`n_bootstrap`. Vklopi jih ključ `metrics.timed_utility: true`
+(privzeto izklopljen, zato obstoječe konfiguracije in njihove vrstice ostanejo enake), in
+to le pri zemljevidu s segmenti in regiji z znanim lokalnim časom (zdaj `beijing`, UTC+8).
+Vrstice dobi le generator, katerega izhod nosi čase (payload `TimedRoute`); roka brez
+časov nima vrstic, v `run.json` pa ima pod `arms["synthetic:<roka>"]["timed_utility"]`
+zapisano, da je bila preskočena (sicer števila sintetičnih poti ter referenčnih poti in
+uporabnikov).
+
+Referenca so ujete poti **zadržanih testnih uporabnikov**; vsak uporabnik šteje enako
+(njegove poti si delijo njegovo utež), vsaka sintetična pot pa enako. Generator se
+prilagodi na učnem delu kot pri napadu MIA in vzorči toliko poti, kolikor je ujetih učnih
+poti (seme `seed`). Interval je bootstrap, ki ponovno vzorči testne uporabnike (vsak s
+svojimi potmi) in neodvisno sintetične poti; pri `metrics.bootstrap.n` ≤ 0 je interval
+prazen. Pri vseh metrikah je manj bolje. Obe strani se opišeta iz zaporedij segmentov na
+istem cestnem omrežju (testna pot z ujetim `edge_seq`): dolžina je vsota dolžin segmentov,
+celice in cone izhajajo iz koordinat vozlišč, le trajanje in uro odhoda testne poti beremo iz
+njenih točk GPS; tako dolžina in hitrost nimata zamika med dolžino GPS in dolžino po omrežju,
+ki ga niti popoln generator ne bi mogel zapreti. Uporabnik s potmi v nekem obdobju odhoda ima
+v metriki tega obdobja polno utež (njegove poti v obdobju si delijo vso njegovo utež).
+
+| metrika | enota | pomen |
+|---|---|---|
+| `duration_w1_s` | s | razdalja Wasserstein-1 (W1) med porazdelitvama trajanja poti |
+| `speed_w1_mps` | m/s | W1 med porazdelitvama povprečne hitrosti poti (dolžina / trajanje) |
+| `departure_hour_circ_w1_h` | h (0–12) | W1 na 24-urnem krogu med lokalnimi urami odhoda (23.00 in 1.00 sta 2 h narazen) |
+| `od3x3_jsd` | biti (0–1) | Jensen-Shannonova divergenca matrik izvor–cilj nad conami 3 × 3 (mreža čez okvir zemljevida `map.bbox`) |
+| `cell_js_divergence` | biti (0–1) | JSD seštetih obiskov celic; vsak segment šteje enkrat v celici svoje sredine na mreži `metrics.utility_grid` čez `map.bbox` (prestavljeno iz `rnldp_eval`) |
+| `length_w1_m` | m | W1 med porazdelitvama dolžine poti po omrežju (prestavljeno iz `rnldp_eval`) |
+| `duration_w1_s@night` | s | P12: W1 trajanja znotraj obdobja odhoda 0.00–7.00 |
+| `duration_w1_s@am_peak` | s | P12: enako za jutranjo konico 7.00–9.00 |
+| `duration_w1_s@midday` | s | P12: enako za 9.00–17.00 |
+| `duration_w1_s@pm_peak` | s | P12: enako za večerno konico 17.00–19.00 |
+| `duration_w1_s@evening` | s | P12: enako za 19.00–24.00 |
+
+Meji konic sledita dogovoru pekinškega prometnega inštituta (letno poročilo 北京交通发展年报:
+jutranja konica 7.00–9.00, večerna 17.00–19.00); preostala tri obdobja so to, kar ostane do
+polnoči. Obdobje brez poti na eni od strani da prazno celico.
+
+Dobiček roke (`utility_gain` v istem modulu) je (prior − roka) / (prior − orakelj) na eni
+metriki z intervalom 95 % iz ponovnega vzorčenja testnih uporabnikov (vse tri roke na istem
+vzorcu). Če orakelj ne premaga priorja, se dobiček izpiše, a ima oznako
+`counts_as_evidence = False` in ne šteje kot dokaz. Pragov uspeha ni. Intervala metrike in
+dobička nista neposredno primerljiva: prvi ponovno vzorči tudi sintetične poti, drugi jih drži
+fiksne. Dobiček se v
+`results.csv` ne zapisuje, ker roki priorja in orakla še ne obstajata (P3).
+
 ### Statistika veje (ponovljena na vrsticah iste veje)
 
 | stolpec | tip | pomen | vir danes |
