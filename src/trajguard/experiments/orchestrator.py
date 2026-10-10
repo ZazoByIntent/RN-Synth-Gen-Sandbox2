@@ -39,6 +39,14 @@ from trajguard.datasets.cleaning import (
 from trajguard.datasets.split import split_by_user
 from trajguard.evaluation.metrics import LinkageRate, SampledMetric, TopKAccuracy, evaluate
 from trajguard.evaluation.roc import tpr_at_fpr_measurable
+from trajguard.evaluation.timed_utility import (
+    REGION_UTC_OFFSET_S,
+    carries_times,
+    od_zones,
+    reference_trips,
+    synthetic_trips,
+    timed_utility,
+)
 from trajguard.evaluation.utility import UTILITY_METRICS
 from trajguard.experiments import builtins as _builtins  # registers first-party implementations
 from trajguard.experiments import registry
@@ -148,6 +156,7 @@ class RunConfig:
     top_k: int
     utility_names: tuple[str, ...]
     utility_grid: tuple[int, int]  # (n_rows, n_cols)
+    timed_utility: bool  # metrics.timed_utility: P2/P12 metrics of timed generator output
     bootstrap_n: int
     bootstrap_ci: float
     measure_memory: bool  # trace each attack's peak memory (metrics.memory, default on)
@@ -515,6 +524,30 @@ def load_config(path: str | Path) -> RunConfig:
     if "tradeoff" in plots and "cell_js_divergence" not in utility_names:
         raise ValueError("config: the tradeoff plot needs 'cell_js_divergence' in metrics.utility")
     grid_cfg = metrics.get("utility_grid", {})
+    # Timed synthetic utility (ULDP P2 + P12): off unless a config sets it, so every
+    # existing config keeps exactly its rows. Its reference is the test split.
+    timed = metrics.get("timed_utility", False)
+    if not isinstance(timed, bool):
+        raise ValueError("metrics.timed_utility: must be true or false")
+    if timed:
+        if representation != "segments":
+            raise ValueError(
+                "config: metrics.timed_utility needs the segments representation (synthetic "
+                "trip lengths and zones come from the road network)"
+            )
+        region = str(_req(mp or {}, "region", "map"))
+        if region not in REGION_UTC_OFFSET_S:
+            raise ValueError(
+                f"config: metrics.timed_utility has no local-time offset for map.region "
+                f"{region!r}; known: {sorted(REGION_UTC_OFFSET_S)}"
+            )
+        if not raw.get("synthetic_generators"):
+            raise ValueError("config: metrics.timed_utility needs synthetic_generators arms")
+        if float(_req(sp, "fractions", "split").get("test", 0.0)) <= 0.0:
+            raise ValueError(
+                "config: metrics.timed_utility compares against held-out test users; "
+                "the test split fraction must be > 0"
+            )
 
     attacks = _req(raw, "attacks", "")
     if not attacks:
@@ -585,6 +618,7 @@ def load_config(path: str | Path) -> RunConfig:
         top_k=int(metrics.get("top_k", 5)),
         utility_names=utility_names,
         utility_grid=(int(grid_cfg.get("n_rows", 20)), int(grid_cfg.get("n_cols", 20))),
+        timed_utility=timed,
         bootstrap_n=int(_req(metrics, "bootstrap", "metrics").get("n", 1000)),
         bootstrap_ci=float(_req(metrics, "bootstrap", "metrics").get("ci", 0.95)),
         measure_memory=bool(metrics.get("memory", True)),
@@ -1600,6 +1634,77 @@ def _membership_values(
     return rows, warnings, arm_facts
 
 
+def _timed_utility_values(
+    cfg: RunConfig,
+    items: Sequence[_PoolItem],
+    clean_by_id: dict[str, CleanTrajectory],
+    gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]],
+    provide: _NetProvider,
+) -> tuple[list[ResultRow], dict[str, dict[str, Any]]]:
+    """Timed utility rows (ULDP P2 + P12) of every generator arm whose output carries times.
+
+    Per arm the target generator fits on the train split exactly as in the membership
+    path, samples as many trips as it was trained on (seed ``cfg.seed``), and is
+    compared with the matched trips of the held-out test users, each user weighing
+    equally. An arm whose output carries no ``TimedRoute`` gets no rows, only a note in
+    its ``run.json`` facts. Returns the rows and those per-arm facts.
+    """
+    train = [m for m in items if clean_by_id[m.traj_id].split == "train"]
+    test = sorted((c for c in clean_by_id.values() if c.split == "test"), key=lambda c: c.traj_id)
+    zones = od_zones(cfg.map_bbox)
+    reference = reference_trips(test, zones, REGION_UTC_OFFSET_S[cfg.map_region])
+    n_ref_users = len({t.user_id for t in reference})
+    rows: list[ResultRow] = []
+    facts: dict[str, dict[str, Any]] = {}
+    for gspec, make in gen_plans:
+        target = make(0)
+        if target.needs_user_roster:
+            target.set_user_roster(_train_roster(cfg))
+        target.fit([_item_view(m, clean_by_id[m.traj_id]) for m in train])
+        released = list(target.generate(len(train), cfg.seed))
+        ref = f"synthetic:{gspec.ref}"
+        if not carries_times(released):
+            facts[ref] = {"timed_utility": "skipped: generator output carries no times"}
+            continue
+        syn = synthetic_trips(released, provide()[0], zones)
+        facts[ref] = {
+            "timed_utility": {
+                "n_synthetic": len(syn),
+                "n_reference_trips": len(reference),
+                "n_reference_users": n_ref_users,
+            }
+        }
+        result_id = f"utility:{ref}"
+        values = timed_utility(
+            reference,
+            syn,
+            n_bootstrap=cfg.bootstrap_n,
+            ci=cfg.bootstrap_ci,
+            rng=np.random.default_rng(cfg.seed),
+        )
+        rows.extend(
+            ResultRow(
+                value=MetricValue(
+                    metric_id=f"{result_id}:{name}",
+                    result_id=result_id,
+                    name=name,
+                    value=point,
+                    ci_low=lo,
+                    ci_high=hi,
+                    n_bootstrap=cfg.bootstrap_n,
+                ),
+                family="utility",
+                scope="synthetic",
+                arm_id=gspec.mech_id,
+                target_ref=ref,
+                epsilon=_opt_float_attr(target, "epsilon"),
+                n_pool=len(syn),
+            )
+            for name, (point, lo, hi) in values.items()
+        )
+    return rows, facts
+
+
 def run(config_path: str | Path) -> list[MetricValue]:
     """Load a config file, run the experiment, and return all metric values."""
     return run_experiment(load_config(config_path))
@@ -1917,6 +2022,12 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
                 )
             )
             utility_by_ref.setdefault(ref, {})[name] = point
+
+    if cfg.timed_utility:
+        timed_rows, timed_facts = _timed_utility_values(cfg, items, clean_by_id, gen_plans, provide)
+        all_rows.extend(timed_rows)
+        for ref, facts in timed_facts.items():
+            generator_arms.setdefault(ref, {}).update(facts)
 
     arms: dict[str, dict[str, Any]] = {
         ref: {
