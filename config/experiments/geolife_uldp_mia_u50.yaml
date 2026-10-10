@@ -1,0 +1,113 @@
+# ULDP synthesis validation run (docs/NACRT_ULDP_SINTEZA.md §5.3; docs/IZVEDBA_ULDP_SINTEZA.md
+# §3): membership inference and timed utility of the user-level LDP generator `uldp_synth`
+# at the 50-user rung.
+#
+# Why a sister file: geolife_mech_mia_u50.yaml is the measured record of the mechanism
+# campaign at this rung and must not change. This file copies its population, split,
+# attack (MIA settings) and budget verbatim. Two things differ:
+#   - cleaning.split_sessions: true cuts every recorded session into trips at stops
+#     (prerequisite P10), so the pool-cache key differs and the pool is rebuilt once;
+#   - the arms: the ULDP arms plus three control arms (below); `privtrace` is dropped
+#     because the plan's arm list (IZVEDBA §3) does not name it.
+# metrics.timed_utility: true adds the timed utility metrics (P2, P12) against the held-out
+# test users. Reidentification is not run on generators; u182 is not part of this session.
+#
+# Arms:
+#   - `uldp_prior` (public simulator with public defaults, ε -> 0) and `uldp_oracle`
+#     (noise-free per-user estimate, NOT private): the floor and the ceiling of the gain
+#     (prior - arm) / (prior - oracle) of §5.3;
+#   - `uldp_synth` with `module` c3, c2, c1 and `all` (the composite), each at
+#     ε ∈ {0.5, 2, 8} (closed decision, IZVEDBA §1, row "§7.1 točka 5"); ε is spent PER
+#     USER (one report per training user), not per trajectory;
+#   - controls `markov` (order 1), `rn_ldp_synth` and `ldptrace`, both at
+#     ε ∈ {0.5, 2.0, 8.0}, exactly as in geolife_mech_mia_u50.yaml (their ε is per
+#     trajectory, so it is not comparable with the user-level ε of the ULDP arms).
+#
+# tpr@fpr = 0.001 and 0.01 stay NaN at this rung, as in the sister file (S4-2).
+#
+# Run it (the validator, detached):
+#   $env:PYTHONHASHSEED=0; uv run trajguard repeat config/experiments/geolife_uldp_mia_u50.yaml --seeds 1 2 3
+experiment:
+  id: geolife_uldp_mia_u50
+  seed: 42                   # run seed: shadow subsets, generator fit noise
+  split_seed: 42             # population seed: user subsample + split; pinned across seeds
+  output_dir: results/geolife_uldp_mia_u50
+
+map:
+  source: osm
+  region: beijing            # must equal the Geolife native region (orchestrator enforces)
+  bbox: [116.20, 39.75, 116.55, 40.05]
+  crs: EPSG:32650
+
+dataset:
+  id: geolife
+  path: data/raw/geolife
+  native_region: beijing
+  max_users: 50              # design §6.4 sample ladder: 20/50/100/182
+
+cleaning:
+  max_speed_kmh: 200
+  min_points: 20
+  min_length_m: 500
+  resample_s: 5
+  split_sessions: true       # P10: cut sessions into trips at stops (IZVEDBA_ULDP_SINTEZA §3)
+
+map_matching:
+  matcher: leuven
+  k_candidates: 8
+  radius_m: 50
+  gps_error_m: 20
+  min_match_score: 0.05      # S4-1 population threshold, as in geolife_mech_mia_u50.yaml
+
+split:
+  scheme: by_user
+  fractions: {train: 0.5, test: 0.2, shadow: 0.2, attack: 0.1}
+
+privacy_mechanisms: []       # no protected arms here: MIA targets the fitted generators
+
+synthetic_generators:
+  - id: uldp_prior           # shared prior arm, ε -> 0 (IZVEDBA §1, row "§7.1 točka 1")
+  - id: uldp_oracle          # noise-free per-user estimate, NOT private (ceiling of the gain)
+  - id: uldp_synth           # C3 regime vote (NACRT_ULDP_SINTEZA §4.3)
+    params: {module: c3, epsilon: [0.5, 2.0, 8.0]}   # ε grid: closed decision, IZVEDBA §1
+  - id: uldp_synth           # C2 origin-destination shares (§4.4)
+    params: {module: c2, epsilon: [0.5, 2.0, 8.0]}   # ε grid: closed decision, IZVEDBA §1
+  - id: uldp_synth           # C1 behavioural moments (§4.5)
+    params: {module: c1, epsilon: [0.5, 2.0, 8.0]}   # ε grid: closed decision, IZVEDBA §1
+  - id: uldp_synth           # composite arm, the three modules on public thirds (§4.2)
+    params:
+      module: all
+      epsilon: [0.5, 2.0, 8.0]   # ε grid: closed decision, IZVEDBA §1
+      # rule_n: n of the public n·ε² rule, fixed so the target and every shadow ask the
+      # same questions (NACRT §7.1 point 3). Derived from the population, not the data:
+      # max_users 50 x split.fractions.train 0.5 = 25 training users (largest-remainder
+      # apportionment of datasets/split.py; exact here).
+      rule_n: 25
+  - id: markov               # control: non-private baseline (memorizes the train split)
+    params: {order: 1}
+  - id: rn_ldp_synth         # control: as in geolife_mech_mia_u50.yaml (ε = 2 is the S4
+    params: {epsilon: [0.5, 2.0, 8.0]}   # anchor, the other two complete the shared ε grid;
+                                         # grid/l_max keep v1 defaults)
+  - id: ldptrace             # control: as in geolife_mech_mia_u50.yaml (grid 12x12, quantile
+    params: {epsilon: [0.5, 2.0, 8.0]}   # 0.9, length_share 0.1, alpha 0.3, beta 0.2,
+                                         # defaults); same-class shadows share the arm's ε
+
+attacks:
+  - type: membership_inference
+    target_scope: [synthetic]
+    attacker: {n_shadow: 16, subsample: 0.5}
+    fprs: [0.001, 0.01, 0.1] # Carlini low-FPR operating points (design §6.2); 0.1 needs
+                             # only 10 non-members (S4-2), the stricter points revive
+                             # once the matched pool grows
+
+metrics:
+  privacy: []                # MIA brings its own family metrics (auc, tpr@fpr=...)
+  timed_utility: true        # P2 + P12 timed metrics vs held-out test users (NACRT §5.3)
+  bootstrap: {n: 1000, ci: 0.95}   # unused by MIA rows: score-based, CI across seeds
+  memory: false              # R0 (RUNNING.md §7.3): untraced runs, as in the sister file
+  # Budget 300 s, the value of the u20 and u50 rungs (report §6.6, X = 300 s per attack
+  # invocation); 1200 s starts at the 182 rung.
+  attack_time_budget_s: 300
+
+reporting:
+  export: [csv]

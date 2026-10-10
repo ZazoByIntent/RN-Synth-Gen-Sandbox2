@@ -1,6 +1,7 @@
 """Tests for the experiment orchestrator on the committed fixtures (no network)."""
 
 import csv
+import dataclasses
 import json
 import math
 import shutil
@@ -387,6 +388,66 @@ def test_experiment_configs_parse(config_path: Path) -> None:
         for spec in loaded.attacks
     )
     assert entries == _EXPECTED_ATTACKS[config_path.name]
+
+
+_ULDP_EPS = (0.5, 2.0, 8.0)
+
+
+def _uldp_arms(rule_n: int, rn_ldp_eps: tuple[float, ...]) -> frozenset[str]:
+    """Expected arm refs of a ULDP validation config (IZVEDBA_ULDP_SINTEZA §3)."""
+    return frozenset(
+        {"uldp_prior", "uldp_oracle", "markov:order=1"}
+        | {f"uldp_synth:epsilon={e},module={m}" for m in ("c3", "c2", "c1") for e in _ULDP_EPS}
+        | {f"uldp_synth:epsilon={e},module=all,rule_n={rule_n}" for e in _ULDP_EPS}
+        | {f"rn_ldp_synth:epsilon={e}" for e in rn_ldp_eps}
+        | {f"ldptrace:epsilon={e}" for e in _ULDP_EPS}
+    )
+
+
+_CONFIGS = Path(__file__).parent.parent / "config" / "experiments"
+
+
+@pytest.mark.parametrize(
+    ("name", "sister", "expected"),
+    [
+        ("geolife_uldp_mia_u20.yaml", "geolife_mech_mia_u20.yaml", _uldp_arms(10, (2.0,))),
+        ("geolife_uldp_mia_u50.yaml", "geolife_mech_mia_u50.yaml", _uldp_arms(25, _ULDP_EPS)),
+    ],
+)
+def test_uldp_configs_parse_and_build_every_arm(
+    name: str, sister: str, expected: frozenset[str], fixture_network: Any
+) -> None:
+    """The ULDP sister configs validate, keep the sister's population and build every arm."""
+    from trajguard.datasets.split import _largest_remainder
+    from trajguard.experiments import registry
+    from trajguard.experiments.orchestrator import _generator_ctor
+
+    loaded = load_config(_CONFIGS / name)
+    base = load_config(_CONFIGS / sister)
+    stem = name.removesuffix(".yaml")
+    assert loaded.exp_id == stem and loaded.output_dir == Path("results") / stem
+    assert loaded.cleaning.split_sessions and loaded.timed_utility
+    for field in ("max_users", "fractions", "split_seed", "seed", "attacks", "mechanisms"):
+        assert getattr(loaded, field) == getattr(base, field), field
+    assert loaded.cleaning == dataclasses.replace(base.cleaning, split_sessions=True)
+    assert {s.ref for s in loaded.generators} == expected
+
+    # rule_n is public: the train share of the population under the split's apportionment.
+    assert loaded.max_users is not None
+    n_train = _largest_remainder(loaded.max_users, loaded.fractions)["train"]
+    for spec in loaded.generators:
+        params = dict(spec.params)
+        assert ("rule_n" in params) == (params.get("module") == "all")
+        if "rule_n" in params:
+            assert params["rule_n"] == n_train
+
+    # Build every arm through the registry on the committed fixture map (no data/ access).
+    for spec in loaded.generators:
+        gen_cls = registry.get("generator", spec.mech_id)
+        make = _generator_ctor(
+            gen_cls, dict(spec.params), loaded, lambda: (fixture_network, None), spec.ref
+        )
+        assert isinstance(make(0), gen_cls)
 
 
 def test_reconstruction_rejects_reid_attacker_keys(tmp_path: Path) -> None:
