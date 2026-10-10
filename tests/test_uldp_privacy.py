@@ -57,7 +57,7 @@ def _bucket(views: Sequence[TrajectoryView], question: int) -> int:
 
 
 class _Toy(UldpGenerator):
-    """Honest toy module: a public draw picks one of two questions, GRR answers it."""
+    """Honest toy module: the public draw assigns one of two questions, GRR answers it."""
 
     def __init__(self, epsilon: float = EPS, seed: int = 0) -> None:
         self.epsilon = epsilon
@@ -71,11 +71,10 @@ class _Toy(UldpGenerator):
 
     @staticmethod
     def encode_user(
-        user_views: Sequence[TrajectoryView], public: Any, rng: np.random.Generator
+        user_views: Sequence[TrajectoryView], public: Any, question: int, rng: np.random.Generator
     ) -> UserReport:
-        q = int(rng.integers(2))  # the public draw comes first and reads no data
-        answer = grr_perturb(_bucket(user_views, q), K, public["epsilon"], rng)
-        return UserReport("toy", q, (float(answer),), public["epsilon"])
+        answer = grr_perturb(_bucket(user_views, question), K, public["epsilon"], rng)
+        return UserReport("toy", question, (float(answer),), public["epsilon"])
 
     @staticmethod
     def server_fit(reports: Sequence[UserReport], public: Any) -> Any:
@@ -108,10 +107,10 @@ class _LeakyServer(_Toy):
 
     @staticmethod
     def encode_user(
-        user_views: Sequence[TrajectoryView], public: Any, rng: np.random.Generator
+        user_views: Sequence[TrajectoryView], public: Any, question: int, rng: np.random.Generator
     ) -> UserReport:
         _STASHED_EDGES.append(sum(len(v.as_sequence()) for v in user_views))
-        return _Toy.encode_user(user_views, public, rng)
+        return _Toy.encode_user(user_views, public, question, rng)
 
     @staticmethod
     def server_fit(reports: Sequence[UserReport], public: Any) -> Any:
@@ -123,11 +122,10 @@ class _OverBudget(_Toy):
 
     @staticmethod
     def encode_user(
-        user_views: Sequence[TrajectoryView], public: Any, rng: np.random.Generator
+        user_views: Sequence[TrajectoryView], public: Any, question: int, rng: np.random.Generator
     ) -> UserReport:
-        q = int(rng.integers(2))
-        answer = grr_perturb(_bucket(user_views, q), K, 3 * public["epsilon"], rng)
-        return UserReport("toy", q, (float(answer),), public["epsilon"])
+        answer = grr_perturb(_bucket(user_views, question), K, 3 * public["epsilon"], rng)
+        return UserReport("toy", question, (float(answer),), public["epsilon"])
 
 
 class _Unclipped(_Toy):
@@ -135,10 +133,10 @@ class _Unclipped(_Toy):
 
     @staticmethod
     def encode_user(
-        user_views: Sequence[TrajectoryView], public: Any, rng: np.random.Generator
+        user_views: Sequence[TrajectoryView], public: Any, question: int, rng: np.random.Generator
     ) -> UserReport:
         raw = float(len(user_views[0].as_sequence())) if user_views else 0.0
-        return UserReport("toy", 0, (raw,), public["epsilon"])
+        return UserReport("toy", question, (raw,), public["epsilon"])
 
 
 class _Familiar(_Toy):
@@ -146,10 +144,10 @@ class _Familiar(_Toy):
 
     @staticmethod
     def encode_user(
-        user_views: Sequence[TrajectoryView], public: Any, rng: np.random.Generator
+        user_views: Sequence[TrajectoryView], public: Any, question: int, rng: np.random.Generator
     ) -> UserReport:
         _SEEN_EDGES.update(e for v in user_views for e in v.as_sequence())
-        return _Toy.encode_user(user_views, public, rng)
+        return _Toy.encode_user(user_views, public, question, rng)
 
     def sequence_log_prob(self, edge_seq: Sequence[int]) -> float:
         familiar = sum(e in _SEEN_EDGES for e in edge_seq) / max(len(edge_seq), 1)
@@ -236,14 +234,43 @@ def test_overspending_report_is_refused() -> None:
     class _Greedy(_Toy):
         @staticmethod
         def encode_user(
-            user_views: Sequence[TrajectoryView], public: Any, rng: np.random.Generator
+            user_views: Sequence[TrajectoryView],
+            public: Any,
+            question: int,
+            rng: np.random.Generator,
         ) -> UserReport:
-            return UserReport("toy", 0, (0.0,), 2 * public["epsilon"])
+            return UserReport("toy", question, (0.0,), 2 * public["epsilon"])
 
     gen = _Greedy()
     gen.set_user_roster(ROSTER)
     with pytest.raises(ValueError, match="user-level budget"):
         gen.fit(TRAIN_A)
+
+
+def test_questions_are_drawn_publicly_and_enforced() -> None:
+    gen = _Toy(seed=5)
+    space = gen.report_space(gen.public_params())
+    assigned = gen.assign_questions(ROSTER, space)
+    assert assigned == gen.assign_questions(tuple(reversed(ROSTER)), space)  # sorted roster
+    assert set(assigned) == set(ROSTER) and set(assigned.values()) <= {0, 1}
+    gen.set_user_roster(ROSTER)
+    for train in (TRAIN_A, TRAIN_B):  # the views never move the question
+        assert [r.question for r in gen.collect_reports(train)] == [assigned[u] for u in ROSTER]
+
+    class _OwnQuestion(_Toy):
+        @staticmethod
+        def encode_user(
+            user_views: Sequence[TrajectoryView],
+            public: Any,
+            question: int,
+            rng: np.random.Generator,
+        ) -> UserReport:
+            return _Toy.encode_user(user_views, public, 1 - question, rng)
+
+    rogue = _OwnQuestion(seed=5)
+    rogue.set_user_roster(ROSTER)
+    with pytest.raises(ValueError, match="answered question"):
+        rogue.fit(TRAIN_A)
 
 
 # --- P5: the four privacy tests of §6.2, each with its positive control --------------------

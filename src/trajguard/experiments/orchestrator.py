@@ -1555,7 +1555,8 @@ def _generator_facts(target: Any, max_trips: int) -> dict[str, Any]:
     §7.1 point 6 of docs/NACRT_ULDP_SINTEZA.md): a user-level mechanism (``privacy_unit``
     ``"user"``) records ``user_epsilon``; a per-trip one records ``trip_epsilon``, the
     largest number of matched training trips per user ``max_trips_per_user`` (m) and the
-    user-level bound ``user_epsilon_bound`` = m·ε under basic composition.
+    user-level bound ``user_epsilon_bound`` = m·ε under basic composition. A generator
+    with a ``fit_facts()`` method (``uldp_synth``) records its result as ``uldp_fit``.
     """
     facts: dict[str, Any] = {}
     epsilon = _finite_or_none(_opt_float_attr(target, "epsilon"))
@@ -1582,6 +1583,9 @@ def _generator_facts(target: Any, max_trips: int) -> dict[str, Any]:
         # recorded anyway so the record matches privtrace_eval's validation table.
         facts["n_capped_walks"] = int(getattr(target, "n_capped_walks", 0))
         facts["n_redrawn_walks"] = int(getattr(target, "n_redrawn_walks", 0))
+    fit_facts = getattr(target, "fit_facts", None)
+    if callable(fit_facts):  # uldp_synth: per-module report histograms, gates, question counts
+        facts["uldp_fit"] = fit_facts()
     return facts
 
 

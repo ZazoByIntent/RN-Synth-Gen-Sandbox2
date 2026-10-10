@@ -223,8 +223,10 @@ zasebna izbira hipoteze.
   na uporabnika.
 - **Pot s časi:** izžrebaj režim, nato izvor po javni masi, cilj po upadu režima, odhod,
   pot in čase iz njegovega profila, usmerjevalnika in hitrosti.
-- **Pri n ≈ 91:** trije deleži z SD 0.12 (ε = 1) oziroma 0.05 (ε = 2) pred dekonvolucijo
-  (odstranitvijo učinka matrike zamenjav); dobiček v obliki porazdelitev trajanja in
+- **Pri n ≈ 91:** trije deleži z SD 0.136 (ε = 1) oziroma 0.073 (ε = 2) pred
+  dekonvolucijo (odstranitvijo učinka matrike zamenjav), točno pri deležih blizu 1/3
+  (ugotovitev F4 v `NACRT_ULDP_RANGI.md` §10; prejšnji vrednosti 0.12 in 0.05 veljata le za
+  izginjajoče deleže); dobiček v obliki porazdelitev trajanja in
   hitrosti (dvovrhost hoja proti vozilu, ki je ena hitrostna številka ne zajame);
   geografija ostane na priorju.
 - **Pri velikem n (5000–10 000):** 24–48 razredov (regija, delavnik) in popravki po
@@ -355,8 +357,11 @@ razpona, ki šteje šele pri ε = 8.
 **Pravilo: dobiček zahteva napako priorja okoli dveh SD.** Pri ε = 0.5 pogon z 91
 uporabniki ne pokaže ničesar. Pri ε = 2 je dobiček le pri d ≤ 2 in napakah priorja okoli
 0.3 polovice razpona ali več (d = 4 le za eno napako blizu 0.45); deluje tudi eno
-kategorično vprašanje: trije deleži z SD 0.05 ali devet z 0.06, če odgovarjajo vsi,
-oziroma 0.08 ali 0.11, če tretjina. Pri ε = 8 deluje d ≤ 8 za napake od 0.1 do 0.25. Pri
+kategorično vprašanje: trije deleži z SD 0.073 ali devet z 0.079 (0.11 za delež blizu
+0.5), če odgovarjajo vsi, oziroma 0.126 ali 0.137, če tretjina; to velja točno pri
+deležih blizu 1/k (ugotovitev F4 v `NACRT_ULDP_RANGI.md` §10; prejšnje vrednosti 0.05,
+0.06, 0.08 in 0.11 veljajo le za izginjajoče deleže). Številke v tabeli zgoraj so
+najslabši primer HM pri n = 91 in ostanejo. Pri ε = 8 deluje d ≤ 8 za napake od 0.1 do 0.25. Pri
 stopnji 20 (n = 10) ima ena številka pri ε = 2 SD 0.42 (Duchijev mehanizem), zato je tam
 vsak kandidat enak priorju in je stopnja le dimni test; pri n ≈ 5000 proračun kupi okoli
 10–25 števil pri ε = 1–2.
