@@ -60,6 +60,10 @@ doctoral project. This file is the constitution for the repo; read it every sess
   one-hour public check on the simulator, P15, which decides whether T3 is built or the
   round-3 pick falls back to T1 with T4's relation question, K-α; a segment-speed metric,
   P16). Plan, candidate bank T1–T6 and session plan: `docs/NACRT_ULDP_ODSEKI.md`.
+- All three ULDP plans are in `main` (PRs #56–#58, 10 Oct 2026). Implementation runs as
+  three autonomous orchestration sessions in order (1 SINTEZA with all shared prerequisites,
+  2 RANGI, 3 ODSEKI); each session's instructions, closed defaults, start prompt and
+  progress log: `docs/IZVEDBA_ULDP_SKUPNO.md` plus `docs/IZVEDBA_ULDP_<MECHANISM>.md`.
 
 Whoever changes the project state updates these lines in the same PR. The history of
 PRs, merge commits and result interpretation lives only in `docs/HANDOFF.md`, never
@@ -116,6 +120,12 @@ question (a section, not the file). For a typical coding task this file plus
   **Read only the section for the step you are implementing, or when the user mentions
   segment-time contrasts, street frontage, mid-block windows, a candidate T1–T6, a
   combination K-α or K-β, a prerequisite P13–P16, or a round-3 raw idea R3-A.1 to R3-E.4.**
+- `docs/IZVEDBA_ULDP_SKUPNO.md` and `docs/IZVEDBA_ULDP_{SINTEZA,RANGI,ODSEKI}.md`
+  (Slovenian) — rules for the autonomous ULDP implementation sessions (roles, context
+  budget, subagent prompt templates, merge policy, artifact) and, per mechanism, the closed
+  defaults, PR blocks, validation run, start prompt and the progress log at the bottom.
+  **Read in full only when you are the orchestrator of such a session; a subagent reads
+  only what its prompt names.**
 - `docs/REZULTATI_SHEMA.md` (Slovenian) — the `results.csv` column schema and its
   consumers. **Read only when touching `results.csv` columns or
   `reporting/results_schema.py`, `results_io.py`, `report.py`, `plots.py`, or
