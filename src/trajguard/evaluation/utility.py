@@ -58,7 +58,7 @@ def _paired_bootstrap(
     return point, float(np.quantile(stats, alpha)), float(np.quantile(stats, 1.0 - alpha))
 
 
-def _jsd_bits(p_counts: np.ndarray, q_counts: np.ndarray) -> float:
+def jsd_bits(p_counts: np.ndarray, q_counts: np.ndarray) -> float:
     """Jensen-Shannon divergence, base 2 (in [0, 1]), between two count vectors."""
     p = p_counts / p_counts.sum()
     q = q_counts / q_counts.sum()
@@ -93,7 +93,7 @@ def cell_js_divergence(
     noisy_counts = np.stack([_cell_counts(t, grid) for t in noisy])
 
     def stat(a: np.ndarray, b: np.ndarray) -> float:
-        return _jsd_bits(a.sum(axis=0), b.sum(axis=0))
+        return jsd_bits(a.sum(axis=0), b.sum(axis=0))
 
     return _paired_bootstrap(raw_counts, noisy_counts, stat, n_bootstrap, ci, rng)
 
@@ -228,7 +228,7 @@ def unpaired_cell_js_divergence(
         return math.nan, math.nan, math.nan
 
     def stat(a: np.ndarray, b: np.ndarray) -> float:
-        return _jsd_bits(a.sum(axis=0), b.sum(axis=0))
+        return jsd_bits(a.sum(axis=0), b.sum(axis=0))
 
     return _two_sample_bootstrap(
         np.asarray(real_counts, dtype=float),

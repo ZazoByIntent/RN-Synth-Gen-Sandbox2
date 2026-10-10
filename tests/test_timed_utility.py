@@ -33,18 +33,26 @@ from trajguard.evaluation.timed_utility import (
     utility_gain,
     weighted_w1,
 )
+from trajguard.evaluation.utility import unpaired_cell_js_divergence, unpaired_length_w1
 from trajguard.experiments.orchestrator import load_config, run
 from trajguard.experiments.registry import register
 from trajguard.maps.base import RoadNetwork
-from trajguard.representation import TrajectoryView
+from trajguard.representation import Grid, TrajectoryView
 from trajguard.synthesis.base import SyntheticGenerator
 
 _ = beijing_maps_dir  # imported so pytest resolves the fixture by name here
 BBOX = (116.30, 39.98, 116.32, 39.995)
 MIDNIGHT_UTC = 1_222_819_200.0  # 2008-10-01 00:00:00 UTC, 08:00 in Beijing
+GRID = Grid(bbox=BBOX, n_rows=4, n_cols=4)
 
 
-def _trip(user: str, duration: float, hour: float = 10.0, od: tuple[int, int] = (0, 8)) -> Any:
+def _trip(
+    user: str,
+    duration: float,
+    hour: float = 10.0,
+    od: tuple[int, int] = (0, 8),
+    cells: tuple[int, ...] = (0, 5),
+) -> Any:
     return TripFeatures(
         user_id=user,
         duration_s=duration,
@@ -52,6 +60,7 @@ def _trip(user: str, duration: float, hour: float = 10.0, od: tuple[int, int] = 
         departure_hour=hour,
         origin_zone=od[0],
         dest_zone=od[1],
+        cells=cells,
     )
 
 
@@ -81,7 +90,47 @@ def test_reference_is_weighted_per_user_not_per_trip() -> None:
     out = timed_utility(reference, synthetic, n_bootstrap=0, ci=0.95, rng=np.random.default_rng(0))
     assert out["duration_w1_s"][0] == pytest.approx(0.0)
     assert out["od3x3_jsd"][0] == pytest.approx(0.0)
+    assert out["length_w1_m"][0] == pytest.approx(0.0)
     assert set(out) == set(TIMED_UTILITY_METRICS)
+
+
+def test_reference_weighting_reaches_the_cell_metric() -> None:
+    """A user's many trips in one cell weigh no more than another user's single trip."""
+    reference = [_trip("a", 100.0, cells=(1,))] + [_trip("b", 100.0, cells=(2,)) for _ in range(9)]
+    synthetic = [_trip("", 100.0, cells=(1,)), _trip("", 100.0, cells=(2,))]
+    out = timed_utility(reference, synthetic, n_bootstrap=0, ci=0.95, rng=np.random.default_rng(0))
+    assert out["cell_js_divergence"][0] == pytest.approx(0.0)
+
+
+def test_cell_and_length_match_the_unpaired_rnldp_metrics_for_one_trip_per_user() -> None:
+    """With one trip per user, the weighted points equal unpaired_cell_js / unpaired_length_w1."""
+    rng = np.random.default_rng(5)
+    reference = [
+        _trip(f"u{i}", float(rng.integers(60, 900)), cells=tuple(rng.integers(0, 16, size=3)))
+        for i in range(12)
+    ]
+    synthetic = [
+        _trip("", float(rng.integers(60, 900)), cells=tuple(rng.integers(0, 16, size=4)))
+        for _ in range(9)
+    ]
+    out = timed_utility(reference, synthetic, n_bootstrap=0, ci=0.95, rng=np.random.default_rng(0))
+
+    def counts(trips: list[Any]) -> np.ndarray:
+        return np.stack([np.bincount(t.cells, minlength=16) for t in trips]).astype(float)
+
+    gen = np.random.default_rng(0)
+    jsd = unpaired_cell_js_divergence(
+        counts(reference), counts(synthetic), n_bootstrap=0, ci=0.95, rng=gen
+    )[0]
+    w1 = unpaired_length_w1(
+        np.array([t.length_m for t in reference]),
+        np.array([t.length_m for t in synthetic]),
+        n_bootstrap=0,
+        ci=0.95,
+        rng=gen,
+    )[0]
+    assert out["cell_js_divergence"][0] == pytest.approx(jsd)
+    assert out["length_w1_m"][0] == pytest.approx(w1)
 
 
 def test_period_metrics_split_by_departure_hour_and_nan_when_empty() -> None:
@@ -110,6 +159,13 @@ def test_bootstrap_is_seeded_and_brackets_the_point() -> None:
     assert lo <= point <= hi or math.isclose(lo, point) or math.isclose(hi, point)
     empty = timed_utility([], synthetic, n_bootstrap=10, ci=0.95, rng=np.random.default_rng(3))
     assert all(math.isnan(v[0]) for v in empty.values())
+    # Without bootstrap there is no interval (NaN), not a zero-width one at the point.
+    bare = timed_utility(reference, synthetic, n_bootstrap=0, ci=0.95, rng=np.random.default_rng(3))
+    assert all(
+        math.isfinite(v[0]) and math.isnan(v[1]) and math.isnan(v[2])
+        for k, v in bare.items()
+        if not k.startswith("duration_w1_s@")
+    )
 
 
 def test_gain_formula_and_evidence_flag() -> None:
@@ -157,25 +213,6 @@ def test_gain_formula_and_evidence_flag() -> None:
         )
 
 
-def test_reference_trips_read_local_beijing_hour_and_zones() -> None:
-    pts = ((39.981, 116.301, MIDNIGHT_UTC), (39.994, 116.319, MIDNIGHT_UTC + 600.0))
-    clean = CleanTrajectory(
-        traj_id="t",
-        user_id="u",
-        points=pts,
-        bbox=BBOX,
-        duration_s=600.0,
-        length_m=3000.0,
-        mean_speed=5.0,
-        cleaning_flags=(),
-        split="test",
-    )
-    (trip,) = reference_trips([clean], od_zones(BBOX), BEIJING_UTC_OFFSET_S)
-    assert trip.departure_hour == pytest.approx(8.0)
-    assert trip.duration_s == pytest.approx(600.0) and trip.speed_mps == pytest.approx(5.0)
-    assert (trip.origin_zone, trip.dest_zone) == (0, 8)
-
-
 def _fixture_network() -> RoadNetwork:
     d = FIXTURES / "maps" / "beijing_fixture"
     return RoadNetwork(
@@ -195,17 +232,55 @@ def _route(edges: Sequence[int], start: float) -> TimedRoute:
     return TimedRoute(visits=visits, utc_offset_s=BEIJING_UTC_OFFSET_S)
 
 
+def test_reference_trips_read_times_from_points_and_the_rest_from_edges() -> None:
+    """A real trip and a synthetic route over the same edges get identical geometry.
+
+    The clean trip's GPS length (3000 m here) is ignored: both sides use the network
+    edge-length sum, so a perfect generator can reach zero length and speed distance.
+    """
+    net = _fixture_network()
+    pts = ((39.981, 116.301, MIDNIGHT_UTC), (39.994, 116.319, MIDNIGHT_UTC + 60.0))
+    clean = CleanTrajectory(
+        traj_id="t",
+        user_id="u",
+        points=pts,
+        bbox=BBOX,
+        duration_s=60.0,
+        length_m=3000.0,
+        mean_speed=50.0,
+        cleaning_flags=(),
+        split="test",
+    )
+    (real,) = reference_trips([(clean, (0, 1))], net, od_zones(BBOX), GRID, BEIJING_UTC_OFFSET_S)
+    syn = SyntheticTrajectory("s0", "g", "h", _route([0, 1], MIDNIGHT_UTC), "train", "m")
+    (fake,) = synthetic_trips([syn], net, od_zones(BBOX), GRID)
+    assert real.departure_hour == pytest.approx(8.0) and real.duration_s == pytest.approx(60.0)
+    lengths = net.edges.set_index("edge_id")["length_m"]
+    assert real.length_m == pytest.approx(float(lengths[0] + lengths[1]))
+    assert (real.length_m, real.origin_zone, real.dest_zone, real.cells) == (
+        fake.length_m,
+        fake.origin_zone,
+        fake.dest_zone,
+        fake.cells,
+    )
+    assert len(real.cells) == 2
+    out = timed_utility([real], [fake], n_bootstrap=0, ci=0.95, rng=np.random.default_rng(0))
+    for name in ("speed_w1_mps", "length_w1_m", "cell_js_divergence", "od3x3_jsd"):
+        assert out[name][0] == pytest.approx(0.0)
+    assert reference_trips([(clean, ())], net, od_zones(BBOX), GRID, BEIJING_UTC_OFFSET_S) == []
+
+
 def test_synthetic_trips_take_length_and_zones_from_the_network() -> None:
     net = _fixture_network()
     syn = SyntheticTrajectory("s0", "g", "h", _route([0, 1], MIDNIGHT_UTC), "train", "m")
-    (trip,) = synthetic_trips([syn], net, od_zones(BBOX))
+    (trip,) = synthetic_trips([syn], net, od_zones(BBOX), GRID)
     lengths = net.edges.set_index("edge_id")["length_m"]
     assert trip.length_m == pytest.approx(float(lengths[0] + lengths[1]))
     assert trip.duration_s == pytest.approx(60.0)
     assert trip.departure_hour == pytest.approx(8.0)
     untimed = SyntheticTrajectory("s1", "g", "h", (0, 1), "train", "m")
     with pytest.raises(TypeError, match="TimedRoute"):
-        synthetic_trips([untimed], net, od_zones(BBOX))
+        synthetic_trips([untimed], net, od_zones(BBOX), GRID)
 
 
 @register("generator", "_test_timed_replay")

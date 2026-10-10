@@ -41,6 +41,7 @@ from trajguard.evaluation.metrics import LinkageRate, SampledMetric, TopKAccurac
 from trajguard.evaluation.roc import tpr_at_fpr_measurable
 from trajguard.evaluation.timed_utility import (
     REGION_UTC_OFFSET_S,
+    TripFeatures,
     carries_times,
     od_zones,
     reference_trips,
@@ -1647,13 +1648,17 @@ def _timed_utility_values(
     path, samples as many trips as it was trained on (seed ``cfg.seed``), and is
     compared with the matched trips of the held-out test users, each user weighing
     equally. An arm whose output carries no ``TimedRoute`` gets no rows, only a note in
-    its ``run.json`` facts. Returns the rows and those per-arm facts.
+    its ``run.json`` facts. Both sides are featurised from edge sequences on the road
+    network (a test trip by its matched ``edge_seq``), with cells on the same utility
+    grid as the paired ``cell_js_divergence``. Returns the rows and those per-arm facts.
     """
     train = [m for m in items if clean_by_id[m.traj_id].split == "train"]
-    test = sorted((c for c in clean_by_id.values() if c.split == "test"), key=lambda c: c.traj_id)
+    test = sorted(
+        (m for m in items if clean_by_id[m.traj_id].split == "test"), key=lambda m: m.traj_id
+    )
     zones = od_zones(cfg.map_bbox)
-    reference = reference_trips(test, zones, REGION_UTC_OFFSET_S[cfg.map_region])
-    n_ref_users = len({t.user_id for t in reference})
+    grid = Grid(bbox=cfg.map_bbox, n_rows=cfg.utility_grid[0], n_cols=cfg.utility_grid[1])
+    reference: list[TripFeatures] | None = None  # built on the first timed arm (needs the map)
     rows: list[ResultRow] = []
     facts: dict[str, dict[str, Any]] = {}
     for gspec, make in gen_plans:
@@ -1666,12 +1671,21 @@ def _timed_utility_values(
         if not carries_times(released):
             facts[ref] = {"timed_utility": "skipped: generator output carries no times"}
             continue
-        syn = synthetic_trips(released, provide()[0], zones)
+        network = provide()[0]
+        if reference is None:
+            reference = reference_trips(
+                [(clean_by_id[m.traj_id], _item_sequence(m)) for m in test],
+                network,
+                zones,
+                grid,
+                REGION_UTC_OFFSET_S[cfg.map_region],
+            )
+        syn = synthetic_trips(released, network, zones, grid)
         facts[ref] = {
             "timed_utility": {
                 "n_synthetic": len(syn),
                 "n_reference_trips": len(reference),
-                "n_reference_users": n_ref_users,
+                "n_reference_users": len({t.user_id for t in reference}),
             }
         }
         result_id = f"utility:{ref}"

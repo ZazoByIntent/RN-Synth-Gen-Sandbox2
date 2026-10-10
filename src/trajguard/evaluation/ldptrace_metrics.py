@@ -31,7 +31,7 @@ says what the number is.
 Jensen–Shannon divergence is the reference's ``utils.jensen_shannon_distance``:
 ``0.5·KL(p, m) + 0.5·KL(q, m)`` with the **natural logarithm** (maximum ln 2 ≈ 0.693),
 ``1e-8`` smoothing inside the log ratio only, no square root. It is not the base-2
-``_jsd_bits`` of ``evaluation/utility.py``.
+``jsd_bits`` of ``evaluation/utility.py``.
 
 Deviations from the reference, each also noted at the function:
 

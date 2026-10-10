@@ -4,7 +4,13 @@ A user-level generator releases trips with times (``TimedRoute`` payloads) and n
 bijection to real trips, so its output is compared, as a population, with the trips of
 the held-out **test** users (docs/NACRT_ULDP_SINTEZA.md §5.3). Each reference user
 weighs equally: a user's trips share that user's weight (docs/NACRT_ULDP_RANGI.md §8,
-point 8). Synthetic trips carry no user, so each one weighs equally.
+point 8). Synthetic trips carry no user, so each one weighs equally. A user with trips
+in a departure period keeps its full weight in that period's metric.
+
+Both sides are featurised from edge sequences on the same road network (the matched
+``edge_seq`` of a reference trip, the route of a synthetic trip): length is the sum of
+network edge lengths, cells and origin-destination zones come from node coordinates.
+Duration and departure of a reference trip are read off its own points.
 
 The pre-registered metrics (lower is better for all of them):
 
@@ -14,10 +20,14 @@ The pre-registered metrics (lower is better for all of them):
   hours, hours (0 to 12);
 - ``od3x3_jsd``: Jensen-Shannon divergence, bits, between the 3 x 3 origin-destination
   zone matrices (zones: a 3 x 3 grid over the public map bbox);
+- ``cell_js_divergence``: JSD, bits, between the summed cell-visit distributions (each
+  edge's midpoint counts once in its utility-grid cell), as ``rnldp_eval`` computes it;
+- ``length_w1_m``: W1 between network trip lengths, metres;
 - ``duration_w1_s@<period>``: W1 of trip duration within each departure period (P12).
 
 Intervals come from a two-sided bootstrap: reference **users** are resampled with
 replacement (each drawn user brings all of its trips), synthetic trips independently.
+With ``n_bootstrap <= 0`` the interval is NaN.
 These functions do not fit the attack-shaped ``Metric`` ABC (there is no attack result),
 so, like ``evaluation.utility``, they are plain functions the orchestrator calls.
 
@@ -39,7 +49,7 @@ from trajguard.datamodel import (
     SyntheticTrajectory,
     TimedRoute,
 )
-from trajguard.evaluation.utility import _jsd_bits
+from trajguard.evaluation.utility import jsd_bits
 from trajguard.maps.base import RoadNetwork
 from trajguard.representation import Grid
 
@@ -70,6 +80,8 @@ PRIMARY_METRICS: tuple[str, ...] = (
     "speed_w1_mps",
     "departure_hour_circ_w1_h",
     "od3x3_jsd",
+    "cell_js_divergence",
+    "length_w1_m",
 )
 PERIOD_METRICS: tuple[str, ...] = tuple(f"duration_w1_s@{name}" for name, _, _ in DEPARTURE_PERIODS)
 TIMED_UTILITY_METRICS: tuple[str, ...] = PRIMARY_METRICS + PERIOD_METRICS
@@ -86,6 +98,7 @@ class TripFeatures:
     departure_hour: float  # local hour of day in [0, 24)
     origin_zone: int  # row-major index into the 3 x 3 zone grid
     dest_zone: int
+    cells: tuple[int, ...] = ()  # utility-grid cell of each edge's midpoint, in order
 
     @property
     def speed_mps(self) -> float:
@@ -103,24 +116,67 @@ def _local_hour(t: float, utc_offset_s: int) -> float:
     return ((t + utc_offset_s) % 86400.0) / 3600.0
 
 
+class _Geometry:
+    """Edge lengths, edge end nodes and node coordinates of one road network."""
+
+    def __init__(self, network: RoadNetwork) -> None:
+        edges = network.edges.set_index("edge_id")
+        nodes = network.nodes.set_index("node_id")
+        self.length: dict[int, float] = edges["length_m"].astype(float).to_dict()
+        self.tail: dict[int, int] = edges["u"].to_dict()
+        self.head: dict[int, int] = edges["v"].to_dict()
+        self.lat: dict[int, float] = nodes["lat"].astype(float).to_dict()
+        self.lon: dict[int, float] = nodes["lon"].astype(float).to_dict()
+
+    def route(
+        self, edge_seq: Sequence[int], zones: Grid, grid: Grid
+    ) -> tuple[float, int, int, tuple[int, ...]]:
+        """(network length, origin zone, destination zone, edge-midpoint cells) of a route."""
+        o, d = self.tail[edge_seq[0]], self.head[edge_seq[-1]]
+        cells = tuple(
+            grid.cell_of(
+                (self.lat[self.tail[e]] + self.lat[self.head[e]]) / 2.0,
+                (self.lon[self.tail[e]] + self.lon[self.head[e]]) / 2.0,
+            )
+            for e in edge_seq
+        )
+        return (
+            float(sum(self.length[e] for e in edge_seq)),
+            zones.cell_of(self.lat[o], self.lon[o]),
+            zones.cell_of(self.lat[d], self.lon[d]),
+            cells,
+        )
+
+
 def reference_trips(
-    trips: Sequence[CleanTrajectory], zones: Grid, utc_offset_s: int
+    trips: Sequence[tuple[CleanTrajectory, Sequence[int]]],
+    network: RoadNetwork,
+    zones: Grid,
+    grid: Grid,
+    utc_offset_s: int,
 ) -> list[TripFeatures]:
-    """Features of real trips (duration and departure read off their own points)."""
+    """Features of real trips: times from their own points, the rest from ``edge_seq``.
+
+    Each item is a clean trip with its map-matched edge sequence, so length, zones and
+    cells are featurised exactly as for a synthetic route on the same network (GPS
+    length would differ from network length even for a perfect generator).
+    """
+    geo = _Geometry(network)
     out: list[TripFeatures] = []
-    for t in trips:
-        if len(t.points) < 2:
+    for t, edge_seq in trips:
+        if len(t.points) < 2 or not edge_seq:
             continue
-        lat0, lon0, t0 = t.points[0]
-        lat1, lon1, t1 = t.points[-1]
+        t0, t1 = t.points[0][2], t.points[-1][2]
+        length, o, d, cells = geo.route(edge_seq, zones, grid)
         out.append(
             TripFeatures(
                 user_id=t.user_id,
                 duration_s=float(t1 - t0),
-                length_m=float(t.length_m),
+                length_m=length,
                 departure_hour=_local_hour(t0, utc_offset_s),
-                origin_zone=zones.cell_of(lat0, lon0),
-                dest_zone=zones.cell_of(lat1, lon1),
+                origin_zone=o,
+                dest_zone=d,
+                cells=cells,
             )
         )
     return out
@@ -132,29 +188,25 @@ def carries_times(trips: Sequence[SyntheticTrajectory]) -> bool:
 
 
 def synthetic_trips(
-    trips: Sequence[SyntheticTrajectory], network: RoadNetwork, zones: Grid
+    trips: Sequence[SyntheticTrajectory], network: RoadNetwork, zones: Grid, grid: Grid
 ) -> list[TripFeatures]:
-    """Features of timed synthetic trips; lengths and zones come from the road network."""
-    edges = network.edges.set_index("edge_id")
-    nodes = network.nodes.set_index("node_id")
-    length = edges["length_m"].astype(float).to_dict()
-    tail, head = edges["u"].to_dict(), edges["v"].to_dict()
-    lat, lon = nodes["lat"].astype(float).to_dict(), nodes["lon"].astype(float).to_dict()
+    """Features of timed synthetic trips; length, zones and cells from the road network."""
+    geo = _Geometry(network)
     out: list[TripFeatures] = []
     for t in trips:
         route = t.payload
         if not isinstance(route, TimedRoute):
             raise TypeError(f"synthetic_trips: {t.syn_id} payload is not a TimedRoute")
-        first, last = route.visits[0].edge_id, route.visits[-1].edge_id
-        o, d = tail[first], head[last]
+        length, o, d, cells = geo.route(route.edge_seq, zones, grid)
         out.append(
             TripFeatures(
                 user_id="",
                 duration_s=route.arrival_t - route.departure_t,
-                length_m=float(sum(length[e] for e in route.edge_seq)),
+                length_m=length,
                 departure_hour=_local_hour(route.departure_t, route.utc_offset_s),
-                origin_zone=zones.cell_of(lat[o], lon[o]),
-                dest_zone=zones.cell_of(lat[d], lon[d]),
+                origin_zone=o,
+                dest_zone=d,
+                cells=cells,
             )
         )
     return out
@@ -211,9 +263,12 @@ class _Trips:
     unit: np.ndarray  # int: user index (reference) or trip index (synthetic)
     n_units: int
     duration: np.ndarray
+    length: np.ndarray
     speed: np.ndarray
     hour: np.ndarray
     od: np.ndarray  # origin_zone * n_zones + dest_zone
+    cell: np.ndarray  # utility-grid cell of every edge visit, all trips concatenated
+    cell_trip: np.ndarray  # the trip index of each entry of ``cell``
 
     @classmethod
     def of(cls, trips: Sequence[TripFeatures]) -> "_Trips":
@@ -228,9 +283,12 @@ class _Trips:
             unit=np.asarray(units, dtype=int),
             n_units=len(index),
             duration=np.asarray([t.duration_s for t in trips], dtype=float),
+            length=np.asarray([t.length_m for t in trips], dtype=float),
             speed=np.asarray([t.speed_mps for t in trips], dtype=float),
             hour=np.asarray([t.departure_hour for t in trips], dtype=float),
             od=np.asarray([t.origin_zone * n_zones + t.dest_zone for t in trips], dtype=int),
+            cell=np.asarray([c for t in trips for c in t.cells], dtype=int),
+            cell_trip=np.asarray([i for i, t in enumerate(trips) for _ in t.cells], dtype=int),
         )
 
     def weights(self, unit_draws: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
@@ -248,17 +306,29 @@ def _period_mask(hour: np.ndarray, start: float, end: float) -> np.ndarray:
     return (hour >= start) & (hour < end)
 
 
+def _jsd_or_nan(p: np.ndarray, q: np.ndarray) -> float:
+    """JSD (bits) of two count vectors; NaN when either side is empty."""
+    return jsd_bits(p, q) if p.sum() > 0 and q.sum() > 0 else math.nan
+
+
 def _values(ref: _Trips, rd: np.ndarray, syn: _Trips, sd: np.ndarray) -> dict[str, float]:
     """Every timed metric for given unit draw counts on both sides."""
     wr, ws = ref.weights(rd), syn.weights(sd)
     n_cells = (OD_ZONES_PER_SIDE * OD_ZONES_PER_SIDE) ** 2
     od_r = np.bincount(ref.od, weights=wr, minlength=n_cells)
     od_s = np.bincount(syn.od, weights=ws, minlength=n_cells)
+    # Cell-visit counts summed over trips, each trip's edge visits scaled by its weight
+    # (the statistic of unpaired_cell_js_divergence in evaluation.utility, per user).
+    n_grid = int(max(ref.cell.max(initial=-1), syn.cell.max(initial=-1))) + 1
+    cell_r = np.bincount(ref.cell, weights=wr[ref.cell_trip], minlength=n_grid)
+    cell_s = np.bincount(syn.cell, weights=ws[syn.cell_trip], minlength=n_grid)
     out = {
         "duration_w1_s": weighted_w1(ref.duration, wr, syn.duration, ws),
         "speed_w1_mps": weighted_w1(ref.speed, wr, syn.speed, ws),
         "departure_hour_circ_w1_h": circular_w1(ref.hour, wr, syn.hour, ws),
-        "od3x3_jsd": _jsd_bits(od_r, od_s) if od_r.sum() > 0 and od_s.sum() > 0 else math.nan,
+        "od3x3_jsd": _jsd_or_nan(od_r, od_s),
+        "cell_js_divergence": _jsd_or_nan(cell_r, cell_s),
+        "length_w1_m": weighted_w1(ref.length, wr, syn.length, ws),
     }
     for (_, start, end), name in zip(DEPARTURE_PERIODS, PERIOD_METRICS, strict=True):
         mr, ms = _period_mask(ref.hour, start, end), _period_mask(syn.hour, start, end)
@@ -296,7 +366,7 @@ def timed_utility(
     ref, syn = _Trips.of(reference), _Trips.of(synthetic)
     point = _values(ref, np.ones(ref.n_units), syn, np.ones(syn.n_units))
     if n_bootstrap <= 0:
-        return {name: (point[name], point[name], point[name]) for name in TIMED_UTILITY_METRICS}
+        return {name: (point[name], math.nan, math.nan) for name in TIMED_UTILITY_METRICS}
     reps = {name: np.empty(n_bootstrap) for name in TIMED_UTILITY_METRICS}
     for b in range(n_bootstrap):
         rd, sd = _draw_counts(ref.n_units, rng), _draw_counts(syn.n_units, rng)

@@ -63,9 +63,10 @@ def test_repetitions_columns_are_documented_and_lead_with_provenance() -> None:
 
 
 def test_timed_utility_metric_names_are_documented() -> None:
-    """Each timed synthetic utility metric (ULDP P2 + P12) is named in the doc too."""
+    """Each timed synthetic utility metric (ULDP P2 + P12) has its own row in the doc table."""
     doc = DOC.read_text(encoding="utf-8")
-    missing = [m for m in TIMED_UTILITY_METRICS if f"`{m}`" not in doc]
+    rows = {line.split("|")[1].strip() for line in doc.splitlines() if line.startswith("| `")}
+    missing = [m for m in TIMED_UTILITY_METRICS if f"`{m}`" not in rows]
     assert not missing, f"timed utility metrics not documented in {DOC.name}: {missing}"
 
 
