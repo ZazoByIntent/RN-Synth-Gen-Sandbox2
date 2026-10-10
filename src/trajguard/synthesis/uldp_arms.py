@@ -13,11 +13,11 @@ What the oracle estimates (everything else stays at the public prior):
 
 - origin-destination zone shares (module C2), from the first and last link;
 - departure-period shares (C1/C2), from the first GPS point in local time;
-- regime weights over the catalogue (C3): each trip goes to the regime whose
-  jitter-free time on the trip's own route is closest, in log ratio, to the observed
-  duration (with the one-regime public catalogue the weight is trivially 1);
-- the speed level of each departure period (C1): the mean log ratio of that regime
-  time to the observed duration; and the trip jitter (C1): the spread around it.
+- regime weights over the shared catalogue of the prior (C3; walk, bike, motorised,
+  ``public_sim.REGIME_CATALOGUE``): each trip goes to the regime whose jitter-free time
+  on the trip's own route is closest, in log ratio, to the observed duration;
+- the speed level of each departure period (C1): the mean log ratio of the chosen
+  regime's time to the observed duration; and the trip jitter (C1): the spread around it.
 
 Route-choice parameters (detour scale, U-turn penalty, class costs), the link jitter
 and the turn delay stay at the prior (SESSION DECISION: at n of about 91 the plan
@@ -37,12 +37,54 @@ from trajguard.maps.base import RoadNetwork
 from trajguard.privacy.base import params_hash
 from trajguard.representation import TrajectoryView
 from trajguard.synthesis.base import SyntheticGenerator, views_by_user
-from trajguard.synthesis.public_sim import N_PERIODS, PublicSimulator, SimParams, prior_params
+from trajguard.synthesis.public_sim import (
+    N_PERIODS,
+    PUBLIC_SIM_VERSION,
+    PublicSimulator,
+    SimParams,
+    prior_params,
+)
 from trajguard.synthesis.uldp_base import require_roster
 
 #: Public clip of a trip's log speed ratio (regime time over observed duration): a
 #: ratio below 1/20 or above 20 is a map-matching or timing artefact, not a speed.
 LOG_RATIO_CLIP = math.log(20.0)
+
+
+def simulator_params_hash(sim: PublicSimulator, params: SimParams, **extra: object) -> str:
+    """Hash of everything a simulator arm's output depends on: map key, version, parameters."""
+    return params_hash(
+        {
+            **extra,
+            "map": sim.graph.key,
+            "sim_version": PUBLIC_SIM_VERSION,
+            "sim": asdict(params),
+        }
+    )
+
+
+def simulate_trips(
+    sim: PublicSimulator,
+    params: SimParams,
+    n: int,
+    seed: int,
+    generator_id: str,
+    map_id: str,
+    ph: str,
+) -> list[SyntheticTrajectory]:
+    """Sample n timed trips (``TimedRoute`` payloads) of one arm, deterministic in the seed."""
+    routes = sim.simulate(params, n, np.random.default_rng(seed))
+    return [
+        SyntheticTrajectory(
+            syn_id=f"{generator_id}/{seed}/{i}",
+            generator_id=generator_id,
+            params_hash=ph,
+            payload=route,
+            trained_on_split="train",
+            map_id=map_id,
+        )
+        for i, route in enumerate(routes)
+    ]
 
 
 class _SimulatorArm(SyntheticGenerator):
@@ -67,19 +109,8 @@ class _SimulatorArm(SyntheticGenerator):
         """Sample n timed trips (``TimedRoute`` payloads), deterministic in the seed."""
         if not self._fitted:
             raise RuntimeError(f"{type(self).__name__}.generate called before fit()")
-        routes = self.sim.simulate(self.params, n, np.random.default_rng(seed))
-        ph = params_hash({"zones_per_side": self.zones_per_side, "sim": asdict(self.params)})
-        return [
-            SyntheticTrajectory(
-                syn_id=f"{self.generator_id}/{seed}/{i}",
-                generator_id=self.generator_id,
-                params_hash=ph,
-                payload=route,
-                trained_on_split="train",
-                map_id=self.map_id,
-            )
-            for i, route in enumerate(routes)
-        ]
+        ph = simulator_params_hash(self.sim, self.params, zones_per_side=self.zones_per_side)
+        return simulate_trips(self.sim, self.params, n, seed, self.generator_id, self.map_id, ph)
 
     def sequence_log_prob(self, edge_seq: Sequence[int]) -> float:
         """Exact, floor-bounded log-likelihood of an edge sequence under the arm's parameters."""

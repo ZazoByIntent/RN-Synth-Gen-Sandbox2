@@ -32,6 +32,7 @@ from trajguard.representation import Grid, TrajectoryView
 from trajguard.synthesis.public_sim import (
     CLASS_SPEED_KMH,
     PERIODS,
+    REGIME_CATALOGUE,
     PublicSimulator,
     Regime,
     SimParams,
@@ -84,13 +85,22 @@ def _view(
     return TrajectoryView(clean=clean, matched=matched)
 
 
-def _training_views(sim: PublicSimulator) -> list[TrajectoryView]:
-    """User a: three trips at 08:00 at half free-flow speed; user b: one at 18:00, quarter."""
+def _training_views(sim: PublicSimulator, b_walks: bool = True) -> list[TrajectoryView]:
+    """User a: three trips at 08:00 at 0.9 x free flow (motorised); b: one at 18:00.
+
+    User b walks at half the walking speed, or with ``b_walks=False`` drives at 0.9 x
+    free flow too.
+    """
+    walk, _, motorised = REGIME_CATALOGUE
+    b_regime, b_factor = (walk, 0.5) if b_walks else (motorised, 0.9)
     routes = sim.simulate(prior_params(), 4, np.random.default_rng(5))
     views = []
     for i, r in enumerate(routes):
-        user, hour, factor = ("a", 8.0, 0.5) if i < 3 else ("b", 18.0, 0.25)
-        views.append(_view(user, i, r.edge_seq, hour, sim.route_time_s(r.edge_seq) / factor))
+        user, hour, regime, factor = (
+            ("a", 8.0, motorised, 0.9) if i < 3 else ("b", 18.0, b_regime, b_factor)
+        )
+        duration = sim.route_time_s(r.edge_seq, regime) / factor
+        views.append(_view(user, i, r.edge_seq, hour, duration))
     return views
 
 
@@ -200,11 +210,12 @@ def test_likelihood_is_exact_and_floor_bounded(fixture_network: RoadNetwork) -> 
         od_term = sim._od_log_prob(sim.router(cold.regimes[0]), None, int(o), int(d))
         assert sim.log_prob(cold, seq) == pytest.approx(od_term, abs=1e-6)
     seq = sim.simulate(prior_params(), 1, np.random.default_rng(2))[0].edge_seq
-    one = sim.log_prob(prior_params(), seq)
+    one = sim.log_prob(SimParams(), seq)
     twin = SimParams(regimes=(Regime("a"), Regime("a")), regime_weights=(0.3, 0.7))
     assert sim.log_prob(twin, seq) == pytest.approx(one)
-    gap = sim.log_prob(prior_params(), (*seq, *seq[::-1]))
+    gap = sim.log_prob(SimParams(), (*seq, *seq[::-1]))
     assert math.isfinite(gap) and gap < one
+    assert math.isfinite(sim.log_prob(prior_params(), seq))  # the three-regime mixture
     assert math.isfinite(sim.log_prob(prior_params(), (10**9,)))
 
 
@@ -219,11 +230,12 @@ def test_oracle_estimates_user_weighted_parameters(fixture_network: RoadNetwork)
     am, pm = names.index("am_peak"), names.index("pm_peak")
     assert p.departure_shares[am] == pytest.approx(0.5)
     assert p.departure_shares[pm] == pytest.approx(0.5)
-    assert p.period_speed_factors[am] == pytest.approx(0.5)
-    assert p.period_speed_factors[pm] == pytest.approx(0.25)
+    assert p.period_speed_factors[am] == pytest.approx(0.9)  # against the motorised time
+    assert p.period_speed_factors[pm] == pytest.approx(0.5)  # against the walking time
     assert p.period_speed_factors[names.index("night")] == 1.0  # no trip: prior kept
     assert p.trip_jitter_sigma == pytest.approx(0.0, abs=1e-9)
-    assert p.regime_weights == (1.0,)
+    assert p.regimes == prior_params().regimes == REGIME_CATALOGUE  # the shared catalogue
+    assert p.regime_weights == pytest.approx((0.5, 0.0, 0.5))  # b walks, a drives
     assert p.od_shares is not None and sum(p.od_shares) == pytest.approx(1.0)
     zo, zd = gen.sim.od_zones(views[3].as_segments())
     assert p.od_shares[zo * 9 + zd] >= 0.5  # user b's single trip weighs as much as a's three
@@ -242,7 +254,7 @@ def test_prior_and_oracle_arms_run_through_the_timed_utility_metrics(
     fixture_network: RoadNetwork,
 ) -> None:
     prior, oracle = UldpPriorGenerator(fixture_network), UldpOracleGenerator(fixture_network)
-    views = _training_views(prior.sim)
+    views = _training_views(prior.sim, b_walks=False)  # all driving: the prior's walk/bike miss
     prior.fit(views)
     oracle.set_user_roster(["a", "b"])
     oracle.fit(views)

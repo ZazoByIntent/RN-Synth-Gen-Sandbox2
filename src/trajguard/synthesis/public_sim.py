@@ -122,6 +122,8 @@ _LOG_FLOOR = math.log(PROB_FLOOR)
 
 #: A change of heading of at least this many degrees between consecutive links counts
 #: as a turn for the turn delay (the usual split of straight on vs turning).
+#: SESSION DECISION (session 1): no cited source; a structural threshold, frozen with the
+#: catalogue (finding F8) and never tuned on Geolife.
 TURN_ANGLE_DEG = 45.0
 
 #: Local date of the public anchor day every synthetic trip departs on. Only the local
@@ -171,6 +173,38 @@ class Regime:
             raise ValueError(f"Regime {self.name}: class_cost multipliers must be > 0")
 
 
+#: Walking speed: the middle of the 3-4 km/h walking speed the national guideline
+#: assumes (住房城乡建设部, 城市步行和自行车交通系统规划设计导则, MOHURD, Dec 2013,
+#: explanatory note on public-bicycle station spacing, "按照步行速度3～4km/h"; verified,
+#: session D, https://www.gov.cn/gzdt/att/att/site1/20140114/001e3741a2cc143f348801.pdf).
+WALK_SPEED_KMH = 3.5
+#: Cycling speed: the same guideline, §3.1.8: an e-bike in a non-motorised lane rides
+#: "at ordinary bicycle speed, at most 15 km/h" (应按人力自行车速度行驶，最高速度不得超过
+#: 15公里/小时; verified, session D, same URL). SESSION DECISION: the bound is used as the
+#: bicycle regime's speed cap.
+BIKE_SPEED_KMH = 15.0
+
+#: The shared regime catalogue (frozen, finding F8), part of the ONE public prior every
+#: ULDP arm starts from (prior, oracle and every ``uldp_synth`` module). Walk and bike
+#: cap the speed on every link; motorised is the free-flow regime (OSM ``maxspeed`` or
+#: the cited class speed). The Beijing drive graph has no footways or cycleways (P9a),
+#: so the regimes differ by speed only (route choice follows the regime's link times).
+REGIME_CATALOGUE: tuple[Regime, ...] = (
+    Regime("walk", speed_cap_mps=WALK_SPEED_KMH / 3.6),
+    Regime("bike", speed_cap_mps=BIKE_SPEED_KMH / 3.6),
+    Regime("motorised"),
+)
+#: The free-flow cost model (OSM ``maxspeed`` or the cited class speed, no factor, cap or
+#: class cost): the cost the gravity decay of destination choice acts on.
+FREE_FLOW_REGIME = Regime("free_flow")
+#: Public prior weights of the catalogue: uniform. Source: the plan itself,
+#: docs/NACRT_ULDP_SINTEZA.md §4.3 ("the arm with uniform weights is the baseline
+#: 'public prior plus one label'"; shares are shrunk towards uniform). No mode share is
+#: read from Geolife, and no published Beijing mode split is adopted, since the plan
+#: names the uniform prior.
+REGIME_PRIOR_WEIGHTS: tuple[float, ...] = (1.0 / 3.0,) * 3
+
+
 def _uniform_period_shares() -> tuple[float, ...]:
     """Period shares of a departure time uniform over the 24-hour day."""
     return tuple((end - start) / 24.0 for _, start, end in PERIODS)
@@ -178,7 +212,10 @@ def _uniform_period_shares() -> tuple[float, ...]:
 
 @dataclass(frozen=True)
 class SimParams:
-    """Every parameter the ULDP modules calibrate; the defaults are the public prior.
+    """Every parameter the ULDP modules calibrate; :func:`prior_params` is the public prior.
+
+    The defaults equal the prior except the regimes: one neutral free-flow regime, a
+    building block for single-regime simulation (the prior sets the catalogue).
 
     - ``regimes`` / ``regime_weights``: the catalogue and its mixture weights (C3);
     - ``od_shares``: row-major Z x Z origin-destination zone shares, or None for the
@@ -224,8 +261,13 @@ class SimParams:
 
 
 def prior_params() -> SimParams:
-    """The public prior: one free-flow regime, gravity OD without decay, uniform departures."""
-    return SimParams()
+    """The one shared public prior: the regime catalogue under its prior weights, the rest default.
+
+    Gravity OD without decay, uniform departures and free-flow times (the SimParams
+    defaults). Every ULDP arm (``uldp_prior``, ``uldp_oracle``, every ``uldp_synth``
+    module) starts from exactly these parameters.
+    """
+    return SimParams(regimes=REGIME_CATALOGUE, regime_weights=REGIME_PRIOR_WEIGHTS)
 
 
 def parse_maxspeed_kmh(raw: object) -> float | None:
@@ -587,12 +629,18 @@ class PublicSimulator:
         return origin, dest
 
     def _gravity(self, router: _Router, origin: int) -> np.ndarray:
-        """Unnormalized gravity weights of every destination from ``origin``."""
+        """Unnormalized gravity weights of every destination from ``origin``.
+
+        The decay acts on the free-flow cost (:data:`FREE_FLOW_REGIME`), not on the
+        regime's own route cost, so one decay value means the same trip-length scale in
+        every regime (module C1 sets it equally on all of them).
+        """
         g = self.graph
         decay = router.regime.distance_decay_per_s
         if decay == 0.0:
             return g.mass
-        weights: np.ndarray = g.mass * np.exp(-decay * router.frm(origin))  # inf cost -> 0
+        cost = self.router(FREE_FLOW_REGIME).frm(origin)
+        weights: np.ndarray = g.mass * np.exp(-decay * cost)  # inf cost -> 0
         return weights
 
     def _walk(self, router: _Router, origin: int, dest: int, rng: np.random.Generator) -> list[int]:

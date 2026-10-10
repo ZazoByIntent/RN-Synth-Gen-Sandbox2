@@ -5,13 +5,18 @@ A user-level mechanism (docs/NACRT_ULDP_SINTEZA.md §4.2, §4.6, §6.2) is a
 
 1. ``public_params()`` builds everything public (map products, catalogue, number of
    questions, epsilon) from the map and the config only; it takes no view.
-2. For every user of the training roster, in roster order, the **phone side**
-   ``encode_user(user_views, public, rng)`` runs on that user's views alone (an empty
-   tuple for a user without a matched trip, who must answer from a public default) with
-   an independent per-user generator, and returns exactly one fixed-shape
-   :class:`UserReport`. The report is checked against the public ``report_space`` and
-   its epsilon is booked in a :class:`~trajguard.privacy.ldp.UserBudget`.
-3. The **server side** ``server_fit(reports, public)`` turns the reports into fitted
+2. Which question every user answers is drawn **publicly** by ``assign_questions``,
+   from the generator's seed over the sorted roster, before any view is read; it never
+   depends on private data. A composite mechanism first splits the roster between its
+   modules by the same public draw (``ReportSpace.question_module``).
+3. For every user of the training roster, in roster order, the **phone side**
+   ``encode_user(user_views, public, question, rng)`` runs on that user's views alone
+   (an empty tuple for a user without a matched trip, who must answer from a public
+   default) with an independent per-user generator, answers the assigned question and
+   returns exactly one fixed-shape :class:`UserReport`. The report is checked against
+   the public ``report_space`` and the assigned question, and its epsilon is booked in a
+   :class:`~trajguard.privacy.ldp.UserBudget`.
+4. The **server side** ``server_fit(reports, public)`` turns the reports into fitted
    parameters; it never sees a view.
 
 ``encode_user`` and ``server_fit`` must be static methods (enforced when the subclass
@@ -40,6 +45,9 @@ import numpy as np
 from trajguard.privacy.ldp import UserBudget
 from trajguard.representation import TrajectoryView
 from trajguard.synthesis.base import SyntheticGenerator, views_by_user
+
+#: Stream tag of the public question draw, so it never shares draws with the phones.
+_QUESTION_STREAM = 7
 
 
 def require_roster(gen: SyntheticGenerator) -> tuple[str, ...]:
@@ -75,6 +83,14 @@ class ReportSpace:
     answer_len: int
     low: float
     high: float
+    #: Module index (into ``modules``) of every question, for a mechanism that splits the
+    #: roster between modules; None when every user may get any question.
+    question_module: tuple[int, ...] | None = None
+
+
+def split_sizes(n_users: int, n_parts: int) -> tuple[int, ...]:
+    """Sizes of the public near-equal parts of a roster (larger parts first, as array_split)."""
+    return tuple(len(p) for p in np.array_split(np.arange(n_users), n_parts))
 
 
 def validate_report(report: UserReport, space: ReportSpace) -> None:
@@ -85,6 +101,12 @@ def validate_report(report: UserReport, space: ReportSpace) -> None:
         raise ValueError(f"report module {report.module!r} is not one of {space.modules}")
     if not 0 <= report.question < space.n_questions:
         raise ValueError(f"report question {report.question} outside [0, {space.n_questions})")
+    if space.question_module is not None:
+        owner = space.modules[space.question_module[report.question]]
+        if report.module != owner:
+            raise ValueError(
+                f"question {report.question} belongs to {owner!r}, not {report.module!r}"
+            )
     if len(report.answer) != space.answer_len:
         raise ValueError(
             f"report answer has {len(report.answer)} values, the public size is {space.answer_len}"
@@ -106,7 +128,12 @@ class UldpGenerator(SyntheticGenerator):
     #: Whatever ``server_fit`` returned; None before fit.
     fitted: Any = None
 
-    _SEALED: ClassVar[tuple[str, ...]] = ("fit", "collect_reports", "fit_from_reports")
+    _SEALED: ClassVar[tuple[str, ...]] = (
+        "fit",
+        "collect_reports",
+        "fit_from_reports",
+        "assign_questions",
+    )
     _STATIC: ClassVar[tuple[str, ...]] = ("encode_user", "server_fit")
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -130,9 +157,13 @@ class UldpGenerator(SyntheticGenerator):
     @staticmethod
     @abstractmethod
     def encode_user(
-        user_views: Sequence[TrajectoryView], public: Any, rng: np.random.Generator
+        user_views: Sequence[TrajectoryView], public: Any, question: int, rng: np.random.Generator
     ) -> UserReport:
-        """Phone side: one randomised report from one user's views (empty: public default)."""
+        """Phone side: one randomised answer to ``question`` from one user's views.
+
+        ``question`` was drawn publicly by :meth:`assign_questions`; an empty
+        ``user_views`` answers from a public default.
+        """
 
     @staticmethod
     @abstractmethod
@@ -147,18 +178,51 @@ class UldpGenerator(SyntheticGenerator):
         """Encode every roster user on their own views, then fit the server on the reports."""
         self.fit_from_reports(self.collect_reports(train))
 
+    def assign_questions(self, roster: Sequence[str], space: ReportSpace) -> dict[str, int]:
+        """Public, data-independent question of every user: seeded draws over the sorted roster.
+
+        With ``space.question_module`` set, a seeded permutation of the sorted roster is
+        first cut into near-equal parts (:func:`split_sizes`), part i going to module i,
+        and each user then draws uniformly among that module's questions.
+        """
+        rng = np.random.default_rng(np.random.SeedSequence([self.seed, _QUESTION_STREAM]))
+        users = sorted(roster)
+        if space.question_module is None:
+            draws = rng.integers(space.n_questions, size=len(users))
+            return {user: int(q) for user, q in zip(users, draws, strict=True)}
+        module_of = np.empty(len(users), dtype=np.int64)
+        perm = rng.permutation(len(users))
+        for m, part in enumerate(np.array_split(perm, len(space.modules))):
+            module_of[part] = m
+        options = [
+            [q for q, owner in enumerate(space.question_module) if owner == m]
+            for m in range(len(space.modules))
+        ]
+        out: dict[str, int] = {}
+        for user, m in zip(users, module_of.tolist(), strict=True):
+            out[user] = options[m][int(rng.integers(len(options[m])))]
+        return out
+
     def collect_reports(self, train: Sequence[TrajectoryView]) -> tuple[UserReport, ...]:
         """Run the phone side once per roster user (independent per-user generators)."""
         roster = require_roster(self)
         public = self.public_params()
         space = self.report_space(public)
+        questions = self.assign_questions(roster, space)
         grouped = views_by_user(train, roster)
         budget = UserBudget(self.epsilon)
         children = np.random.SeedSequence(self.seed).spawn(len(roster))
         reports: list[UserReport] = []
         for user, child in zip(roster, children, strict=True):
-            report = self.encode_user(tuple(grouped[user]), public, np.random.default_rng(child))
+            question = questions[user]
+            report = self.encode_user(
+                tuple(grouped[user]), public, question, np.random.default_rng(child)
+            )
             validate_report(report, space)
+            if report.question != question:
+                raise ValueError(
+                    f"user {user!r} answered question {report.question}, assigned {question}"
+                )
             budget.spend(user, report.epsilon)
             reports.append(report)
         return tuple(reports)
@@ -251,6 +315,9 @@ def randomiser_log_ratio(
 ) -> float:
     """Test 2: largest empirical |log ratio| of report frequencies between two users.
 
+    Draw i of both users answers the same public question (one seeded uniform draw over
+    the public questions per i, as :meth:`UldpGenerator.assign_questions` would assign),
+    so bins keyed by question compare like with like.
     Each user is encoded ``n_draws`` times with independent generators; outputs are
     binned by ``key`` (identity on the report by default; continuous answers need a
     coarser key). Bins with fewer than ``min_count`` reports over both users are skipped;
@@ -259,12 +326,15 @@ def randomiser_log_ratio(
     """
     public = gen.public_params()
     space = gen.report_space(public)
+    q_rng = np.random.default_rng(np.random.SeedSequence([seed, _QUESTION_STREAM]))
+    questions = [int(q) for q in q_rng.integers(space.n_questions, size=n_draws)]
     counts: list[Counter[Hashable]] = []
     for user_seed, views in enumerate((views_a, views_b)):
         children = np.random.SeedSequence([seed, user_seed]).spawn(n_draws)
         tally: Counter[Hashable] = Counter()
-        for child in children:
-            report = gen.encode_user(tuple(views), public, np.random.default_rng(child))
+        for child, question in zip(children, questions, strict=True):
+            rng = np.random.default_rng(child)
+            report = gen.encode_user(tuple(views), public, question, rng)
             validate_report(report, space)
             tally[key(report)] += 1
         counts.append(tally)
