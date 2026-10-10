@@ -94,6 +94,10 @@ class TrajectoryView:
     representation, grid-cell indices in the cells representation. Generators and the
     membership attack read :meth:`as_sequence`, which serves both. Each ``as_*`` view
     raises ValueError when the form it needs was not provided.
+
+    A bare sequence may carry its owner's ``user_id`` (ULDP P5: membership candidates
+    enter the shadow fits of a user-level generator under their own user) without any
+    split label, so the train-only guards of generators never see a ``test`` label.
     """
 
     def __init__(
@@ -101,14 +105,18 @@ class TrajectoryView:
         clean: CleanTrajectory | None = None,
         matched: MatchedTrajectory | None = None,
         sequence: tuple[int, ...] | None = None,
+        user_id: str | None = None,
     ) -> None:
         if clean is None and matched is None and sequence is None:
             raise ValueError(
                 "TrajectoryView needs a clean and/or matched trajectory or a bare sequence"
             )
+        if user_id is not None and (clean is not None or matched is not None):
+            raise ValueError("user_id is only given with a bare sequence; it is read otherwise")
         self.clean = clean
         self.matched = matched
         self.sequence = sequence
+        self._user_id = user_id
 
     @property
     def traj_id(self) -> str:
@@ -121,12 +129,12 @@ class TrajectoryView:
 
     @property
     def user_id(self) -> str:
-        """Owning user id (ground truth for attacks); empty for a bare sequence."""
+        """Owning user id (ground truth for attacks); for a bare sequence the given one, else ""."""
         if self.clean is not None:
             return self.clean.user_id
         if self.matched is not None:
             return self.matched.user_id
-        return ""
+        return self._user_id or ""
 
     @property
     def split(self) -> str | None:

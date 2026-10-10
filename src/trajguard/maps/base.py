@@ -16,6 +16,9 @@ class RoadNetwork:
     edges: gpd.GeoDataFrame  # edge_id, u, v, key, length_m, highway, oneway, maxspeed, geometry
     region: str
     crs: str
+    # The public map frame (min_lon, min_lat, max_lon, max_lat) the map was built for,
+    # from meta.json; None for a network assembled in memory without one.
+    bbox: tuple[float, float, float, float] | None = None
 
 
 class MapSource(ABC):

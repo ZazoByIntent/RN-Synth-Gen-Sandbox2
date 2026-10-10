@@ -10,6 +10,7 @@ import os
 import subprocess
 import time
 import tracemalloc
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
@@ -1525,9 +1526,48 @@ def _mia_pool(
     return base + members + nonmembers, candidates, train_m
 
 
-def _generator_facts(target: Any) -> dict[str, Any]:
-    """Public facts of a fitted generator for ``run.json``, by the attributes it exposes."""
+def _mia_pool_users(
+    items: Sequence[_PoolItem], clean_by_id: dict[str, CleanTrajectory]
+) -> list[str]:
+    """Owning user_id of every :func:`_mia_pool` entry, in its order (shadow, train, test).
+
+    User-level shadows (ULDP P5) fit every candidate under its own user; the label is
+    the bare user_id, never the split, so no train-only guard sees a ``test`` label.
+    """
+    return [
+        clean_by_id[m.traj_id].user_id
+        for split in ("shadow", "train", "test")
+        for m in items
+        if clean_by_id[m.traj_id].split == split
+    ]
+
+
+def _max_trips_per_user(train: Sequence[_PoolItem], clean_by_id: dict[str, CleanTrajectory]) -> int:
+    """m: the largest number of matched training trips any single user contributes."""
+    counts = Counter(clean_by_id[m.traj_id].user_id for m in train)
+    return max(counts.values(), default=0)
+
+
+def _generator_facts(target: Any, max_trips: int) -> dict[str, Any]:
+    """Public facts of a fitted generator for ``run.json``, by the attributes it exposes.
+
+    A generator with a finite ``epsilon`` also records its privacy unit (closed decision
+    §7.1 point 6 of docs/NACRT_ULDP_SINTEZA.md): a user-level mechanism (``privacy_unit``
+    ``"user"``) records ``user_epsilon``; a per-trip one records ``trip_epsilon``, the
+    largest number of matched training trips per user ``max_trips_per_user`` (m) and the
+    user-level bound ``user_epsilon_bound`` = m·ε under basic composition.
+    """
     facts: dict[str, Any] = {}
+    epsilon = _finite_or_none(_opt_float_attr(target, "epsilon"))
+    if epsilon is not None:
+        if getattr(type(target), "privacy_unit", "trip") == "user":
+            facts["privacy_unit"] = "user"
+            facts["user_epsilon"] = epsilon
+        else:
+            facts["privacy_unit"] = "trip"
+            facts["trip_epsilon"] = epsilon
+            facts["max_trips_per_user"] = max_trips
+            facts["user_epsilon_bound"] = max_trips * epsilon
     l_k = getattr(target, "l_k", None)
     if l_k is not None:  # ldptrace: public length cap and the per-report epsilon
         facts["l_k"] = int(l_k)
@@ -1552,7 +1592,7 @@ def _membership_values(
     items: Sequence[_PoolItem],
     clean_by_id: dict[str, CleanTrajectory],
     gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]],
-) -> tuple[list[ResultRow], list[str], dict[str, dict[str, Any]]]:
+) -> tuple[list[ResultRow], list[str], dict[str, dict[str, Any]], dict[str, Any]]:
     """Run LiRA membership inference against every fitted generator arm (design §6.2).
 
     Per arm: the target generator fits on the train split (its release contract), and
@@ -1564,14 +1604,20 @@ def _membership_values(
     per-arm facts of the fitted target for ``run.json`` (``ldptrace``: the public length
     cap ``l_k`` and the per-report ``report_epsilon``; ``privtrace``: ``n_states``,
     ``n_second_order``, ``max_redraws`` and the two walk counters — so later readers
-    need not refit).
+    need not refit), plus the fitted targets by ``synthetic:<ref>`` so the timed utility
+    metrics reuse them instead of refitting. Candidates enter the shadow fits of a
+    roster-opt-in generator under their own user_id (ULDP P5); other generators get
+    exactly the bare sequences they always did.
     """
     pool, candidates, train_m = _mia_pool(items, clean_by_id)
+    pool_users = _mia_pool_users(items, clean_by_id)
+    max_trips = _max_trips_per_user(train_m, clean_by_id)
     n_members = sum(1 for _, is_member in candidates if is_member)
     n_nonmembers = len(candidates) - n_members
     rows: list[ResultRow] = []
     warnings: list[str] = []
     arm_facts: dict[str, dict[str, Any]] = {}
+    fitted: dict[str, Any] = {}
     for gspec, make in gen_plans:
         target = make(0)
         if target.needs_user_roster:
@@ -1579,7 +1625,8 @@ def _membership_values(
             # user whose trips all failed matching is enrolled too (finding F3).
             target.set_user_roster(_train_roster(cfg))
         target.fit([_item_view(m, clean_by_id[m.traj_id]) for m in train_m])
-        facts = _generator_facts(target)
+        fitted[f"synthetic:{gspec.ref}"] = target
+        facts = _generator_facts(target, max_trips)
         if facts:
             arm_facts[f"synthetic:{gspec.ref}"] = facts
         attack = attack_cls(
@@ -1599,7 +1646,7 @@ def _membership_values(
                     f"run has {n_nonmembers}; value recorded as NaN"
                 )
         result, peak_mb = _run_measured(
-            cfg.measure_memory, partial(attack.run, target, (pool, candidates))
+            cfg.measure_memory, partial(attack.run, target, (pool, candidates, pool_users))
         )
         result = replace(
             result,
@@ -1632,7 +1679,7 @@ def _membership_values(
             )
             for name, val in membership_report(result, fprs=spec.fprs).items()
         )
-    return rows, warnings, arm_facts
+    return rows, warnings, arm_facts, fitted
 
 
 def _timed_utility_values(
@@ -1641,6 +1688,7 @@ def _timed_utility_values(
     clean_by_id: dict[str, CleanTrajectory],
     gen_plans: list[tuple[MechanismSpec, Callable[[int], Any]]],
     provide: _NetProvider,
+    fitted: Mapping[str, Any] | None = None,
 ) -> tuple[list[ResultRow], dict[str, dict[str, Any]]]:
     """Timed utility rows (ULDP P2 + P12) of every generator arm whose output carries times.
 
@@ -1651,6 +1699,11 @@ def _timed_utility_values(
     its ``run.json`` facts. Both sides are featurised from edge sequences on the road
     network (a test trip by its matched ``edge_seq``), with cells on the same utility
     grid as the paired ``cell_js_divergence``. Returns the rows and those per-arm facts.
+
+    ``fitted`` holds the targets the membership path already fitted on the same train
+    views (by ``synthetic:<ref>``); such a target is reused, not refitted, which gives
+    identical output at half the fit cost. A target fitted here also records the
+    :func:`_generator_facts` (before sampling, so sampling counters stay out of them).
     """
     train = [m for m in items if clean_by_id[m.traj_id].split == "train"]
     test = sorted(
@@ -1662,14 +1715,20 @@ def _timed_utility_values(
     rows: list[ResultRow] = []
     facts: dict[str, dict[str, Any]] = {}
     for gspec, make in gen_plans:
-        target = make(0)
-        if target.needs_user_roster:
-            target.set_user_roster(_train_roster(cfg))
-        target.fit([_item_view(m, clean_by_id[m.traj_id]) for m in train])
-        released = list(target.generate(len(train), cfg.seed))
         ref = f"synthetic:{gspec.ref}"
+        arm_facts: dict[str, Any] = {}
+        if fitted is not None and ref in fitted:
+            target = fitted[ref]
+        else:
+            target = make(0)
+            if target.needs_user_roster:
+                target.set_user_roster(_train_roster(cfg))
+            target.fit([_item_view(m, clean_by_id[m.traj_id]) for m in train])
+            arm_facts = _generator_facts(target, _max_trips_per_user(train, clean_by_id))
+        released = list(target.generate(len(train), cfg.seed))
         if not carries_times(released):
-            facts[ref] = {"timed_utility": "skipped: generator output carries no times"}
+            skipped = "skipped: generator output carries no times"
+            facts[ref] = {**arm_facts, "timed_utility": skipped}
             continue
         network = provide()[0]
         if reference is None:
@@ -1682,11 +1741,12 @@ def _timed_utility_values(
             )
         syn = synthetic_trips(released, network, zones, grid)
         facts[ref] = {
+            **arm_facts,
             "timed_utility": {
                 "n_synthetic": len(syn),
                 "n_reference_trips": len(reference),
                 "n_reference_users": len({t.user_id for t in reference}),
-            }
+            },
         }
         result_id = f"utility:{ref}"
         values = timed_utility(
@@ -1890,6 +1950,7 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
     all_rows: list[ResultRow] = []
     run_warnings: list[str] = []
     generator_arms: dict[str, dict[str, Any]] = {}  # fitted-target facts per MIA arm
+    fitted_targets: dict[str, Any] = {}  # fitted MIA targets, reused by timed utility
     probe_counts: dict[str, int] = {}
     release_arms: dict[str, dict[str, Any]] = {}  # per-ref facts of the release gallery
     for spec, attack_cls in plans:
@@ -1906,9 +1967,10 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             )
             continue
         if spec.attack_type == "membership_inference":
-            mia_rows, mia_warnings, mia_arms = _membership_values(
+            mia_rows, mia_warnings, mia_arms, mia_fitted = _membership_values(
                 cfg, spec, attack_cls, items, clean_by_id, gen_plans
             )
+            fitted_targets.update(mia_fitted)
             all_rows.extend(mia_rows)
             run_warnings.extend(mia_warnings)
             generator_arms.update(mia_arms)
@@ -2038,7 +2100,9 @@ def run_experiment(cfg: RunConfig) -> list[MetricValue]:
             utility_by_ref.setdefault(ref, {})[name] = point
 
     if cfg.timed_utility:
-        timed_rows, timed_facts = _timed_utility_values(cfg, items, clean_by_id, gen_plans, provide)
+        timed_rows, timed_facts = _timed_utility_values(
+            cfg, items, clean_by_id, gen_plans, provide, fitted_targets
+        )
         all_rows.extend(timed_rows)
         for ref, facts in timed_facts.items():
             generator_arms.setdefault(ref, {}).update(facts)

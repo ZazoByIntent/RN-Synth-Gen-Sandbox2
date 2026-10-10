@@ -59,7 +59,14 @@ class OSMMapSource(MapSource):
         graph = ox.project_graph(graph, to_crs=self._crs)
         nodes, edges = _to_tables(graph)
         self._save(graph, nodes, edges)
-        return RoadNetwork(graph=graph, nodes=nodes, edges=edges, region=self.region, crs=self._crs)
+        return RoadNetwork(
+            graph=graph,
+            nodes=nodes,
+            edges=edges,
+            region=self.region,
+            crs=self._crs,
+            bbox=self.bbox,
+        )
 
     def load(self) -> RoadNetwork:
         """Read a previously built network from disk (never touches the network)."""
@@ -78,8 +85,14 @@ class OSMMapSource(MapSource):
         )
         nodes = gpd.read_parquet(self.out_dir / _NODES_FILE)
         edges = gpd.read_parquet(self.out_dir / _EDGES_FILE)
+        min_lon, min_lat, max_lon, max_lat = (float(v) for v in meta["bbox"])
         return RoadNetwork(
-            graph=graph, nodes=nodes, edges=edges, region=meta["region"], crs=meta["crs"]
+            graph=graph,
+            nodes=nodes,
+            edges=edges,
+            region=meta["region"],
+            crs=meta["crs"],
+            bbox=(min_lon, min_lat, max_lon, max_lat),
         )
 
     def _save(

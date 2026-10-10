@@ -11,7 +11,7 @@ from trajguard.evaluation import metrics
 from trajguard.maps import osm
 from trajguard.matching import leuven
 from trajguard.privacy import geoind, naive, none, point_ldp
-from trajguard.synthesis import ldptrace, markov, privtrace, rn_ldp_synth
+from trajguard.synthesis import ldptrace, markov, privtrace, rn_ldp_synth, uldp_arms
 
 # Referencing the modules keeps linters happy; importing them did the registration.
 _IMPLEMENTATIONS = (
@@ -32,4 +32,5 @@ _IMPLEMENTATIONS = (
     rn_ldp_synth,
     ldptrace,
     privtrace,
+    uldp_arms,
 )
